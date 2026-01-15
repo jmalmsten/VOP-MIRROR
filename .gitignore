@@ -1,0 +1,26 @@
+# VOP Project - Git Ignore
+# Version: v.0.0.3
+
+# --- Project Data ---
+# Ignore all test and production image directories
+vop_stills/
+vop_focus_tests/
+*.csv   # Skip all .csv's which in this repo means x-sheets
+*.csv*  # Also skip all "csv#" files
+*.jpg
+*.dng
+*.tiff
+
+# --- Python Junk ---
+__pychache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# --- System & Trash Junk ---
+#Ignore the hidden trash folders created by Linux file managers
+.Trash-*/
+.trash/
+.DS_Store
+# Ignore local VSCodium settings
+.vscode/

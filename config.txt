@@ -1,0 +1,12 @@
+# VOP Studio Configuration
+# Handshake Fallback (Used if HDMI detection fails)
+SCREEN_WIDTH=1920
+SCREEN_HEIGHT=1080
+
+# Optical Calibration
+BLACK_CLIP=0.00
+GAMMA=1.0
+GLOBAL_BRIGHTNESS=1.0
+
+# Default duration in seconds for the smear/projection per frame
+DEFAULT_DURATION=5.0
