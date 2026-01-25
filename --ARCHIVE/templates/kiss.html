@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>VOP KISS TEST v0.0.1</title>
+        <style>
+            /* Dark Studio aestetic */
+            body {
+                background:         #111;
+                display:            flex;
+                justify-content:    center;
+                align-items:        center;
+                height:             100vh;
+                margin:             0;
+                overflow:           hidden;
+            }
+            #trigger {
+                width:              280px;
+                height:             280px;
+                border-radius:      50%;
+                background:         #300;
+                border:             6px solid #f00;
+                color:              #f00;
+                font-family:        'Courier New', monospace;
+                font-size:          22px;
+                font-weight:        bold;
+                cursor:             pointer;
+                transition:         all 0.1s ease;
+                outline:            none;
+                -webkit-tap-highlight-color: transparent;
+            }
+            /* Visual feedback for the press */
+            #trigger:active{
+                background:         #f00;
+                color:              #fff;
+                box-shadow:         0 0 60px #f00;
+                transform:          scale(.95);
+            }
+        </style>
+    </head>
+    <body>
+        
+        <button id="trigger">HOLD FOR RED</button>
+
+        <script>
+            const btn = document.getElementById('trigger');
+
+            // Function to send color data to the Flask API
+            const setColor = async (color) => {
+                try {
+                    await fetch('/set_color', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({color: color})
+                    });
+                } catch (err) {
+                    console.error("API Communication Error:", err);
+                }
+            };
+
+            // Desktop Events
+            btn.addEventListener('mousedown', () => setColor('1,0,0'));
+            btn.addEventListener('mouseup',   () => setColor('0,0,0'));
+
+            // Mobile/Tablet Events
+            btn.addEventlistener('touchstart', (e) => {
+                e.preventDefault(); // Prevents double-firing on some browsers
+                setColor('1,0,0');
+            });
+            btn.addEventListener('touchend',  () => setcolor('0,0,0'));
+        </script>
+    </body>
+</html>

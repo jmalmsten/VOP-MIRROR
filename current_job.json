@@ -1,0 +1,12 @@
+{
+    "image": "vop_logo_mockup_400px.png",
+    "smear_duration": 15.0,
+    "pos_start": "0.0,40.0,-150.0",
+    "pos_end": "0.0,0.0,-2",
+    "rot_start": "0,0,-270",
+    "rot_end": "0,0,1080",
+    "scale_start": 1.0,
+    "scale_end": 1.0,
+    "fov": 45.0,
+    "gain": 1.0
+}
