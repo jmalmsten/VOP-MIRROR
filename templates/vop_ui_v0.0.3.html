@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VOP UI v0.0.3 - Phase II/III</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vop_style_v0.0.1.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h2>VOP v0.3.2 | PHASE II/III</h2><br>
+        
+        <div class="panel">
+            <h3>LOGISTICS & OPTICS</h3>
+            <div class="input-group">
+                <label>LATENT FRAME #</label>
+                <input id="frame" type="number" value="1">
+            </div>
+            <div class="input-group">
+                <label>PROJ IMAGE</label>
+                <input id="image" value="vop_logo_mockup_400px.png">
+            </div>
+            <div class="input-group">
+                <label>SMEAR (SEC)</label>
+                <input id="smear" type="number" step="0.1" value="5.0">
+            </div>
+            <div class="input-group">
+                <label>GAIN</label>
+                <input id="gain" type="number" step="0.1" value="1.0">
+            </div>
+            <div class="input-group">
+                <label>AWB GAINS (R, B)</label>
+                <div style="display:flex; gap: 5px;">
+                    <input id="awb_r" value="3.18" style="width:50%">
+                    <input id="awb_b" value="1.45" style="width:50%">
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>RENDER & PREVIEW</h3>
+            <div class="input-group">
+                <label>FOV</label>
+                <input id="fov" type="number" value="45.0">
+            </div>
+            <div class="input-group">
+                <label>CLIP (NEAR, FAR)</label>
+                <div style="display:flex; gap: 5px;">
+                    <input id="near" value="0.1" style="width:50%">
+                    <input id="far" value="1000.0" style="width:50%">
+                </div>
+            </div>
+            <div class="preview-group">
+                <button class="preview-btn" onclick="runTask('preview', 0.0)">|&lt;</button>
+                <button class="preview-btn" onclick="runTask('preview', 0.5)">&lt;|&gt;</button>
+                <button class="preview-btn" onclick="runTask('preview', 1.0)">&gt;|</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>3D TRANSFORM</h3>
+            <div class="input-group">
+                <label>POS START (X,Y,Z)</label>
+                <input id="p_start" value="0.0,0.0,-2.0">
+            </div>
+            <div class="input-group">
+                <label>POS END (X,Y,Z)</label>
+                <input id="p_end" value="0.0,0.0,-2.0">
+            </div>
+            <div class="input-group">
+                <label>ROT START (P,Y,R)</label>
+                <input id="r_start" value="0.0,0.0,0.0">
+            </div>
+            <div class="input-group">
+                <label>ROT END (P,Y,R)</label>
+                <input id="r_end" value="0.0,0.0,0.0">
+            </div>
+            <button class="execute-btn" onclick="runTask('smear')">
+                EXECUTE OPTICAL SMEAR
+            </button>
+        </div>
+    </div>
+
+    <script>
+        async function runTask(type, pValue = 0.0) {
+            const data = {
+                frame:      document.getElementById('frame').value,
+                image:      document.getElementById('image').value,
+                smear:      document.getElementById('smear').value,
+                gain:       document.getElementById('gain').value,
+                awb_r:      document.getElementById('awb_r').value,
+                awb_b:      document.getElementById('awb_b').value,
+                fov:        document.getElementById('fov').value,
+                near:       document.getElementById('near').value,
+                far:        document.getElementById('far').value,
+                p_start:    document.getElementById('p_start').value,
+                p_end:      document.getElementById('p_end').value,
+                r_start:    document.getElementById('r_start').value,
+                r_end:      document.getElementById('r_end').value,
+                preview_p:  pValue
+            };
+
+            const endpoint = type === 'preview' ? '/preview' : '/execute_smear';
+            const resp = await fetch(endpoint, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const res = await resp.json();
+            if(type !== 'preview') alert(res.status);
+        }
+    </script>
+</body>
+</html>

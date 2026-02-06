@@ -1,0 +1,103 @@
+:root {
+    --vop-accent:               #05F;
+    --vop-bg:                   #111;
+    --vop-panel:                #000;
+    --vop-border:               #333;
+    --vop-text:                 #fff;
+    --vop-dim:                  #002299;
+}
+
+body {
+    background:                 var(--vop-bg);
+    color:                      var(--vop-text);
+    font-family:                'Courier New', monospace;
+    padding:                    20px;
+    margin:                     0;
+}
+
+h2{
+    color:                      var(--vop-accent);
+    border-bottom:              2px solid var(--vop-accent);
+    padding-bottom:                    10px;
+}
+
+.container {
+    max-width:                  900px;
+    margin:                     auto;
+}
+
+.panel {
+    background:                 var(--vop-panel);
+    border:                     1px solid var(--vop-border);
+    padding:                    15px;
+    margin-bottom:              15px;
+    display:                    grid;
+    grid-template-columns:     1fr 1fr;
+    gap:                        15px;
+}
+
+.panel h3 {
+    grid-column:                span 2;
+    margin:                     0 0 10px 0;
+    font-size:                  14px;
+    text-transform:             uppercase;
+    color:                      var(--vop-accent);
+}
+
+.input-group {
+    display:                    flex;
+    flex-direction:             column;
+}
+
+input {
+    background:                 #000;
+    color:                      var(--vop-accent);
+    border:                     1px solid var(--vop-border);
+    padding:                    8px;
+    font-family:                inherit;
+}
+
+input:focus {
+    border-color:               var(--vop-accent);
+    outline:                    none;
+}
+
+button {
+    background:                 var(--vop-accent);
+    color:                      #000;
+    border:                     none;
+    padding:                    15px;
+    font-weight:                bold;
+    cursor:                     pointer;
+    font-family:                inherit;
+    text-transform:             uppercase;
+}
+
+button:hover {
+    background:                 #fff
+}
+
+.preview-group {
+    grid-column:                span 2;
+    display:                    flex;
+    gap:                        5px;
+}
+
+.preview-btn {
+    background:                 var(--vop-dim);
+    color:                      var(--vop-accent);
+    border:                     1px solid var(--vop-accent);
+    flex:                       1;
+    padding:                    10px;
+}
+
+.preview-btn:active {
+    background:                 var(--vop-accent);
+    color:                      #000;
+}
+
+.execute-btn {
+    grid-column:                2;
+    margin-top:                 10px;
+    font-size:                  18px;
+}

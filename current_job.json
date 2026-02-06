@@ -1,12 +1,17 @@
 {
+    "frame": "1",
     "image": "vop_logo_mockup_400px.png",
-    "smear_duration": 15.0,
-    "pos_start": "0.0,40.0,-150.0",
-    "pos_end": "0.0,0.0,-2",
-    "rot_start": "0,0,-270",
-    "rot_end": "0,0,1080",
-    "scale_start": 1.0,
-    "scale_end": 1.0,
-    "fov": 45.0,
-    "gain": 1.0
+    "smear": "5.0",
+    "gain": "1.0",
+    "awb_r": "3.18",
+    "awb_b": "1.45",
+    "fov": "45.0",
+    "near": "0.1",
+    "far": "1000.0",
+    "p_start": "0.0,0.0,-2.0",
+    "p_end": "0.0,0.0,-2.0",
+    "r_start": "0.0,0.0,0.0",
+    "r_end": "0.0,0.0,0.0",
+    "preview_p": 0,
+    "type": "smear"
 }
