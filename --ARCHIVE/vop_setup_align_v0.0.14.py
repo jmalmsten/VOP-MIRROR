@@ -1,6 +1,6 @@
 """
-VOP Module:     vop_setup_align_v0.0.13.py
-Version:        v0.0.13
+VOP Module:     vop_setup_align_v0.0.14.py
+Version:        v0.0.14
 Description:    TCP Connect-back Alignment. Removed invalid --tune flag.
 """
 import os, sys, time, subprocess, numpy as np
