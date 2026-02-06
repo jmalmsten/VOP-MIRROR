@@ -10,6 +10,7 @@ vop_focus_tests/
 *.jpg
 *.dng
 *.tiff
+*.tif
 
 # --- Python Junk ---
 __pychache__/
