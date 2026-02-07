@@ -64,4 +64,5 @@ Phase Designation Key Objective Status
                     "Hold" logic. Also expand the keyframing in the GUI so there's only one row per keyframe. Horizontal 
                     scrolling will be necessary. (Planned)
     Phase VII   -   Add the ProjBiPack for masking the "light" going from the projection light through the ProjMag (Planned)
-    Phase VIII  -   Bipack Manipulation Introduce independent transforms for the "Latent" image and the "Projection" image (simulating moving both the film and the projector). (Planned)
+    Phase VIII  -   Bipack Manipulation Introduce independent transforms for the "Latent" image and the "Projection" image 
+                    (simulating moving both the film and the projector). (Planned)
