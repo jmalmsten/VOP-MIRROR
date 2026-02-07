@@ -1,7 +1,7 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.24-stable
-Description:    Phase III/IV Engine. Restored Shutter Handshake.
+Version:        v0.0.28-stable
+Description:    Phase III/IV Engine. Restored exact logging request.
 """
 import os, sys, json, time, argparse, subprocess
 import numpy as np
@@ -65,10 +65,8 @@ def run_vop_engine(job_path):
     vbo = ctx.buffer(np.array([-1,-1,0,0,0, 1,-1,0,1,0, -1,1,0,0,1, 1,1,0,1,1], dtype='f4'))
     vao = ctx.vertex_array(prog, [(vbo, '3f 2f', 'in_position', 'in_texcoord')], mode=moderngl.TRIANGLE_STRIP)
 
-    p1 = np.array([float(x) for x in job['p_start'].split(',')])
-    p2 = np.array([float(x) for x in job['p_end'].split(',')])
-    r1 = np.array([float(x) for x in job['r_start'].split(',')])
-    r2 = np.array([float(x) for x in job['r_end'].split(',')])
+    p1, p2 = np.array([float(x) for x in job['p_start'].split(',')]), np.array([float(x) for x in job['p_end'].split(',')])
+    r1, r2 = np.array([float(x) for x in job['r_start'].split(',')]), np.array([float(x) for x in job['r_end'].split(',')])
 
     if is_preview:
         t = float(job.get('preview_p', 0.5))
@@ -82,7 +80,7 @@ def run_vop_engine(job_path):
         prog['mvp'].write((proj * model).astype('f4'))
         tex.use(); vao.render(); pygame.display.flip(); time.sleep(3)
     else:
-        x_ms = float(job['smear']) * 1000.0
+        x_ms = (float(job['smear']) * 1000.0)
         total_ms = x_ms + 1000.0
         output_file = os.path.join(paths["CAM_MAG"], f"latent_{str(job['frame']).zfill(4)}.tif")
         buffer_file = "/tmp/vop_capture.dng"
@@ -120,7 +118,7 @@ def run_vop_engine(job_path):
             else:
                 cv2.imwrite(output_file, new_img_16, [cv2.IMWRITE_TIFF_COMPRESSION, 1])
             os.remove(buffer_file)
-            print("VOP_STATUS: COMPLETE")
+            print("FRAME_STATUS: COMPLETE")
     pygame.quit()
 
 if __name__ == "__main__":
