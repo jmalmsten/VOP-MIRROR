@@ -2,51 +2,64 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>VOP Projector v0.3.3</title>
+    <title>VOP v0.4.4 - Console Layout</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style> .color-row { display: flex; gap: 10px; align-items: center; margin-top: 5px; } </style>
+    <style>
+        .panel-row { display: flex; gap: 20px; }
+        .panel-row .panel { flex: 1; }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h2>VOP v0.3.3 | CHROMATIC 3D SMEAR</h2><br>
+        <h2>VOP v0.4.4 | PRINTER CONSOLE</h2>
         
         <div class="panel">
-            <h3>LOGISTICS & OPTICS</h3>
-            <div class="input-group"><label>FRAME #</label><input id="frame" type="number" value="1"></div>
-            <div class="input-group"><label>SMEAR (SEC)</label><input id="smear" type="number" step="0.1" value="5.0"></div>
-            <div class="input-group"><label>GAIN</label><input id="gain" type="number" value="1.0"></div>
-            <div class="input-group">
-                <label>AWB GAINS (R, B)</label>
-                <div style="display:flex; gap: 5px;">
-                    <input id="awb_r" value="3.18" style="width:50%">
-                    <input id="awb_b" value="1.45" style="width:50%">
-                </div>
-            </div>
-            <div class="input-group" style="grid-column: span 2;">
-                <label>PROJECTION COLOR (START -> END)</label>
-                <div class="color-row">
-                    <input type="color" id="c_start_hex" value="#0000ff" style="width:100px; height:40px;">
-                    <span style="font-size: 20px;">➔</span>
-                    <input type="color" id="c_end_hex" value="#ffffff" style="width:100px; height:40px;">
+            <h3>PRINTER CONSTANTS (GLOBAL)</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div class="input-group"><label>START FRAME</label><input id="f_start" type="number" value="1"></div>
+                <div class="input-group"><label>END FRAME</label><input id="f_end" type="number" value="24"></div>
+                <div class="input-group"><label>EXPORT FPS</label><input id="fps" type="number" value="24"></div>
+                
+                <div class="input-group"><label>SHUTTER SPEED (SEC)</label><input id="smear" type="number" step="0.1" value="2.0"></div>
+                <div class="input-group"><label>SHUTTER DISC (1.0=360°)</label><input id="shutter" type="number" step="0.1" value="0.5"></div>
+                <div class="input-group"><label>GAIN</label><input id="gain" type="number" step="0.1" value="1.0"></div>
+                
+                <div class="input-group"><label>PROJ IMAGE</label><input id="image" value="vop_logo_mockup_400px.png"></div>
+                <div class="input-group"><label>FOV</label><input id="fov" type="number" value="45"></div>
+                <div class="input-group">
+                    <label>AWB GAINS (R,B)</label>
+                    <div style="display:flex; gap:5px;">
+                        <input id="awb_r" value="3.18" style="width:50%"><input id="awb_b" value="1.45" style="width:50%">
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="panel">
-            <h3>3D TRANSFORM</h3>
-            <div class="input-group"><label>PROJ IMAGE</label><input id="image" value="vop_logo_mockup_400px.png"></div>
-            <div class="input-group"><label>FOV</label><input id="fov" value="45.0"></div>
-            <div class="input-group"><label>POS START</label><input id="p_start" value="0.0,0.0,-2.0"></div>
-            <div class="input-group"><label>POS END</label><input id="p_end" value="0.0,0.0,-2.0"></div>
-            <div class="input-group"><label>ROT START</label><input id="r_start" value="0.0,0.0,0.0"></div>
-            <div class="input-group"><label>ROT END</label><input id="r_end" value="0.0,0.0,0.0"></div>
-            <div class="preview-group">
-                <button class="preview-btn" onclick="runTask('preview', 0.0)">START</button>
-                <button class="preview-btn" onclick="runTask('preview', 0.5)">MID</button>
-                <button class="preview-btn" onclick="runTask('preview', 1.0)">END</button>
+        <div class="panel-row">
+            <div class="panel" style="border-left: 4px solid #ff0000;">
+                <h3>START KEYFRAME (Frame Start)</h3>
+                <div class="input-group"><label>POSITION (X,Y,Z)</label><input id="p_start" value="0.0,0.0,-5.0"></div>
+                <div class="input-group"><label>ROTATION (P,Y,R)</label><input id="r_start" value="0.0,0.0,0.0"></div>
+                <div class="input-group"><label>COLOR</label><input type="color" id="c_start_hex" value="#ff0000" style="width:100%; height:40px;"></div>
+            </div>
+
+            <div class="panel" style="border-left: 4px solid #0000ff;">
+                <h3>END KEYFRAME (Frame End)</h3>
+                <div class="input-group"><label>POSITION (X,Y,Z)</label><input id="p_end" value="0.0,0.0,-2.0"></div>
+                <div class="input-group"><label>ROTATION (P,Y,R)</label><input id="r_end" value="0.0,0.0,0.0"></div>
+                <div class="input-group"><label>COLOR</label><input type="color" id="c_end_hex" value="#0000ff" style="width:100%; height:40px;"></div>
             </div>
         </div>
-        <button class="execute-btn" style="width:100%; margin-top:10px;" onclick="runTask('smear')">EXECUTE OPTICAL SMEAR</button>
+
+        <div class="panel">
+            <h3>RENDER CONTROL</h3>
+            <div class="preview-group" style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button class="preview-btn" style="flex:1" onclick="runTask('preview', 0.0)">PREVIEW START</button>
+                <button class="preview-btn" style="flex:1" onclick="runTask('preview', 0.5)">PREVIEW MID</button>
+                <button class="preview-btn" style="flex:1" onclick="runTask('preview', 1.0)">PREVIEW END</button>
+            </div>
+            <button class="execute-btn" style="width:100%; font-size: 1.2em; padding: 20px;" onclick="runTask('sequence')">EXECUTE OPTICAL SEQUENCE</button>
+        </div>
     </div>
 
     <script>
@@ -56,7 +69,10 @@
 
         async function runTask(type, pValue = 0.0) {
             const data = {
-                frame:   document.getElementById('frame').value,
+                f_start: document.getElementById('f_start').value,
+                f_end:   document.getElementById('f_end').value,
+                shutter: document.getElementById('shutter').value,
+                fps:     document.getElementById('fps').value,
                 image:   document.getElementById('image').value,
                 smear:   document.getElementById('smear').value,
                 gain:    document.getElementById('gain').value,
@@ -71,14 +87,10 @@
                 c_end:   hexToRgb(document.getElementById('c_end_hex').value),
                 preview_p: pValue
             };
-            const endpoint = (type === 'preview') ? '/preview' : '/execute_smear';
-            const resp = await fetch(endpoint, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
+            const endpoint = (type === 'preview') ? '/preview' : '/execute_sequence';
+            const resp = await fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
             const res = await resp.json();
-            if(type !== 'preview') alert(res.status + ": " + res.message);
+            if (type !== 'preview') alert(res.status + ": " + res.message);
         }
     </script>
 </body>
