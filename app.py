@@ -1,15 +1,13 @@
 """
 VOP Module:     app.py
-Version:        v0.4.24-api
-Description:    Phase IV Final - Robust Path Handling & Space-Free Metadata.
-                Optimized for Pi OS Lite / Trixie.
+Version:        v0.4.31-api
+Description:    Phase IV Baseline. Fixed AWB inputs.
 """
 import subprocess, os, json, numpy as np, time, logging, glob, shutil
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# --- LOG SILENCER ---
 class StatusFilter(logging.Filter):
     def filter(self, record):
         return "/status" not in record.getMessage()
@@ -23,9 +21,7 @@ JOB_FILE = "/tmp/vop_job.json"
 WORKPRINT_DIR = os.path.join(BASE_DIR, "WorkPrints")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 
-# Ensure base directories exist on startup
-for d in [WORKPRINT_DIR, CAM_MAG_DIR]:
-    os.makedirs(d, exist_ok=True)
+for d in [WORKPRINT_DIR, CAM_MAG_DIR]: os.makedirs(d, exist_ok=True)
 
 progress_state = {"current": 0, "total": 0, "start_time": 0, "msg": "Idle", "status": "idle"}
 
@@ -38,55 +34,39 @@ def check_disk_space():
     total, used, free = shutil.disk_usage(BASE_DIR)
     return free / (1024**3)
 
-def lerp_vec(v1, v2, t):
-    return v1 + (v2 - v1) * t
+def lerp(v1, v2, t): return v1 + (v2 - v1) * t
+def lerp_vec(v1, v2, t): return v1 + (v2 - v1) * t
 
 def generate_workprint(fps, burn_in, meta_list):
-    """Encodes WorkPrint with 2K downscale and sanitized metadata."""
     output_path = os.path.join(WORKPRINT_DIR, "vop_workprint_latest.mp4")
     font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    if not glob.glob(os.path.join(CAM_MAG_DIR, "*.tif")): return False
     
-    # Pre-flight check: ensure directory hasn't vanished
-    os.makedirs(WORKPRINT_DIR, exist_ok=True)
-    
-    if not glob.glob(os.path.join(CAM_MAG_DIR, "*.tif")):
-        print("FFMPEG ERROR: CamMag is empty. No frames to encode.")
-        return False
-
     v_base = "scale=2048:1536:flags=neighbor,lutrgb=r=gammaval(2.2):g=gammaval(2.2):b=gammaval(2.2),format=yuv420p"
-    
     if burn_in and os.path.exists(font):
         meta_file = os.path.join(WORKPRINT_DIR, "ffmpeg_metadata.txt")
         with open(meta_file, 'w') as f:
             for i, m in enumerate(meta_list):
-                # Using '=' separator and quotes to prevent 'extraneous data' errors in FFmpeg 7
                 f.write(f"{i} metadata add vop_time='{m['dur']:.2f}s';\n")
                 f.write(f"{i} metadata add vop_xyz='{m['tx_pos']}';\n")
                 f.write(f"{i} metadata add vop_pyr='{m['tx_rot']}';\n")
+                f.write(f"{i} metadata add vop_sm='{m['smear']:.2f}s';\n")
+                f.write(f"{i} metadata add vop_ph='{m['phase']:.2f}';\n")
         
-        # Labels are handled inside drawtext to keep metadata values space-free
-        z_time = f"drawtext=fontfile='{font}':text='TIME\\: %{{metadata\\:vop_time}}':x=40:y=h-th-40:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.7"
-        z_fr   = f"drawtext=fontfile='{font}':text='FR\\: %{{n}}':x=w-tw-40:y=h-th-40:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.7"
-        z_pos  = f"drawtext=fontfile='{font}':text='XYZ\\: %{{metadata\\:vop_xyz}}':x=(w-tw)/2:y=h-th-80:fontsize=28:fontcolor=yellow:box=1:boxcolor=black@0.7"
-        z_rot  = f"drawtext=fontfile='{font}':text='PYR\\: %{{metadata\\:vop_pyr}}':x=(w-tw)/2:y=h-th-35:fontsize=28:fontcolor=cyan:box=1:boxcolor=black@0.7"
-        vf_chain = f"{v_base},sendcmd=f='{meta_file}',{z_time},{z_fr},{z_pos},{z_rot}"
-    else:
-        vf_chain = v_base
+        vf = f"{v_base},sendcmd=f='{meta_file}'," \
+             f"drawtext=fontfile='{font}':text='PROC\\: %{{metadata\\:vop_time}}':x=40:y=h-th-40:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.7," \
+             f"drawtext=fontfile='{font}':text='SMEAR\\: %{{metadata\\:vop_sm}} ph %{{metadata\\:vop_ph}}':x=40:y=h-th-80:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.7," \
+             f"drawtext=fontfile='{font}':text='FR\\: %{{n}}':x=w-tw-40:y=h-th-40:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.7," \
+             f"drawtext=fontfile='{font}':text='XYZ\\: %{{metadata\\:vop_xyz}}':x=(w-tw)/2:y=h-th-80:fontsize=28:fontcolor=yellow:box=1:boxcolor=black@0.7," \
+             f"drawtext=fontfile='{font}':text='PYR\\: %{{metadata\\:vop_pyr}}':x=(w-tw)/2:y=h-th-35:fontsize=28:fontcolor=cyan:box=1:boxcolor=black@0.7"
+    else: vf = v_base
 
-    ffmpeg_cmd = [
-        "ffmpeg", "-y", "-framerate", str(fps),
-        "-i", os.path.join(CAM_MAG_DIR, "latent_%04d.tif"),
-        "-vf", vf_chain, "-c:v", "libx264", "-crf", "23", "-preset", "ultrafast", output_path
-    ]
-
-    print("DEBUG: Launching FFmpeg Encode...")
-    result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-    print(f"--- FFMPEG LOG ---\n{result.stdout}\n{result.stderr}\n------------------")
-    return result.returncode == 0
+    cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(CAM_MAG_DIR, "latent_%04d.tif"),
+           "-vf", vf, "-c:v", "libx264", "-crf", "23", "-preset", "ultrafast", output_path]
+    return subprocess.run(cmd, capture_output=True).returncode == 0
 
 @app.route('/status')
 def get_status(): return jsonify(progress_state)
-
 @app.route('/')
 def index(): return render_template('index.html')
 
@@ -95,64 +75,55 @@ def preview():
     data = request.json
     p1, p2 = np.array([float(x) for x in data['p_start'].split(',')]), np.array([float(x) for x in data['p_end'].split(',')])
     r1, r2 = np.array([float(x) for x in data['r_start'].split(',')]), np.array([float(x) for x in data['r_end'].split(',')])
+    s1, s2 = float(data['s_start']), float(data['s_end'])
+    ph1, ph2 = float(data['ph_start']), float(data['ph_end'])
     t_p = float(data.get('preview_p', 0.0))
-    pos, rot = lerp_vec(p1, p2, t_p), lerp_vec(r1, r2, t_p)
+    pos, rot, sm, ph = lerp_vec(p1, p2, t_p), lerp_vec(r1, r2, t_p), lerp(s1, s2, t_p), lerp(ph1, ph2, t_p)
     job = data.copy()
     job.update({"p_start": f"{pos[0]},{pos[1]},{pos[2]}", "p_end": f"{pos[0]},{pos[1]},{pos[2]}",
                 "r_start": f"{rot[0]},{rot[1]},{rot[2]}", "r_end": f"{rot[0]},{rot[1]},{rot[2]}",
-                "type": "preview"})
+                "smear": sm, "phase": ph, "type": "preview"})
     with open(JOB_FILE, 'w') as f: json.dump(job, f, indent=4)
     subprocess.run(["python3", ENGINE_PATH, "--job", JOB_FILE])
     return jsonify({"status": "SUCCESS"}), 200
 
 @app.route('/execute_sequence', methods=['POST'])
 def execute_sequence():
-    if check_disk_space() < 2.0:
-        update_status(0, 0, "LOW DISK", "error")
-        return jsonify({"status": "ERROR", "message": "Insufficient Disk Space."}), 400
-
+    if check_disk_space() < 2.0: return jsonify({"status": "ERROR", "message": "Low Disk"}), 400
     data = request.json
     f_start, f_end = int(data['f_start']), int(data['f_end'])
     total_seq = max(1, (f_end - f_start) + 1)
-    sh_disc = float(data.get('shutter_disc', 0.5)) 
+    sh_disc = float(data.get('shutter_disc', 0.5))
+    
     p1, p2 = np.array([float(x) for x in data['p_start'].split(',')]), np.array([float(x) for x in data['p_end'].split(',')])
     r1, r2 = np.array([float(x) for x in data['r_start'].split(',')]), np.array([float(x) for x in data['r_end'].split(',')])
+    s1, s2 = float(data['s_start']), float(data['s_end'])
+    ph1, ph2 = float(data['ph_start']), float(data['ph_end'])
 
     frame_meta = []
     update_status(0, total_seq, "Exposing Sequence...", "running")
-    
     for i in range(total_seq):
         update_status(i + 1, total_seq)
         start_t = time.time()
         t_center = i / (total_seq - 1) if total_seq > 1 else 0
         t_step = 1.0 / (total_seq - 1) if total_seq > 1 else 0
-        t_s, t_e = t_center - (t_step * sh_disc * 0.5), t_center + (t_step * sh_disc * 0.5)
-        pos_s, pos_e = lerp_vec(p1, p2, t_s), lerp_vec(p1, p2, t_e)
-        rot_s, rot_e = lerp_vec(r1, r2, t_s), lerp_vec(r1, r2, t_e)
+        cur_sm, cur_ph = lerp(s1, s2, t_center), lerp(ph1, ph2, t_center)
+        win_size = t_step * sh_disc
+        t_s, t_e = t_center - (win_size * cur_ph), t_center + (win_size * (1.0 - cur_ph))
+        ps, pe = lerp_vec(p1, p2, t_s), lerp_vec(p1, p2, t_e)
+        rs, re = lerp_vec(r1, r2, t_s), lerp_vec(r1, r2, t_e)
         
         job = data.copy()
-        job.update({
-            "p_start": f"{pos_s[0]},{pos_s[1]},{pos_s[2]}", "p_end": f"{pos_e[0]},{pos_e[1]},{pos_e[2]}",
-            "r_start": f"{rot_s[0]},{rot_s[1]},{rot_s[2]}", "r_end": f"{rot_e[0]},{rot_e[1]},{rot_e[2]}",
-            "frame": f_start + i, "type": "smear"
-        })
+        job.update({"p_start": f"{ps[0]},{ps[1]},{ps[2]}", "p_end": f"{pe[0]},{pe[1]},{pe[2]}",
+                    "r_start": f"{rs[0]},{rs[1]},{rs[2]}", "r_end": f"{re[0]},{re[1]},{re[2]}",
+                    "smear": cur_sm, "frame": f_start + i})
         with open(JOB_FILE, 'w') as f: json.dump(job, f, indent=4)
         subprocess.run(["python3", ENGINE_PATH, "--job", JOB_FILE])
-        
-        # Meta strings: sanitized of labels/spaces for sendcmd
-        tx_p = f"S({pos_s[0]:.1f},{pos_s[1]:.1f},{pos_s[2]:.1f})->E({pos_e[0]:.1f},{pos_e[1]:.1f},{pos_e[2]:.1f})"
-        tx_r = f"S({rot_s[0]:.0f},{rot_s[1]:.0f},{rot_s[2]:.0f})->E({rot_e[0]:.0f},{rot_e[1]:.0f},{rot_e[2]:.0f})"
-        frame_meta.append({"dur": time.time() - start_t, "tx_pos": tx_p, "tx_rot": tx_r})
+        frame_meta.append({"dur": time.time() - start_t, "tx_pos": f"{ps[0]:.1f}->{pe[0]:.1f}", 
+                           "tx_rot": f"{rs[0]:.0f}->{re[0]:.0f}", "smear": cur_sm, "phase": cur_ph})
 
-    update_status(total_seq, total_seq, "Encoding WorkPrint...", "running")
-    success = generate_workprint(data.get('fps', 24), data.get('burn_in', True), frame_meta)
-    
-    if success:
-        update_status(total_seq, total_seq, "COMPLETE", "success")
-        return jsonify({"status": "SUCCESS", "message": "Sequence & WorkPrint Complete"}), 200
-    else:
-        update_status(total_seq, total_seq, "ENCODER FAILED", "error")
-        return jsonify({"status": "ERROR", "message": "WorkPrint encoding failed."}), 500
+    generate_workprint(data.get('fps', 24), True, frame_meta)
+    update_status(total_seq, total_seq, "COMPLETE", "success")
+    return jsonify({"status": "SUCCESS"}), 200
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__": app.run(host='0.0.0.0', port=5000)

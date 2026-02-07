@@ -52,9 +52,16 @@ A basic instruction to how to set one of these up yourself.
 ------------
 Phase Designation Key Objective Status
 
-    Phase I JSON Bridge Move from CLI arguments to a JSON-based job file triggered via a Web GUI. v0.3.1 (Complete)
-    Phase II Latent Imaging Implement "Bipack" logic using high-bit-depth TIFF files. Allows multiple exposures on a single frame number without saving separate files. v0.3.2 (Complete)
-    Phase III Projection Color Introduce a "Filter" logic—multiplying a color value (R, G, B) against the loaded image to simulate optical gel filters. (Planned)
-    Phase IV The Dual-Key Transition the UI to accept two keyframes (Start/End) and generate a sequence of intermediary frames. (Planned)
-    Phase V Arbitrary Sheet Expand to a full Exposure Sheet with an unlimited number of keyframes and "Hold" logic. (Planned)
-    Phase VI Bipack Manipulation Introduce independent transforms for the "Latent" image and the "Projection" image (simulating moving both the film and the projector). (Planned)
+    Phase I     -   JSON Bridge Move from CLI arguments to a JSON-based job file triggered via a Web GUI. v0.3.1 (Complete)
+    Phase II    -   Latent Imaging Implement "Bipack" logic using high-bit-depth TIFF files. Allows multiple exposures on a 
+                    single frame number without saving separate files. v0.3.2 (Complete)
+    Phase III   -   Projection Color Introduce a "Filter" logic—multiplying a color value (R, G, B) against the loaded image 
+                    to simulate optical gel filters. (Complete)
+    Phase IV    -   The Dual-Key Transition the UI to accept two keyframes (Start/End) and generate a sequence of 
+                    intermediary frames. (Planned)
+    Phase V     -   Three keyframe version to get b-splines and curved transformations. (Planned)
+    Phase VI    -   Arbitrary Sheet Expand to a full Exposure Sheet with an unlimited number of keyframes with "repeat" and 
+                    "Hold" logic. Also expand the keyframing in the GUI so there's only one row per keyframe. Horizontal 
+                    scrolling will be necessary. (Planned)
+    Phase VII   -   Add the ProjBiPack for masking the "light" going from the projection light through the ProjMag (Planned)
+    Phase VIII  -   Bipack Manipulation Introduce independent transforms for the "Latent" image and the "Projection" image (simulating moving both the film and the projector). (Planned)
