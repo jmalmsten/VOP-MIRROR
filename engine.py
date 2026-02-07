@@ -1,7 +1,7 @@
 """
 VOP Module:     engine.py
 Version:        v0.0.28-stable
-Description:    Phase III/IV Engine. Restored exact logging request.
+Description:    Phase III/IV Engine. Updated logging strings.
 """
 import os, sys, json, time, argparse, subprocess
 import numpy as np
