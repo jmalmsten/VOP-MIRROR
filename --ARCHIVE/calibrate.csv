@@ -1,2 +1,0 @@
-frame,image,color_hex,exposure,focus,wb,tl_x_start,tl_y_start,tr_x_start,tr_y_start,br_x_start,br_y_start,bl_x_start,bl_y_start,tl_x_end,tl_y_end,tr_x_end,tr_y_end,br_x_end,br_y_end,bl_x_end,bl_y_end
-1,test_slide.png,#FFFFFF,2000,200,5500,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,1

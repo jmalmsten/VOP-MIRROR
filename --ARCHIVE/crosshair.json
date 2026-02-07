@@ -1,9 +1,0 @@
-{
-    "grid":
-    {
-        "columns": 2,
-        "rows": 2,
-        "color": [255, 0, 0],
-        "opacity": 1.0
-    }
-}

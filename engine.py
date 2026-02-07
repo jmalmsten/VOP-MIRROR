@@ -1,9 +1,9 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.31-stable
-Description:    Phase III/IV Engine. Fixed ISP lag & Audit logs.
+Version:        v0.0.32-stable
+Description:    Phase III/IV Engine. Added Asynchronous Saving & Fixed ISP.
 """
-import os, sys, json, time, argparse, subprocess
+import os, sys, json, time, argparse, subprocess, threading
 import numpy as np
 import moderngl, pygame, cv2, rawpy
 from pyrr import Matrix44
@@ -33,11 +33,21 @@ void main() {
 }
 """
 
-def log_audit(msg):
-    print(f"[{time.strftime('%H:%M:%S')}] AUDIT: {msg}")
+def log_audit(msg): print(f"[{time.strftime('%H:%M:%S')}] AUDIT: {msg}")
+
+def save_frame_async(buffer_file, output_file, tiff_flag):
+    """Background thread for 16-bit dev and ZIP save."""
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            img = cv2.cvtColor(raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16), cv2.COLOR_RGB2BGR)
+        if os.path.exists(output_file):
+            img = cv2.add(cv2.imread(output_file, cv2.IMREAD_UNCHANGED), img)
+        cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+        os.remove(buffer_file)
+        log_audit(f"Save complete: {os.path.basename(output_file)}")
+    except Exception as e: log_audit(f"SAVE ERROR: {e}")
 
 def run_vop_engine(job_path):
-    log_audit("Loading job file...")
     with open(job_path, 'r') as f: job = json.load(f)
     user_home = os.path.expanduser(f"~{os.environ.get('SUDO_USER', 'admininja')}")
     cam_mag_dir, proj_mag_dir = os.path.join(user_home, "vop/CamMag"), os.path.join(user_home, "vop/ProjMag")
@@ -58,7 +68,6 @@ def run_vop_engine(job_path):
     r1, r2 = np.array([float(x) for x in job['r_start'].split(',')]), np.array([float(x) for x in job['r_end'].split(',')])
 
     if job.get('type') == 'preview':
-        # Preview logic
         t = float(job.get('preview_p', 0.5))
         ctx.clear(0,0,0)
         proj = Matrix44.perspective_projection(float(job['fov']), WIDTH/HEIGHT, 0.1, 1000.0)
@@ -70,9 +79,8 @@ def run_vop_engine(job_path):
         tex.use(); vao.render(); pygame.display.flip(); time.sleep(3)
     else:
         x_ms = float(job['smear']) * 1000.0; total_ms = x_ms + 1000.0
-        output_file, buffer_file = os.path.join(cam_mag_dir, f"latent_{str(job['frame']).zfill(4)}.tif"), "/tmp/vop_capture.dng"
+        output_file, buffer_file = os.path.join(cam_mag_dir, f"latent_{str(job['frame']).zfill(4)}.tif"), f"/tmp/vop_buf_{job['frame']}.dng"
         
-        log_audit(f"Triggering camera: {int(total_ms)}ms exposure...")
         cam_proc = subprocess.Popen([
             "rpicam-still", "-o", buffer_file, "-r",
             "--shutter", str(int(total_ms * 1000)), "--gain", str(job['gain']),
@@ -80,7 +88,7 @@ def run_vop_engine(job_path):
         ])
 
         time.sleep(LATENCY_OFFSET_MS / 1000.0)
-        anchor = time.time(); log_audit("Render loop start.")
+        anchor = time.time()
         while (time.time() - anchor) * 1000 < total_ms:
             elapsed = (time.time() - anchor) * 1000
             ctx.clear(0,0,0)
@@ -95,17 +103,9 @@ def run_vop_engine(job_path):
                 tex.use(); vao.render()
             pygame.display.flip()
         
-        ctx.finish(); log_audit("Render loop end. Waiting for camera driver...")
-        cam_proc.wait(); log_audit("DNG file received.")
-
-        if os.path.exists(buffer_file):
-            with rawpy.imread(buffer_file) as raw:
-                img = cv2.cvtColor(raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16), cv2.COLOR_RGB2BGR)
-            if os.path.exists(output_file):
-                img = cv2.add(cv2.imread(output_file, cv2.IMREAD_UNCHANGED), img)
-            cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
-            os.remove(buffer_file); log_audit("Save complete.")
-            print("FRAME_STATUS: COMPLETE")
+        ctx.finish(); cam_proc.wait()
+        threading.Thread(target=save_frame_async, args=(buffer_file, output_file, tiff_flag)).start()
+        print("FRAME_STATUS: COMPLETE")
     pygame.quit()
 
 if __name__ == "__main__":
