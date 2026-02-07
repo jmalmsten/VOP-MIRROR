@@ -58,7 +58,7 @@ Phase Designation Key Objective Status
     Phase III   -   Projection Color Introduce a "Filter" logic—multiplying a color value (R, G, B) against the loaded image 
                     to simulate optical gel filters. (Complete)
     Phase IV    -   The Dual-Key Transition the UI to accept two keyframes (Start/End) and generate a sequence of 
-                    intermediary frames. (Planned)
+                    intermediary frames. (Complete)
     Phase V     -   Three keyframe version to get b-splines and curved transformations. (Planned)
     Phase VI    -   Arbitrary Sheet Expand to a full Exposure Sheet with an unlimited number of keyframes with "repeat" and 
                     "Hold" logic. Also expand the keyframing in the GUI so there's only one row per keyframe. Horizontal 
