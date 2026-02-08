@@ -1,0 +1,23 @@
+<div class="constants-zone">
+    <div class="const-group"><label>FOV</label><input id="fov"></div>
+    <div class="const-group"><label>IMAGE</label><input id="image"></div>
+    <div class="const-group">
+        <label>TIFF COMPRESSION</label>
+        <select id="tiff_compression" onchange="checkStorageCapacity()">
+            <option value="zip">ZIP (Compressed)</option>
+            <option value="none">RAW (Uncompressed)</option>
+        </select>
+    </div>
+    <div class="const-group"><label>WORKPRINT FPS</label><input id="fps" type="number"></div>
+    <div class="const-group"><label>SENSOR GAIN</label><input id="gain"></div>
+    <div class="const-group">
+        <label>AWB GAINS (R/B)</label>
+        <div style="display:flex; gap:2px">
+            <input id="awb_r" placeholder="R"><input id="awb_b" placeholder="B">
+        </div>
+    </div>
+    <div class="const-group">
+        <label>COLOR MODE</label>
+        <select id="c_mode"><option value="linear">LINEAR</option><option value="smooth">SMOOTH</option></select>
+    </div>
+</div>

@@ -1,0 +1,19 @@
+<div class="control-deck">
+    <div style="display:flex; justify-content: space-between;">
+        <span id="st_msg" style="color:#0cf; font-weight:bold">IDLE</span>
+        <span id="st_eta">00:00</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="st_bar"></div></div>
+    <div id="storage_info" style="font-size:0.7em; margin-top:5px"></div>
+    
+    <div class="maintenance-zone">
+        <a id="wp_download" class="wp-link" style="display:none">DOWNLOAD MP4</a>
+        <button onclick="nukeMag()" class="nuke-btn" style="margin-left:15px">NUKE TIFFs</button>
+    </div>
+
+    <div style="display:flex; gap:5px; margin-top:10px">
+        <button id="exec-btn" class="exec-btn" style="flex:3" onclick="runTask('sequence')">EXECUTE</button>
+        <button class="panic-btn" style="flex:1" onclick="panic()">PANIC</button>
+        <button class="panic-btn" style="flex:1; background:#333" onclick="location.reload()">RELOAD</button>
+    </div>
+</div>

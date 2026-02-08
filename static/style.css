@@ -1,103 +1,45 @@
-:root {
-    --vop-accent:               #05F;
-    --vop-bg:                   #111;
-    --vop-panel:                #000;
-    --vop-border:               #333;
-    --vop-text:                 #fff;
-    --vop-dim:                  #002299;
+/* VOP Style Sheet: static/style.css - v0.0.6 */
+body { background: #050505; color: #aaa; font-family: 'Courier New', monospace; margin: 0; overflow-x: hidden; }
+
+.top-deck { 
+    display: flex; gap: 20px; padding: 20px; 
+    background: #000; border-bottom: 2px solid #333; 
+    height: 280px; box-sizing: border-box; 
 }
 
-body {
-    background:                 var(--vop-bg);
-    color:                      var(--vop-text);
-    font-family:                'Courier New', monospace;
-    padding:                    20px;
-    margin:                     0;
+.probe-deck { flex: 2; display: flex; gap: 20px; border-right: 1px solid #222; }
+.probe-view { 
+    width: 320px; height: 240px; background: #111; border: 1px solid #333; 
+    display: flex; align-items: center; justify-content: center; overflow: hidden; 
+}
+/* Prevents the probe image from breaking the layout */
+#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+.control-deck { flex: 1.2; display: flex; flex-direction: column; gap: 8px; }
+
+/* 3-Column Constants - Balanced for Mobile/Desktop */
+.constants-zone {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 15px; padding: 20px; background: #0a0a0a; border-bottom: 1px solid #222;
 }
 
-h2{
-    color:                      var(--vop-accent);
-    border-bottom:              2px solid var(--vop-accent);
-    padding-bottom:                    10px;
+/* Dark mode inputs: No more blinding white */
+input, select { 
+    background: #111; border: 1px solid #444; color: #eee; 
+    padding: 8px; width: 100%; box-sizing: border-box; 
+    font-family: inherit; font-size: 0.85em;
 }
+input:focus { border-color: #0cf; outline: none; }
 
-.container {
-    max-width:                  900px;
-    margin:                     auto;
-}
+.progress-bar { height: 14px; background: #111; width: 100%; border: 1px solid #333; margin-top: 5px; }
+.progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.5s ease-out; }
 
-.panel {
-    background:                 var(--vop-panel);
-    border:                     1px solid var(--vop-border);
-    padding:                    15px;
-    margin-bottom:              15px;
-    display:                    grid;
-    grid-template-columns:     1fr 1fr;
-    gap:                        15px;
-}
+.exec-btn { background: #004444; color: #00ffff; border: 1px solid #006666; padding: 12px; font-weight: bold; cursor: pointer; }
+.panic-btn { background: #400; color: #f66; border: 1px solid #622; padding: 12px; cursor: pointer; font-weight: bold; }
+.nuke-btn { background: #200; color: #f99; border: 1px solid #400; cursor: pointer; font-size: 0.8em; }
 
-.panel h3 {
-    grid-column:                span 2;
-    margin:                     0 0 10px 0;
-    font-size:                  14px;
-    text-transform:             uppercase;
-    color:                      var(--vop-accent);
-}
+.key-row-1 { background: rgba(255, 50, 50, 0.05); }
+.key-row-2 { background: rgba(50, 255, 50, 0.05); }
+.key-row-3 { background: rgba(50, 50, 255, 0.05); }
 
-.input-group {
-    display:                    flex;
-    flex-direction:             column;
-}
-
-input {
-    background:                 #000;
-    color:                      var(--vop-accent);
-    border:                     1px solid var(--vop-border);
-    padding:                    8px;
-    font-family:                inherit;
-}
-
-input:focus {
-    border-color:               var(--vop-accent);
-    outline:                    none;
-}
-
-button {
-    background:                 var(--vop-accent);
-    color:                      #000;
-    border:                     none;
-    padding:                    15px;
-    font-weight:                bold;
-    cursor:                     pointer;
-    font-family:                inherit;
-    text-transform:             uppercase;
-}
-
-button:hover {
-    background:                 #fff
-}
-
-.preview-group {
-    grid-column:                span 2;
-    display:                    flex;
-    gap:                        5px;
-}
-
-.preview-btn {
-    background:                 var(--vop-dim);
-    color:                      var(--vop-accent);
-    border:                     1px solid var(--vop-accent);
-    flex:                       1;
-    padding:                    10px;
-}
-
-.preview-btn:active {
-    background:                 var(--vop-accent);
-    color:                      #000;
-}
-
-.execute-btn {
-    grid-column:                2;
-    margin-top:                 10px;
-    font-size:                  18px;
-}
+label { font-size: 0.65em; color: #555; margin-bottom: 2px; display: block; }

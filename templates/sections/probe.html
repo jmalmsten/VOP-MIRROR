@@ -1,0 +1,21 @@
+<div class="probe-deck">
+    <div class="probe-controls">
+        <h4 title="Check alignment at any frame before exposing.">PROBE PREVIEW</h4>
+        <div style="display:flex; gap:10px; margin-top:10px">
+            <div style="flex:1">
+                <label>MASTER FR</label>
+                <input type="range" id="probe_frame" oninput="updateProbeRange()">
+            </div>
+            <div style="flex:1">
+                <label title="Position within the Exposure window.">SMEAR POINT %</label>
+                <input type="range" id="probe_sub" min="0" max="1" step="0.01" value="0.5">
+            </div>
+        </div>
+        <button class="exec-btn" style="margin-top:15px; width:100%" onclick="runTask('preview')">GENERATE PROBE CAPTURE</button>
+    </div>
+    
+    <div class="probe-view" id="probe_container">
+        <img id="probe_img" style="width:100%; cursor:zoom-in; display:none" src="" onclick="window.open(this.src, '_blank')">
+        <span id="probe_label" style="color:#222">READY</span>
+    </div>
+</div>
