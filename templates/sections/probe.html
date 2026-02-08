@@ -1,21 +1,32 @@
 <div class="probe-deck">
     <div class="probe-controls">
-        <h4 title="Check alignment at any frame before exposing.">PROBE PREVIEW</h4>
-        <div style="display:flex; gap:10px; margin-top:10px">
-            <div style="flex:1">
-                <label>MASTER FR</label>
-                <input type="range" id="probe_frame" oninput="updateProbeRange()">
-            </div>
-            <div style="flex:1">
-                <label title="Position within the Exposure window.">SMEAR POINT %</label>
-                <input type="range" id="probe_sub" min="0" max="1" step="0.01" value="0.5">
-            </div>
+        <div class="control-group">
+            <label>MASTER FR</label>
+            <input type="range" id="probe_frame" class="wide-slider" oninput="runTask('preview')">
+            <span id="val_probe_frame" class="val-label">1</span>
         </div>
-        <button class="exec-btn" style="margin-top:15px; width:100%" onclick="runTask('preview')">GENERATE PROBE CAPTURE</button>
+        <div class="control-group">
+            <label>SMEAR PT</label>
+            <input type="range" id="probe_sub" min="0" max="1" step="0.01" value="0.5" class="wide-slider" oninput="runTask('preview')">
+            <span id="val_probe_sub" class="val-label">0.5</span>
+        </div>
+        <button onclick="runTask('preview')" class="gen-btn">GENERATE PROBE CAPTURE</button>
     </div>
-    
-    <div class="probe-view" id="probe_container">
-        <img id="probe_img" style="width:100%; cursor:zoom-in; display:none" src="" onclick="window.open(this.src, '_blank')">
-        <span id="probe_label" style="color:#222">READY</span>
+
+    <div class="probe-view">
+        <img id="probe_img" src="/static/probe_live.jpg" alt="Probe Preview">
     </div>
 </div>
+
+<style>
+    .probe-deck { display: flex; gap: 40px; background: #111; padding: 20px; border-radius: 4px; align-items: center; border: 1px solid #222; }
+    .probe-controls { flex: 2; } 
+    .probe-view { flex: 1; display: flex; justify-content: flex-end; } 
+    #probe_img { max-width: 320px; width: 100%; border: 1px solid #333; display: none; border-radius: 2px; }
+    
+    .wide-slider { width: 100%; height: 12px; cursor: pointer; }
+    .control-group { display: flex; align-items: center; gap: 20px; margin-bottom: 15px; }
+    .control-group label { width: 90px; font-size: 0.75em; color: #666; font-weight: bold; }
+    .val-label { font-family: monospace; color: #0cf; width: 50px; text-align: right; font-weight: bold; }
+    .gen-btn { background: #0cf; color: #000; width: 100%; margin-top: 10px; font-size: 0.8em; padding: 10px; font-weight: bold; border-radius: 4px; }
+</style>
