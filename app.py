@@ -1,7 +1,7 @@
 """
 VOP Module:     app.py
-Version:        v0.5.0-api
-Description:    Phase V - Triple Keyframe Linear Interpolation.
+Version:        v0.5.1-api
+Description:    Phase V - Quadratic Bézier Curves & Parameter Toggles.
 """
 import subprocess, os, json, numpy as np, time, logging, glob, shutil, signal
 from flask import Flask, render_template, request, jsonify
@@ -25,14 +25,16 @@ for d in [WORKPRINT_DIR, CAM_MAG_DIR]: os.makedirs(d, exist_ok=True)
 
 DEFAULT_PARAMS = {
     "f1": 1, "f2": 24, "f3": 48,
-    "shutter_disc": 0.5, "fps": 24, "gain": 1.0, "fov": 45, "image": "vop_logo_mockup_400px.png",
+    "fps": 24, "gain": 1.0, "fov": 45, "image": "vop_logo_mockup_400px.png",
     "awb_r": 3.18, "awb_b": 1.45,
     "p1": "0.0,0.0,-5.0", "p2": "0.0,0.0,-3.5", "p3": "0.0,0.0,-2.0",
     "r1": "0.0,0.0,0.0", "r2": "0.0,0.0,0.0", "r3": "0.0,0.0,0.0",
     "s1": 1.0, "s2": 1.0, "s3": 1.0,
     "ph1": 0.5, "ph2": 0.5, "ph3": 0.5,
+    "sd1": 0.5, "sd2": 0.5, "sd3": 0.5,
     "c1_hex": "#ff0000", "c2_hex": "#00ff00", "c3_hex": "#0000ff",
-    "tiff_compression": "zip", "version": "0.5.0"
+    "p_mode": "linear", "r_mode": "linear", "s_mode": "linear",
+    "tiff_compression": "zip", "version": "0.5.1"
 }
 
 current_proc = None
@@ -55,34 +57,51 @@ progress_state["params"] = load_config()
 def lerp(v1, v2, t): return v1 + (v2 - v1) * t
 def lerp_vec(v1, v2, t): return v1 + (v2 - v1) * t
 
+def quadratic_bezier(p0, p1, p2, t):
+    """Standard 3-point Bézier formula: (1-t)^2*P0 + 2(1-t)t*P1 + t^2*P2"""
+    return (1-t)**2 * p0 + 2*(1-t)*t * p1 + t**2 * p2
+
 def hex_to_rgb(hex_str):
     h = hex_str.lstrip('#')
     return [int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)]
 
-def get_state_at_t(global_t, data):
-    """Calculates interpolated values between f1, f2, and f3."""
+def get_state_at_t(t, data):
+    """
+    t is 0.0 to 1.0 across the entire f1 -> f3 range.
+    Handles Linear vs Smooth toggles.
+    """
     f1, f2, f3 = int(data['f1']), int(data['f2']), int(data['f3'])
-    total_f = f3 - f1
-    # Find local frame index based on global_t
-    target_f = f1 + (global_t * total_f)
-
-    if target_f <= f2:
-        seg_t = (target_f - f1) / (f2 - f1) if f2 != f1 else 0
+    
+    # --- Helper for segment determination (Linear fallback) ---
+    if t <= (f2-f1)/(f3-f1) if f3!=f1 else 0:
+        seg_t = t / ((f2-f1)/(f3-f1)) if f2!=f1 else 0
         k_s, k_e = "1", "2"
     else:
-        seg_t = (target_f - f2) / (f3 - f2) if f3 != f2 else 0
+        seg_t = (t - (f2-f1)/(f3-f1)) / ((f3-f2)/(f3-f1)) if f3!=f2 else 0
         k_s, k_e = "2", "3"
-    
-    p_s = np.array([float(x) for x in data[f'p{k_s}'].split(',')])
-    p_e = np.array([float(x) for x in data[f'p{k_e}'].split(',')])
-    r_s = np.array([float(x) for x in data[f'r{k_s}'].split(',')])
-    r_e = np.array([float(x) for x in data[f'r{k_e}'].split(',')])
-    
+
+    def calc_param(key, is_vec=False):
+        v0, v1, v2 = data[f'{key}1'], data[f'{key}2'], data[f'{key}3']
+        if is_vec:
+            v0, v1, v2 = np.array([float(x) for x in v0.split(',')]), \
+                         np.array([float(x) for x in v1.split(',')]), \
+                         np.array([float(x) for x in v2.split(',')])
+        else:
+            v0, v1, v2 = float(v0), float(v1), float(v2)
+
+        if data.get(f'{key}_mode') == 'smooth':
+            return quadratic_bezier(v0, v1, v2, t)
+        else:
+            # Linear Piecewise
+            vs, ve = (v0, v1) if k_s == "1" else (v1, v2)
+            return lerp_vec(vs, ve, seg_t) if is_vec else lerp(vs, ve, seg_t)
+
     return {
-        "p": lerp_vec(p_s, p_e, seg_t),
-        "r": lerp_vec(r_s, r_e, seg_t),
-        "s": lerp(float(data[f's{k_s}']), float(data[f's{k_e}']), seg_t),
+        "p": calc_param('p', True),
+        "r": calc_param('r', True),
+        "s": calc_param('s'),
         "ph": lerp(float(data[f'ph{k_s}']), float(data[f'ph{k_e}']), seg_t),
+        "sd": lerp(float(data[f'sd{k_s}']), float(data[f'sd{k_e}']), seg_t),
         "c_s": hex_to_rgb(data[f'c{k_s}_hex']),
         "c_e": hex_to_rgb(data[f'c{k_e}_hex']),
         "seg_t": seg_t
@@ -130,16 +149,14 @@ def preview():
     target_f = int(data.get('probe_frame', f1))
     sub_t = float(data.get('probe_sub', 0.5))
     
-    # Global T calculation
     global_t_center = (target_f - f1) / (f3 - f1) if f3 != f1 else 0
     t_step = 1.0 / (f3 - f1) if f3 != f1 else 0
     
     state = get_state_at_t(global_t_center, data)
-    win_size = t_step * float(data['shutter_disc'])
+    win_size = t_step * state['sd']
     actual_t = lerp(global_t_center - (win_size * state['ph']), global_t_center + (win_size * (1.0 - state['ph'])), sub_t)
     
     probe_state = get_state_at_t(actual_t, data)
-    
     job = data.copy()
     job.update({
         "p_start": f"{probe_state['p'][0]},{probe_state['p'][1]},{probe_state['p'][2]}",
@@ -172,7 +189,7 @@ def execute_sequence():
         state = get_state_at_t(t_center, data)
         progress_state.update({"current": i+1, "eta": (total_seq-i)*(state['s']+4.5)})
 
-        win_size = t_step * float(data['shutter_disc'])
+        win_size = t_step * state['sd']
         t_s, t_e = t_center - (win_size * state['ph']), t_center + (win_size * (1.0 - state['ph']))
         
         s_state, e_state = get_state_at_t(t_s, data), get_state_at_t(t_e, data)

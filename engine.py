@@ -1,7 +1,7 @@
 """
 VOP Module:     engine.py
 Version:        v0.0.36-stable
-Description:    Phase V Engine. Segment-aware with hardened init.
+Description:    Phase V Engine. Hardened Pygame initialization.
 """
 import os, sys, json, time, argparse, subprocess, threading
 import numpy as np
@@ -33,6 +33,8 @@ void main() {
 }
 """
 
+def log_audit(msg): print(f"[{time.strftime('%H:%M:%S')}] AUDIT: {msg}")
+
 def save_frame_async(buffer_file, output_file, tiff_flag):
     try:
         with rawpy.imread(buffer_file) as raw:
@@ -41,7 +43,8 @@ def save_frame_async(buffer_file, output_file, tiff_flag):
             img = cv2.add(cv2.imread(output_file, cv2.IMREAD_UNCHANGED), img)
         cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
         os.remove(buffer_file)
-    except Exception as e: print(f"SAVE ERROR: {e}")
+        log_audit(f"Save complete: {os.path.basename(output_file)}")
+    except Exception as e: log_audit(f"SAVE ERROR: {e}")
 
 def run_vop_engine(job_path):
     with open(job_path, 'r') as f: job = json.load(f)
@@ -68,7 +71,7 @@ def run_vop_engine(job_path):
         proj = Matrix44.perspective_projection(float(job['fov']), WIDTH/HEIGHT, 0.1, 1000.0)
         model = Matrix44.from_translation(p1) * Matrix44.from_x_rotation(np.radians(r1[0])) * \
                 Matrix44.from_y_rotation(np.radians(r1[1])) * Matrix44.from_z_rotation(np.radians(r1[2]))
-        prog['filter_color'].write(np.array(color.get_perceptual_color(float(job['preview_p']), job['c_start'], job['c_end']), dtype='f4'))
+        prog['filter_color'].write(np.array(color.get_perceptual_color(float(job.get('preview_p', 0.5)), job['c_start'], job['c_end']), dtype='f4'))
         prog['mvp'].write((proj * model).astype('f4'))
         tex.use(); vao.render(); pygame.display.flip(); time.sleep(3)
     else:
@@ -91,7 +94,7 @@ def run_vop_engine(job_path):
                 tex.use(); vao.render()
             pygame.display.flip()
         ctx.finish(); cam_proc.wait()
-        threading.Thread(target=save_frame_async, args=(buffer_file, output_file, 1 if job.get('tiff_compression') == 'zip' else 8)).start()
+        threading.Thread(target=save_frame_async, args=(buffer_file, output_file, 8 if job.get('tiff_compression') == 'zip' else 1)).start()
     pygame.quit()
 
 if __name__ == "__main__":
