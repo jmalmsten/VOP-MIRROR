@@ -1,36 +1,36 @@
 """
 VOP Module:     camera_hardware.py
-Version:        v0.0.1
-Description:    Hardware Abstraction Layer for Pi Camera HQ (Rolling Shutter).
-                DO NOT MODIFY WITHOUT MANUAL AUDIT.
+Version:        v0.0.4
+Description:    Hardware Abstraction Layer for Pi Camera HQ.
 """
 import subprocess
 import time
 
-# Rolling Shutter Latency Offset (Handshake)
+# Offset to account for sensor warm-up/shutter prep
 LATENCY_OFFSET_MS = 900.0 
 
-def trigger_capture(buffer_file, total_ms, gain, awb_r, awb_b):
+def trigger_capture(buffer_file, total_ms, gain, awb_r, awb_b, res_str="4056x3040"):
     """
-    Constructs and fires the parallel camera process.
-    Uses Rule 4 & 5: --immediate --shutter --gain --awbgains --denoise off -n.
+    Triggers rpicam-still with specific resolution, shutter, and gain.
     """
     shutter_us = int(total_ms * 1000)
+    width, height = res_str.split('x')
+    
     cmd = [
         "rpicam-still",
         "-o", buffer_file,
-        "-r", # Raw output
+        "-r",
+        "--width", width,
+        "--height", height,
         "--shutter", str(shutter_us),
         "--gain", str(gain),
         "--awbgains", f"{awb_r},{awb_b}",
         "--immediate",
         "--denoise", "off",
-        "-n" # No preview
+        "-n"
     ]
-    
-    # Return the Popen object so the engine can manage the lifecycle
+    # Return the process handle so the engine can .wait() on it
     return subprocess.Popen(cmd)
 
 def wait_for_sensor_prime():
-    """Rule 6: Offset before the anchor = time.time()."""
     time.sleep(LATENCY_OFFSET_MS / 1000.0)

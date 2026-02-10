@@ -10,39 +10,39 @@
 
 <div class="vop-sheet">
     <div class="sheet-row header">
-        <div>#</div><div>FRAME</div><div>POS (X,Y,Z)</div><div>ROT (P,R,Y)</div><div>COLOR</div><div>SMR</div><div>SD</div><div>PH</div>
+        <div>#</div><div>FRAME</div><div>POS (X,Y,Z)</div><div>ROT (P,R,Y)</div><div>COLOR</div><div>EXP</div><div>SD</div><div>PH</div>
     </div>
 
     <div class="sheet-row">
         <div style="color:#333; font-weight: bold;">1</div>
         <div class="k-fr"><input id="f1" type="number" onchange="updateProbeRange()"><button class="snap-btn" onclick="jumpToFrame('f1')">GO</button></div>
-        <div><input id="p1" type="text"></div>
-        <div><input id="r1" type="text"></div>
+        <div><input id="p1" type="text" placeholder="0,0,-5"></div>
+        <div><input id="r1" type="text" placeholder="0,0,0"></div>
         <div><input id="c1_hex" type="color"></div>
-        <div><input id="s1" type="number" step="0.1"></div>
-        <div><input id="sd1" type="number" step="0.1"></div>
-        <div><input id="ph1" type="number" step="0.1"></div>
+        <div><input id="s1" type="number" step="0.1" value="1.0"></div>
+        <div><input id="sd1" type="number" step="0.1" value="1.0"></div>
+        <div><input id="ph1" type="number" step="0.1" value="0.5"></div>
     </div>
 
     <div class="sheet-row">
         <div style="color:#333; font-weight: bold;">2</div>
         <div class="k-fr"><input id="f2" type="number"><button class="snap-btn" onclick="jumpToFrame('f2')">GO</button></div>
-        <div><input id="p2" type="text"></div>
-        <div><input id="r2" type="text"></div>
+        <div><input id="p2" type="text" placeholder="0,0,-5"></div>
+        <div><input id="r2" type="text" placeholder="0,0,0"></div>
         <div><input id="c2_hex" type="color"></div>
-        <div><input id="s2" type="number" step="0.1"></div>
-        <div><input id="sd2" type="number" step="0.1"></div>
-        <div><input id="ph2" type="number" step="0.1"></div>
+        <div><input id="s2" type="number" step="0.1" value="1.0"></div>
+        <div><input id="sd2" type="number" step="0.1" value="1.0"></div>
+        <div><input id="ph2" type="number" step="0.1" value="0.5"></div>
     </div>
 
     <div class="sheet-row">
         <div style="color:#333; font-weight: bold;">3</div>
         <div class="k-fr"><input id="f3" type="number" onchange="updateProbeRange()"><button class="snap-btn" onclick="jumpToFrame('f3')">GO</button></div>
-        <div><input id="p3" type="text"></div>
-        <div><input id="r3" type="text"></div>
+        <div><input id="p3" type="text" placeholder="0,0,-5"></div>
+        <div><input id="r3" type="text" placeholder="0,0,0"></div>
         <div><input id="c3_hex" type="color"></div>
-        <div><input id="s3" type="number" step="0.1"></div>
-        <div><input id="sd3" type="number" step="0.1"></div>
-        <div><input id="ph3" type="number" step="0.1"></div>
+        <div><input id="s3" type="number" step="0.1" value="1.0"></div>
+        <div><input id="sd3" type="number" step="0.1" value="1.0"></div>
+        <div><input id="ph3" type="number" step="0.1" value="0.5"></div>
     </div>
 </div>
