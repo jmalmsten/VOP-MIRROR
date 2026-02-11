@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VOP v0.7.5</title>
+    <title>VOP v0.7.8</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
@@ -22,7 +22,7 @@
 <body>
     <div class="container">
         <header class="vop-header">
-            <h1>VOP <small style="color:#555">v0.7.5</small></h1>
+            <h1>VOP <small style="color:#555">v0.7.8</small></h1>
             <div id="sync_indicator" style="color:#0f0; font-size:0.8em; font-family: monospace;">● SYNCED</div>
         </header>
 
@@ -47,12 +47,18 @@
             </div>
 
             <div class="group-box">
-                <div class="group-title">Job Quality</div>
+                <div class="group-title">Process Logic</div>
                 <div class="input-row">
                     <div class="c-box"><label>RESOLUTION</label>
                         <select id="cam_res">
                             <option value="4056x3040">Full (4K)</option>
                             <option value="2028x1520" selected>Binned (2K)</option>
+                        </select>
+                    </div>
+                    <div class="c-box"><label>MONO MODE</label>
+                        <select id="mono_mode">
+                            <option value="off">RGB Output</option>
+                            <option value="on">Mono Bypass</option>
                         </select>
                     </div>
                     <div class="c-box"><label>TIFF COMP</label>

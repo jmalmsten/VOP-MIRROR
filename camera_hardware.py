@@ -3,15 +3,14 @@ VOP Module:     camera_hardware.py
 Version:        v0.0.4
 Description:    Hardware Abstraction Layer for Pi Camera HQ.
 """
-import subprocess
-import time
+import subprocess, time
 
-# Offset to account for sensor warm-up/shutter prep
+# Offset to account for sensor warm-up
 LATENCY_OFFSET_MS = 900.0 
 
 def trigger_capture(buffer_file, total_ms, gain, awb_r, awb_b, res_str="4056x3040"):
     """
-    Triggers rpicam-still with specific resolution, shutter, and gain.
+    Triggers rpicam-still with specific resolution and shutter.
     """
     shutter_us = int(total_ms * 1000)
     width, height = res_str.split('x')
@@ -29,7 +28,6 @@ def trigger_capture(buffer_file, total_ms, gain, awb_r, awb_b, res_str="4056x304
         "--denoise", "off",
         "-n"
     ]
-    # Return the process handle so the engine can .wait() on it
     return subprocess.Popen(cmd)
 
 def wait_for_sensor_prime():
