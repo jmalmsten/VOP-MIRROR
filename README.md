@@ -59,7 +59,7 @@ Phase Designation Key Objective Status
                     to simulate optical gel filters. (Complete)
     Phase IV    -   The Dual-Key Transition the UI to accept two keyframes (Start/End) and generate a sequence of 
                     intermediary frames. (Complete)
-    Phase V     -   Three keyframe version to get b-splines and curved transformations. (Planned)
+    Phase V     -   Three keyframe version to get b-splines and curved transformations. (Complete)
     Phase VI    -   Arbitrary Sheet Expand to a full Exposure Sheet with an unlimited number of keyframes with "repeat" and 
                     "Hold" logic. Also expand the keyframing in the GUI so there's only one row per keyframe. Horizontal 
                     scrolling will be necessary. (Planned)
