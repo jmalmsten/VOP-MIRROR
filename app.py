@@ -1,11 +1,11 @@
 """
 VOP Module:     app.py
-Version:        v0.8.0
-Description:    Phase V Orchestrator. Accurate smear previews and heartbeat sync.
+Version:        v0.9.8
+Description:    Phase V Orchestrator. Fixed N-Key sequence execution crash.
 """
 import subprocess, os, json, time, glob, shutil, threading, logging
 from flask import Flask, render_template, request, jsonify, send_from_directory
-import interpolator
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 log = logging.getLogger('werkzeug')
@@ -15,43 +15,45 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENGINE_PATH = os.path.join(BASE_DIR, "engine.py")
 CURRENT_FILE = os.path.join(BASE_DIR, "current_job.json")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
+PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
 WORKPRINT_DIR = os.path.join(BASE_DIR, "WorkPrints")
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
 progress_state = {"current": 0, "total": 0, "msg": "Idle", "status": "idle", "eta": 0, "disk": "0 GB", "latest_wp": ""}
 
 def init_state():
-    for d in [CAM_MAG_DIR, WORKPRINT_DIR]: os.makedirs(d, exist_ok=True)
+    for d in [CAM_MAG_DIR, PROJ_MAG_DIR, WORKPRINT_DIR]: os.makedirs(d, exist_ok=True)
     if not os.path.exists(CURRENT_FILE):
-        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.8.0", "last_sync": 0}, f)
+        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.9.8", "last_sync": 0}, f)
 
 init_state()
 
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 def run_job_thread(data):
     global progress_state
-    f1, f3 = int(data['f1']), int(data['f3'])
-    total = (f3 - f1) + 1
+    
+    # --- DYNAMIC RANGE FINDER ---
+    # Scans for all keys like 'f1', 'f4', 'f99', converts to int, finds range.
+    frames = []
+    for k, v in data.items():
+        if k.startswith('f') and k[1:].isdigit() and str(v).strip():
+            try: frames.append(int(v))
+            except: pass
+    
+    if not frames:
+        print("CRITICAL: No valid frames found in job data.")
+        return
+
+    f_start, f_end = min(frames), max(frames)
+    total = (f_end - f_start) + 1
+    
     progress_state.update({"current": 0, "total": total, "status": "running", "msg": "Exposing..."})
     
     if os.path.exists("/tmp/vop_heartbeat"): os.remove("/tmp/vop_heartbeat")
     
-    sequence = []
-    for i in range(total):
-        t_c = i / (total - 1) if total > 1 else 0
-        t_step = 1.0 / (total - 1) if total > 1 else 0
-        st = interpolator.get_state_at_t(t_c, data)
-        # Calculate precise smear window
-        t_s = t_c - (t_step * st['sd'] * st['ph'])
-        t_e = t_c + (t_step * st['sd'] * (1.0 - st['ph']))
-        s_st, e_st = interpolator.get_state_at_t(t_s, data), interpolator.get_state_at_t(t_e, data)
-        sequence.append({
-            "p_start": ",".join(map(str, s_st['p'])), "p_end": ",".join(map(str, e_st['p'])),
-            "r_start": ",".join(map(str, s_st['r'])), "r_end": ",".join(map(str, e_st['r'])),
-            "c_start": s_st['c'].tolist(), "c_end": e_st['c'].tolist(),
-            "cg_start": s_st['cg'].tolist(), "cg_end": e_st['cg'].tolist(),
-            "smear": st['s'], "frame": f1 + i
-        })
-    
-    with open("/tmp/vop_job.json", 'w') as f: json.dump({**data, "sequence": sequence}, f)
+    with open("/tmp/vop_job.json", 'w') as f: json.dump(data, f)
     proc = subprocess.Popen(["python3", ENGINE_PATH, "--job", "/tmp/vop_job.json"])
     start_time = time.time()
     
@@ -61,8 +63,9 @@ def run_job_thread(data):
             processed += 1
             os.remove("/tmp/vop_heartbeat")
             progress_state["current"] = processed
-            avg = (time.time() - start_time) / processed
-            progress_state["eta"] = int(avg * (total - processed))
+            if processed > 0:
+                avg = (time.time() - start_time) / processed
+                progress_state["eta"] = int(avg * (total - processed))
         time.sleep(0.5)
 
     if len(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif"))) > 0:
@@ -72,32 +75,18 @@ def run_job_thread(data):
                         "-vf", "scale=2048:1536,format=yuv420p", "-c:v", "libx264", "-crf", "23", os.path.join(WORKPRINT_DIR, wp_name)])
         progress_state["latest_wp"] = wp_name
 
-    progress_state.update({"status": "idle", "msg": "COMPLETE", "current": total})
+    progress_state.update({"status": "idle", "msg": "COMPLETE", "current": total, "eta": 0})
 
-@app.route('/preview', methods=['POST'])
-def preview():
-    if progress_state["status"] == "running": return jsonify({"status": "BUSY"}), 423
-    data = request.json
-    f1, f3 = int(data['f1']), int(data['f3'])
-    t_c = (int(data['probe_frame']) - f1) / (f3 - f1) if f3 != f1 else 0
-    t_step = 1.0 / (f3 - f1) if f3 != f1 else 0
-    st = interpolator.get_state_at_t(t_c, data)
-    
-    # Smear Range for Cam Preview
-    t_s = t_c - (t_step * st['sd'] * st['ph'])
-    t_e = t_c + (t_step * st['sd'] * (1.0 - st['ph']))
-    s_st, e_st = interpolator.get_state_at_t(t_s, data), interpolator.get_state_at_t(t_e, data)
-    
-    job = {**data, 
-           "p_start": ",".join(map(str, s_st['p'])), "p_end": ",".join(map(str, e_st['p'])),
-           "r_start": ",".join(map(str, s_st['r'])), "r_end": ",".join(map(str, e_st['r'])),
-           "c_start": s_st['c'].tolist(), "c_end": e_st['c'].tolist(),
-           "cg_start": s_st['cg'].tolist(), "cg_end": e_st['cg'].tolist(),
-           "smear": st['s'], "type": data.get('type', 'preview')}
-    
-    with open("/tmp/vop_job.json", 'w') as f: json.dump(job, f)
-    subprocess.run(["python3", ENGINE_PATH, "--job", "/tmp/vop_job.json"])
-    return jsonify({"status": "SUCCESS"})
+@app.route('/upload_target', methods=['POST'])
+def upload_target():
+    if 'file' not in request.files: return jsonify({"status": "NO FILE"}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({"status": "NO NAME"}), 400
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(PROJ_MAG_DIR, filename))
+        return jsonify({"status": "SUCCESS", "filename": filename})
+    return jsonify({"status": "BAD TYPE"}), 400
 
 @app.route('/status')
 def get_status():
@@ -105,6 +94,15 @@ def get_status():
     progress_state["disk"] = f"{free_gb:.1f} GB"
     with open(CURRENT_FILE, 'r') as f: params = json.load(f)
     return jsonify({**progress_state, "params": params})
+
+@app.route('/preview', methods=['POST'])
+def preview():
+    if progress_state["status"] == "running": return jsonify({"status": "BUSY"}), 423
+    data = request.json
+    with open(CURRENT_FILE, 'w') as f: json.dump(data, f, indent=4)
+    with open("/tmp/vop_job.json", 'w') as f: json.dump(data, f)
+    subprocess.run(["python3", ENGINE_PATH, "--job", "/tmp/vop_job.json"])
+    return jsonify({"status": "SUCCESS"})
 
 @app.route('/sync_state', methods=['POST'])
 def sync_state():

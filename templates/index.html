@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VOP v0.7.8</title>
+    <title>VOP v0.9.4</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
@@ -16,13 +16,18 @@
         .c-box { display: flex; flex-direction: column; }
         .c-box label { font-size: 0.6em; color: #888; margin-bottom: 4px; }
         .c-box input, .c-box select { background: #222; border: 1px solid #444; color: #0cf; padding: 4px; border-radius: 3px; font-size: 0.85em; }
+        
+        .upload-cluster { display: grid; grid-template-columns: 1fr 80px; gap: 10px; align-items: end; }
+        .upload-btn { background: #222; border: 1px solid #444; color: #ccc; cursor: pointer; padding: 5px; border-radius: 3px; font-size: 0.75em; height: 26px; }
+        .upload-btn:hover { background: #0cf; color: #000; }
+        
         hr { border: 0; border-top: 1px solid #333; margin: 25px 0; }
     </style>
 </head>
 <body>
     <div class="container">
         <header class="vop-header">
-            <h1>VOP <small style="color:#555">v0.7.8</small></h1>
+            <h1>VOP <small style="color:#555">v0.9.4</small></h1>
             <div id="sync_indicator" style="color:#0f0; font-size:0.8em; font-family: monospace;">● SYNCED</div>
         </header>
 
@@ -41,8 +46,14 @@
                     <div class="c-box"><label>AWB R</label><input id="awb_r" type="number" step="0.01"></div>
                     <div class="c-box"><label>AWB B</label><input id="awb_b" type="number" step="0.01"></div>
                 </div>
-                <div class="c-box" style="margin-top:10px;">
-                    <label>PROJ IMAGE PATH</label><input id="image" type="text">
+                <div class="upload-cluster" style="margin-top:10px;">
+                    <div class="c-box">
+                        <label>PROJ IMAGE PATH</label><input id="image" type="text">
+                    </div>
+                    <div>
+                        <input type="file" id="file_input" style="display: none;" accept=".png,.jpg,.jpeg">
+                        <button class="upload-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
+                    </div>
                 </div>
             </div>
 
@@ -64,11 +75,6 @@
                     <div class="c-box"><label>TIFF COMP</label>
                         <select id="tiff_compression"><option value="none">None</option><option value="zip">ZIP</option></select>
                     </div>
-                </div>
-                <div class="input-row" style="margin-top:10px;">
-                    <div class="c-box"><label>POS MODE</label><select id="p_mode"><option>smooth</option><option>linear</option></select></div>
-                    <div class="c-box"><label>ROT MODE</label><select id="r_mode"><option>smooth</option><option>linear</option></select></div>
-                    <div class="c-box"><label>CLR MODE</label><select id="c_mode"><option>smooth</option><option>linear</option></select></div>
                 </div>
             </div>
         </div>
