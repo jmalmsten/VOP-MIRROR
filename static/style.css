@@ -66,7 +66,10 @@ body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; pad
 
 .vop-sheet { width: 100%; border-collapse: collapse; font-size: 0.85em; }
 
-.sheet-row { display: grid; grid-template-columns: 20px 50px 35px 20px 1fr 1fr 30px 30px 40px 40px 40px 20px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
+/* Grid columns: #, Frame, Mode, CRN, STP, Pos, Rot, ProjGel, CamGel, Exp, SD, Ph, Del */
+/* Added 35px for STP column */
+.sheet-row { display: grid; grid-template-columns: 20px 50px 35px 20px 35px 1fr 1fr 30px 30px 40px 40px 40px 20px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
+
 .sheet-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
 .sheet-row input[type="text"], .sheet-row input[type="number"], .sheet-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 2px; width: 100%; border-radius: 2px; font-family: monospace; font-size: 0.9em; }
 .sheet-row input[type="checkbox"] { width: auto; margin: 0 auto; display: block; }

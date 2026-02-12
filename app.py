@@ -1,7 +1,7 @@
 """
 VOP Module:     app.py
-Version:        v0.9.9
-Description:    Phase V Orchestrator. Fixes Panic/Workprint bug.
+Version:        v0.9.14
+Description:    Video Baking & Optical Printer Logic.
 """
 import subprocess, os, json, time, glob, shutil, threading, logging
 from flask import Flask, render_template, request, jsonify, send_from_directory
@@ -17,14 +17,16 @@ CURRENT_FILE = os.path.join(BASE_DIR, "current_job.json")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
 WORKPRINT_DIR = os.path.join(BASE_DIR, "WorkPrints")
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+# Expanded for video
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'tif', 'tiff', 'mp4', 'mov', 'mkv', 'avi'}
 
 progress_state = {"current": 0, "total": 0, "msg": "Idle", "status": "idle", "eta": 0, "disk": "0 GB", "latest_wp": ""}
 
 def init_state():
     for d in [CAM_MAG_DIR, PROJ_MAG_DIR, WORKPRINT_DIR]: os.makedirs(d, exist_ok=True)
     if not os.path.exists(CURRENT_FILE):
-        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.9.9", "last_sync": 0}, f)
+        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.9.14", "last_sync": 0}, f)
 
 init_state()
 
@@ -34,6 +36,7 @@ def allowed_file(filename):
 def run_job_thread(data):
     global progress_state
     
+    # Track-based range finding
     frames = []
     for k, v in data.items():
         if k.startswith('f') and k[1:].isdigit() and str(v).strip():
@@ -66,8 +69,6 @@ def run_job_thread(data):
                 progress_state["eta"] = int(avg * (total - processed))
         time.sleep(0.5)
 
-    # --- PANIC FIX ---
-    # Only generate workprint if process exited cleanly (0)
     if proc.returncode == 0:
         if len(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif"))) > 0:
             progress_state["msg"] = "Workprinting..."
@@ -77,7 +78,6 @@ def run_job_thread(data):
             progress_state["latest_wp"] = wp_name
             progress_state.update({"status": "idle", "msg": "COMPLETE", "current": total, "eta": 0})
     else:
-        # If killed or crashed
         progress_state.update({"status": "idle", "msg": "ABORTED", "current": 0, "eta": 0})
 
 @app.route('/upload_target', methods=['POST'])
@@ -85,10 +85,43 @@ def upload_target():
     if 'file' not in request.files: return jsonify({"status": "NO FILE"}), 400
     file = request.files['file']
     if file.filename == '': return jsonify({"status": "NO NAME"}), 400
+    
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
-        file.save(os.path.join(PROJ_MAG_DIR, filename))
-        return jsonify({"status": "SUCCESS", "filename": filename})
+        ext = filename.rsplit('.', 1)[1].lower()
+        
+        # 1. NUKE MAG
+        for f in os.listdir(PROJ_MAG_DIR):
+            os.remove(os.path.join(PROJ_MAG_DIR, f))
+        
+        save_path = os.path.join(PROJ_MAG_DIR, filename)
+        file.save(save_path)
+        
+        final_target = filename # Default to the file itself
+        
+        # 2. VIDEO BAKING (If video)
+        if ext in ['mp4', 'mov', 'mkv', 'avi']:
+            progress_state["status"] = "busy"
+            progress_state["msg"] = "Baking Video..."
+            
+            # Output pattern: frame_0001.tif
+            # We use TIFF (LZW or None) for speed/quality balance
+            subprocess.run([
+                "ffmpeg", "-i", save_path, 
+                "-compression_algo", "lzw", 
+                os.path.join(PROJ_MAG_DIR, "frame_%04d.tif")
+            ])
+            
+            # Remove original video to save space/confusion? 
+            # Let's keep it for reference, but target the sequence.
+            # os.remove(save_path) 
+            
+            final_target = "SEQUENCE" # Signal to UI/Engine that we are in Sequence Mode
+            
+            progress_state["status"] = "idle"
+            progress_state["msg"] = "Ready"
+
+        return jsonify({"status": "SUCCESS", "filename": final_target})
     return jsonify({"status": "BAD TYPE"}), 400
 
 @app.route('/status')
@@ -126,7 +159,6 @@ def execute():
 def panic():
     subprocess.run(["pkill", "-9", "-f", "engine.py"])
     subprocess.run(["pkill", "-9", "-f", "rpicam-still"])
-    # Status update handled by polling loop in thread
     return jsonify({"status": "ABORTED"})
 
 @app.route('/nuke_mag', methods=['POST'])
