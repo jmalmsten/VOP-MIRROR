@@ -1,45 +1,92 @@
-/* VOP Style Sheet: static/style.css - v0.0.6 */
-body { background: #050505; color: #aaa; font-family: 'Courier New', monospace; margin: 0; overflow-x: hidden; }
+/* VOP Module: style.css - v0.0.7 */
+body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
 
-.top-deck { 
-    display: flex; gap: 20px; padding: 20px; 
-    background: #000; border-bottom: 2px solid #333; 
-    height: 280px; box-sizing: border-box; 
+/* Main Grid: 2 Columns, Auto Rows */
+.container { 
+    max-width: 1600px; 
+    margin: 0 auto; 
+    display: grid; 
+    grid-template-columns: 1fr 380px; /* Slightly wider sidebar */
+    gap: 20px; 
 }
 
-.probe-deck { flex: 2; display: flex; gap: 20px; border-right: 1px solid #222; }
-.probe-view { 
-    width: 320px; height: 240px; background: #111; border: 1px solid #333; 
-    display: flex; align-items: center; justify-content: center; overflow: hidden; 
+.vop-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
+
+/* --- Top Left: Preview --- */
+/* Reduced height from 80vh to 55vh */
+.preview-area { 
+    background: #000; 
+    border: 1px solid #333; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    min-height: 400px; 
+    height: 55vh; 
+    overflow: hidden; 
+    position: relative; 
 }
-/* Prevents the probe image from breaking the layout */
-#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+.preview-overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; font-size: 0.8em; pointer-events: none; }
 
-.control-deck { flex: 1.2; display: flex; flex-direction: column; gap: 8px; }
-
-/* 3-Column Constants - Balanced for Mobile/Desktop */
-.constants-zone {
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 15px; padding: 20px; background: #0a0a0a; border-bottom: 1px solid #222;
+/* --- Top Right: Controls --- */
+/* Matches Preview height, scrollable if needed */
+.controls-area { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 15px; 
+    height: 55vh; 
+    overflow-y: auto; 
+    padding-right: 5px; 
 }
 
-/* Dark mode inputs: No more blinding white */
-input, select { 
-    background: #111; border: 1px solid #444; color: #eee; 
-    padding: 8px; width: 100%; box-sizing: border-box; 
-    font-family: inherit; font-size: 0.85em;
+/* --- Bottom: Exposure Sheet --- */
+/* Spans full width */
+.sheet-section {
+    grid-column: 1 / -1;
+    background: #111; 
+    padding: 15px; 
+    border-radius: 4px; 
+    border: 1px solid #222;
+    min-height: 300px;
 }
-input:focus { border-color: #0cf; outline: none; }
 
-.progress-bar { height: 14px; background: #111; width: 100%; border: 1px solid #333; margin-top: 5px; }
-.progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.5s ease-out; }
+/* --- UI Elements --- */
+.group-box { background: #151515; padding: 15px; border-radius: 4px; border: 1px solid #222; }
+.group-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; }
 
-.exec-btn { background: #004444; color: #00ffff; border: 1px solid #006666; padding: 12px; font-weight: bold; cursor: pointer; }
-.panic-btn { background: #400; color: #f66; border: 1px solid #622; padding: 12px; cursor: pointer; font-weight: bold; }
-.nuke-btn { background: #200; color: #f99; border: 1px solid #400; cursor: pointer; font-size: 0.8em; }
+.input-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px; }
+.c-box { display: flex; flex-direction: column; }
+.c-box label { font-size: 0.6em; color: #888; margin-bottom: 4px; }
+.c-box input, .c-box select { background: #222; border: 1px solid #444; color: #0cf; padding: 4px; border-radius: 3px; font-size: 0.85em; }
+.c-box input[type="color"] { padding: 0; height: 24px; width: 100%; cursor: pointer; }
 
-.key-row-1 { background: rgba(255, 50, 50, 0.05); }
-.key-row-2 { background: rgba(50, 255, 50, 0.05); }
-.key-row-3 { background: rgba(50, 50, 255, 0.05); }
+.upload-cluster { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: end; }
+.upload-btn { background: #222; border: 1px solid #444; color: #ccc; cursor: pointer; padding: 0; border-radius: 3px; font-size: 0.75em; height: 24px; line-height: 24px; }
+.upload-btn:hover { background: #0cf; color: #000; }
 
-label { font-size: 0.65em; color: #555; margin-bottom: 2px; display: block; }
+.vop-sheet { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+
+.sheet-row { display: grid; grid-template-columns: 20px 50px 35px 20px 1fr 1fr 30px 30px 40px 40px 40px 20px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
+.sheet-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
+.sheet-row input[type="text"], .sheet-row input[type="number"], .sheet-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 2px; width: 100%; border-radius: 2px; font-family: monospace; font-size: 0.9em; }
+.sheet-row input[type="checkbox"] { width: auto; margin: 0 auto; display: block; }
+
+.row-index { color: #333; font-weight: bold; text-align: center; }
+.row-center { text-align: center; }
+
+.snap-btn { background: #222; color: #0cf; padding: 1px 4px; font-size: 0.7em; border: 1px solid #444; border-radius: 3px; cursor: pointer; }
+.snap-btn:hover { background: #0cf; color: #000; }
+.del-btn { background: #300; color: #f44; border: 1px solid #500; border-radius: 3px; cursor: pointer; font-weight: bold; padding: 0 4px; font-size: 0.8em; }
+.del-btn:hover { background: #f00; color: #fff; }
+.k-fr { display: flex; gap: 2px; align-items: center; }
+
+.add-row { margin-top: 10px; text-align: center; }
+.add-btn { background: #111; border: 1px solid #333; color: #666; width: 100%; padding: 6px; cursor: pointer; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+.add-btn:hover { background: #222; color: #fff; border-color: #555; }
+
+.status-bar { grid-column: 1 / -1; background: #1a1a1a; border: 1px solid #333; padding: 5px 10px; font-size: 0.8em; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.progress-container { flex-grow: 1; margin: 0 15px; background: #000; height: 6px; border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.3s; }
+
+.probe-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.action-btn { background: #0cf; color: #000; border: none; padding: 8px; border-radius: 3px; cursor: pointer; font-weight: bold; text-

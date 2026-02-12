@@ -1,7 +1,7 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.65-stable
-Description:    Fixed sequence execution for Track-Based Interpolator.
+Version:        v0.0.67-stable
+Description:    Coordinate Normalization + Auto-Aspect Ratio.
 """
 import os, sys, json, time, argparse, subprocess, threading
 import numpy as np
@@ -43,7 +43,6 @@ def run_vop_engine(job_path):
     proj_mag_dir = os.path.join(base_path, "ProjMag")
     static_dir = os.path.join(base_path, "static")
 
-    # Initialize Timeline
     timeline = interpolator.Timeline(job_data)
 
     pygame.init()
@@ -78,10 +77,21 @@ def run_vop_engine(job_path):
     vbo = ctx.buffer(np.array([-1,-1,0,0,0, 1,-1,0,1,0, -1,1,0,0,1, 1,1,0,1,1], dtype='f4'))
     vao = ctx.vertex_array(prog, [(vbo, '3f 2f', 'in_position', 'in_texcoord')], mode=moderngl.TRIANGLE_STRIP)
 
+    # --- IMAGE LOADING & GLOBAL SCALING ---
     img_path = os.path.join(proj_mag_dir, job_data['image'])
-    img_s = pygame.image.load(img_path).convert_alpha() if os.path.exists(img_path) else pygame.Surface((10,10))
+    if os.path.exists(img_path):
+        img_s = pygame.image.load(img_path).convert_alpha()
+        iw, ih = img_s.get_size()
+        aspect_ratio = float(iw) / float(ih) if ih > 0 else 1.0
+    else:
+        img_s = pygame.Surface((10,10))
+        aspect_ratio = 1.0
+
     tex = ctx.texture(img_s.get_size(), 4, pygame.image.tostring(img_s, "RGBA", True))
     
+    # Global World Scale (Default 1.0)
+    world_scale = float(job_data.get('coord_scale', 1.0))
+
     mono_active = (job_data.get('mono_mode') == 'on')
     prog['mono_mode'].value = mono_active
     res_str = job_data.get('cam_res', '2028x1520')
@@ -105,10 +115,23 @@ def run_vop_engine(job_path):
             st = timeline.get_state(t_frame)
             
             proj = Matrix44.perspective_projection(float(job_data['fov']), WIDTH/HEIGHT, 0.1, 1000.0)
+            
+            # --- APPLY SCALING ---
+            # 1. Aspect Ratio (X only)
+            # 2. World Scale (All axes)
+            # Combine them: Scale = [AR * WS, 1.0 * WS, 1.0 * WS]
+            s_x = aspect_ratio * world_scale
+            s_y = world_scale
+            s_z = world_scale
+            
+            scale_mat = Matrix44.from_scale([s_x, s_y, s_z])
+            
             model = Matrix44.from_translation(st['p']) * \
                     Matrix44.from_x_rotation(np.radians(st['r'][0])) * \
                     Matrix44.from_y_rotation(np.radians(st['r'][1])) * \
-                    Matrix44.from_z_rotation(np.radians(st['r'][2]))
+                    Matrix44.from_z_rotation(np.radians(st['r'][2])) * \
+                    scale_mat 
+            
             mvp = (proj * model).astype('f4')
             path_cache.append({'mvp': mvp, 'c': st['c'].astype('f4')})
         
@@ -155,10 +178,18 @@ def run_vop_engine(job_path):
         st = timeline.get_state(frame_t)
         ctx.clear(0,0,0); ctx.viewport = (0, 0, WIDTH, HEIGHT)
         proj = Matrix44.perspective_projection(float(job_data['fov']), WIDTH/HEIGHT, 0.1, 1000.0)
+        
+        s_x = aspect_ratio * world_scale
+        s_y = world_scale
+        s_z = world_scale
+        scale_mat = Matrix44.from_scale([s_x, s_y, s_z])
+        
         model = Matrix44.from_translation(st['p']) * \
                 Matrix44.from_x_rotation(np.radians(st['r'][0])) * \
                 Matrix44.from_y_rotation(np.radians(st['r'][1])) * \
-                Matrix44.from_z_rotation(np.radians(st['r'][2]))
+                Matrix44.from_z_rotation(np.radians(st['r'][2])) * \
+                scale_mat
+        
         prog['filter_color'].write(st['c'].astype('f4'))
         prog['mvp'].write((proj * model).astype('f4'))
         tex.use(); vao.render()
@@ -170,12 +201,9 @@ def run_vop_engine(job_path):
         execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
 
     else:
-        # Sequence Execution
+        # Sequence
         if os.path.exists("/tmp/vop_heartbeat"): os.remove("/tmp/vop_heartbeat")
-        
-        # DYNAMIC RANGE LOGIC (Updated for Track-Based Timeline)
         all_frames = []
-        # timeline.tracks is a dict of lists: {'p': [{'f': 1, ...}], 'r': ...}
         for track_keys in timeline.tracks.values():
             for k in track_keys:
                 all_frames.append(k['f'])

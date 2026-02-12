@@ -1,4 +1,4 @@
-/* VOP Module: main.js - v0.0.25 */
+/* VOP Module: main.js - v0.0.29 */
 let last_sync_ts = 0;
 let last_known_state_str = "";
 let isFirstLoad = true;
@@ -12,10 +12,26 @@ function formatTime(seconds) {
     return [hrs, mins, secs].map(v => v < 10 ? "0" + v : v).join(":");
 }
 
+// --- World Scale Logic ---
+function calcFitScale() {
+    const fovVal = parseFloat(document.getElementById('fov').value);
+    const scaleInput = document.getElementById('coord_scale');
+    if (!fovVal) return;
+
+    // Scale = tan(FOV/2)
+    // This scales the object DOWN so that at Z=-1 it appears to fit the screen
+    const halfFovRad = (fovVal / 2) * (Math.PI / 180);
+    const s = Math.tan(halfFovRad);
+    
+    scaleInput.value = s.toFixed(4);
+    runTask('preview');
+}
+
+// --- Sheet Generation ---
 function createRowHTML(i) {
     return `
         <div class="sheet-row" id="row_${i}">
-            <div style="color:#333; font-weight: bold;">${i}</div>
+            <div class="row-index">${i}</div>
             <div class="k-fr">
                 <input id="f${i}" type="number" onchange="updateProbeRange()">
                 <button class="snap-btn" onclick="jumpToFrame('f${i}')">GO</button>
@@ -28,7 +44,7 @@ function createRowHTML(i) {
                     <option value="O">Out</option>
                 </select>
             </div>
-            <div style="text-align:center;">
+            <div class="row-center">
                 <input id="crn${i}" type="checkbox" title="Corner (Sharp Turn)">
             </div>
             <div><input id="p${i}" type="text" value="0,0,-10"></div>
@@ -122,6 +138,7 @@ function applyServerSettings(params) {
             }
         }
     }
+    
     last_sync_ts = params.last_sync || 0;
     last_known_state_str = getComparable(getUISettings());
     updateProbeRange();
@@ -192,7 +209,6 @@ async function runTask(type) {
 function panic() { fetch('/panic', {method:'POST'}); }
 function nukeMag() { if(confirm("NUKE TIFFS?")) fetch('/nuke_mag', {method:'POST'}); }
 
-// --- File Upload Logic ---
 const fileInput = document.getElementById('file_input');
 if(fileInput) {
     fileInput.addEventListener('change', async function() {
@@ -209,7 +225,7 @@ if(fileInput) {
                 if(resp.ok) {
                     const data = await resp.json();
                     document.getElementById('image').value = data.filename;
-                    runTask('preview'); // Auto-update preview with new image
+                    runTask('preview'); 
                 } else {
                     alert("Upload Failed");
                 }
