@@ -1,7 +1,7 @@
 """
 VOP Module:     interpolator.py
-Version:        v0.1.3
-Description:    Catmull-Rom Splines. Fixed crash on empty frame inputs.
+Version:        v0.1.5
+Description:    Independent Track Interpolation. Allows bridging gaps per parameter.
 """
 import numpy as np
 
@@ -11,7 +11,7 @@ def hex_to_rgb(h):
 
 def lerp(a, b, t): return a + (b - a) * t
 
-# --- Easing ---
+# --- Easing Functions ---
 def ease_smooth(t): 
     ts = max(0, min(1, t))
     return ts * ts * (3 - 2 * ts)
@@ -37,80 +37,125 @@ def catmull_rom(p0, p1, p2, p3, t):
 
 class Timeline:
     def __init__(self, data):
-        self.keys = []
-        for k in data.keys():
-            # Check for keys starting with 'f' (f1, f2...)
-            if k.startswith('f') and k[1:].isdigit():
-                # SAFETY CHECK: Skip if value is empty or not a number
-                val = str(data[k]).strip()
-                if not val: continue
-                
-                idx = k[1:]
-                if f'p{idx}' in data:
-                    self.keys.append({
-                        'f': int(val),
-                        'p': np.array([float(x) for x in data[f'p{idx}'].split(',')]),
-                        'r': np.array([float(x) for x in data[f'r{idx}'].split(',')]) * 360.0,
-                        'c': hex_to_rgb(data[f'c{idx}_hex']),
-                        'cg': hex_to_rgb(data[f'cg{idx}_hex']),
-                        's': float(data[f's{idx}']),
-                        'sd': float(data[f'sd{idx}']),
-                        'ph': float(data[f'ph{idx}']),
-                        'mode': data.get(f'm{idx}', 'S'),
-                        'crn': data.get(f'crn{idx}') == 'true'
-                    })
-        self.keys.sort(key=lambda x: x['f'])
-
-    def get_state(self, frame_float):
-        if not self.keys: return {}
-        if len(self.keys) == 1:
-            k = self.keys[0]
-            return {'p': k['p'], 'r': k['r'], 'c': k['c'], 'cg': k['cg'], 's': k['s'], 'sd': k['sd'], 'ph': k['ph']}
-
-        # Find active segment (A -> B)
-        idx = 0
-        while idx < len(self.keys) - 1 and frame_float > self.keys[idx+1]['f']:
-            idx += 1
-        idx = min(idx, len(self.keys) - 2)
+        # We now store independent tracks
+        # Each track is a list of dicts: {'f': frame, 'val': value, 'mode': easing, 'crn': corner_bool}
+        self.tracks = {
+            'p': [], 'r': [], 'c': [], 'cg': [], 
+            's': [], 'sd': [], 'ph': []
+        }
         
-        kA = self.keys[idx]
-        kB = self.keys[idx+1]
+        # Parsers for each data type
+        parsers = {
+            'p': lambda x: np.array([float(n) for n in x.split(',')]),
+            'r': lambda x: np.array([float(n) for n in x.split(',')]) * 360.0, # 0-1 range to degrees
+            'c': lambda x: hex_to_rgb(x),
+            'cg': lambda x: hex_to_rgb(x),
+            's': float,
+            'sd': float,
+            'ph': float
+        }
+
+        # 1. Scan all input keys to find Frame Numbers
+        # We need to iterate the JSON keys to find any f1, f2, f99...
+        found_indices = set()
+        for k in data.keys():
+            if k.startswith('f') and k[1:].isdigit():
+                found_indices.add(k[1:])
+        
+        # 2. Build Tracks
+        for idx in found_indices:
+            frame_str = str(data.get(f'f{idx}', '')).strip()
+            if not frame_str: continue # Skip if frame number is missing
+            
+            frame = int(frame_str)
+            mode = data.get(f'm{idx}', 'S')
+            crn = (str(data.get(f'crn{idx}', '')).lower() == 'true')
+
+            # Check each parameter type
+            for key_type, parser in parsers.items():
+                # Handle special hex naming for colors
+                lookup_key = f"{key_type}{idx}_hex" if key_type in ['c', 'cg'] else f"{key_type}{idx}"
+                
+                raw_val = str(data.get(lookup_key, '')).strip()
+                if raw_val:
+                    try:
+                        val = parser(raw_val)
+                        self.tracks[key_type].append({
+                            'f': frame,
+                            'val': val,
+                            'mode': mode,
+                            'crn': crn
+                        })
+                    except: pass # Ignore parse errors
+
+        # 3. Sort all tracks
+        for k in self.tracks:
+            self.tracks[k].sort(key=lambda x: x['f'])
+            
+            # If track is empty, inject a default 0-key to prevent crashes
+            if not self.tracks[k]:
+                defaults = {
+                    'p': np.array([0.,0.,-10.]), 'r': np.array([0.,0.,0.]),
+                    'c': np.array([1.,1.,1.]), 'cg': np.array([1.,1.,1.]),
+                    's': 1.0, 'sd': 1.0, 'ph': 0.5
+                }
+                self.tracks[k].append({'f': 1, 'val': defaults[k], 'mode': 'S', 'crn': False})
+
+    def _get_val_at_t(self, track_name, frame_float, is_spatial=False):
+        track = self.tracks[track_name]
+        
+        # Case 1: Before first key -> Clamp to first
+        if frame_float <= track[0]['f']: return track[0]['val']
+        
+        # Case 2: After last key -> Clamp to last
+        if frame_float >= track[-1]['f']: return track[-1]['val']
+        
+        # Case 3: Between keys
+        idx = 0
+        while idx < len(track) - 1 and frame_float > track[idx+1]['f']:
+            idx += 1
+        
+        kA = track[idx]
+        kB = track[idx+1]
         
         seg_len = float(kB['f'] - kA['f'])
-        if seg_len == 0: t = 0.0
-        else: t = (frame_float - kA['f']) / seg_len
+        if seg_len == 0: return kA['val']
+        t = (frame_float - kA['f']) / seg_len
 
+        # Easing
         mode = kA['mode']
         if mode == 'I': t_e = ease_in(t)
         elif mode == 'O': t_e = ease_out(t)
         elif mode == 'L': t_e = t
         else: t_e = ease_smooth(t)
 
-        # --- SPATIAL ---
-        p1, p2 = kA['p'], kB['p']
-        
-        if idx > 0:
-            kPrev = self.keys[idx-1]
-            if kA['crn']: p0 = p1 + (p1 - p2)
-            else: p0 = kPrev['p']
+        if is_spatial:
+            # Catmull-Rom requires 4 points from THIS specific track
+            p1, p2 = kA['val'], kB['val']
+            
+            # Find P0
+            if idx > 0:
+                kPrev = track[idx-1]
+                p0 = p1 + (p1 - p2) if kA['crn'] else kPrev['val']
+            else: p0 = p1 - (p2 - p1)
+
+            # Find P3
+            if idx < len(track) - 2:
+                kNext = track[idx+2]
+                p3 = p2 + (p2 - p1) if kB['crn'] else kNext['val']
+            else: p3 = p2 + (p2 - p1)
+            
+            return catmull_rom(p0, p1, p2, p3, t_e)
         else:
-            p0 = p1 - (p2 - p1)
+            return lerp(kA['val'], kB['val'], t_e)
 
-        if idx < len(self.keys) - 2:
-            kNext = self.keys[idx+2]
-            if kB['crn']: p3 = p2 + (p2 - p1)
-            else: p3 = kNext['p']
-        else:
-            p3 = p2 + (p2 - p1)
-
-        p_res = catmull_rom(p0, p1, p2, p3, t_e)
-
-        # --- LINEAR ---
-        r_res = lerp(kA['r'], kB['r'], t_e)
-        c_res = lerp(kA['c'], kB['c'], t)
-        cg_res = lerp(kA['cg'], kB['cg'], t)
-        s_res = lerp(kA['s'], kB['s'], t)
-        sd_res = lerp(kA['sd'], kB['sd'], t)
-        ph_res = lerp(kA['ph'], kB['ph'], t)
-
-        return {'p': p_res, 'r': r_res, 'c': c_res, 'cg': cg_res, 's': s_res, 'sd': sd_res, 'ph': ph_res}
+    def get_state(self, frame_float):
+        return {
+            'p': self._get_val_at_t('p', frame_float, is_spatial=True),
+            'r': self._get_val_at_t('r', frame_float),
+            'c': self._get_val_at_t('c', frame_float), # Colors could be spatial? sticking to linear for now
+            'cg': self._get_val_at_t('cg', frame_float),
+            's': self._get_val_at_t('s', frame_float),
+            'sd': self._get_val_at_t('sd', frame_float),
+            'ph': self._get_val_at_t('ph', frame_float)
+        }

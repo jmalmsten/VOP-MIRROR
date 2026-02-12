@@ -1,7 +1,7 @@
 """
 VOP Module:     app.py
-Version:        v0.9.8
-Description:    Phase V Orchestrator. Fixed N-Key sequence execution crash.
+Version:        v0.9.9
+Description:    Phase V Orchestrator. Fixes Panic/Workprint bug.
 """
 import subprocess, os, json, time, glob, shutil, threading, logging
 from flask import Flask, render_template, request, jsonify, send_from_directory
@@ -24,7 +24,7 @@ progress_state = {"current": 0, "total": 0, "msg": "Idle", "status": "idle", "et
 def init_state():
     for d in [CAM_MAG_DIR, PROJ_MAG_DIR, WORKPRINT_DIR]: os.makedirs(d, exist_ok=True)
     if not os.path.exists(CURRENT_FILE):
-        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.9.8", "last_sync": 0}, f)
+        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.9.9", "last_sync": 0}, f)
 
 init_state()
 
@@ -34,8 +34,6 @@ def allowed_file(filename):
 def run_job_thread(data):
     global progress_state
     
-    # --- DYNAMIC RANGE FINDER ---
-    # Scans for all keys like 'f1', 'f4', 'f99', converts to int, finds range.
     frames = []
     for k, v in data.items():
         if k.startswith('f') and k[1:].isdigit() and str(v).strip():
@@ -43,7 +41,7 @@ def run_job_thread(data):
             except: pass
     
     if not frames:
-        print("CRITICAL: No valid frames found in job data.")
+        print("CRITICAL: No valid frames found.")
         return
 
     f_start, f_end = min(frames), max(frames)
@@ -68,14 +66,19 @@ def run_job_thread(data):
                 progress_state["eta"] = int(avg * (total - processed))
         time.sleep(0.5)
 
-    if len(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif"))) > 0:
-        progress_state["msg"] = "Workprinting..."
-        wp_name = f"vop_wp_{time.strftime('%H%M%S')}.mp4"
-        subprocess.run(["ffmpeg", "-y", "-framerate", str(data.get('fps', 24)), "-pattern_type", "glob", "-i", os.path.join(CAM_MAG_DIR, "*.tif"),
-                        "-vf", "scale=2048:1536,format=yuv420p", "-c:v", "libx264", "-crf", "23", os.path.join(WORKPRINT_DIR, wp_name)])
-        progress_state["latest_wp"] = wp_name
-
-    progress_state.update({"status": "idle", "msg": "COMPLETE", "current": total, "eta": 0})
+    # --- PANIC FIX ---
+    # Only generate workprint if process exited cleanly (0)
+    if proc.returncode == 0:
+        if len(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif"))) > 0:
+            progress_state["msg"] = "Workprinting..."
+            wp_name = f"vop_wp_{time.strftime('%H%M%S')}.mp4"
+            subprocess.run(["ffmpeg", "-y", "-framerate", str(data.get('fps', 24)), "-pattern_type", "glob", "-i", os.path.join(CAM_MAG_DIR, "*.tif"),
+                            "-vf", "scale=2048:1536,format=yuv420p", "-c:v", "libx264", "-crf", "23", os.path.join(WORKPRINT_DIR, wp_name)])
+            progress_state["latest_wp"] = wp_name
+            progress_state.update({"status": "idle", "msg": "COMPLETE", "current": total, "eta": 0})
+    else:
+        # If killed or crashed
+        progress_state.update({"status": "idle", "msg": "ABORTED", "current": 0, "eta": 0})
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
@@ -123,7 +126,7 @@ def execute():
 def panic():
     subprocess.run(["pkill", "-9", "-f", "engine.py"])
     subprocess.run(["pkill", "-9", "-f", "rpicam-still"])
-    progress_state["status"] = "idle"
+    # Status update handled by polling loop in thread
     return jsonify({"status": "ABORTED"})
 
 @app.route('/nuke_mag', methods=['POST'])

@@ -1,7 +1,7 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.64-stable
-Description:    Fixed N-Key sequence range logic.
+Version:        v0.0.65-stable
+Description:    Fixed sequence execution for Track-Based Interpolator.
 """
 import os, sys, json, time, argparse, subprocess, threading
 import numpy as np
@@ -173,13 +173,19 @@ def run_vop_engine(job_path):
         # Sequence Execution
         if os.path.exists("/tmp/vop_heartbeat"): os.remove("/tmp/vop_heartbeat")
         
-        # DYNAMIC RANGE LOGIC
-        if not timeline.keys:
+        # DYNAMIC RANGE LOGIC (Updated for Track-Based Timeline)
+        all_frames = []
+        # timeline.tracks is a dict of lists: {'p': [{'f': 1, ...}], 'r': ...}
+        for track_keys in timeline.tracks.values():
+            for k in track_keys:
+                all_frames.append(k['f'])
+                
+        if not all_frames:
             print("CRITICAL: No keys found in timeline.")
             return
 
-        f_start = timeline.keys[0]['f']
-        f_end = timeline.keys[-1]['f']
+        f_start = min(all_frames)
+        f_end = max(all_frames)
         
         for f in range(f_start, f_end + 1):
             execute_exposure(f)
