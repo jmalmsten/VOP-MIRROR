@@ -1,42 +1,63 @@
 """
 VOP Module:     color_utils.py
-Version:        v0.0.1
-Description:    Oklab color space utilities for perceptual lerping.
+Version:        v0.0.4
+Description:    16-bit linear workspace modifications and latent image accumulation.
 """
+import os
+import cv2
+import rawpy
 import numpy as np
 
-def linear_srgb_to_oklab(rgb):
-    m1 = np.array([
-        [0.4122214708, 0.5363325363, 0.0514459929],
-        [0.2119034982, 0.6806995451, 0.1073969566],
-        [0.0883024619, 0.2817188376, 0.6299787005]
-    ])
-    lms = np.dot(m1, rgb)
-    lms_cube = np.cbrt(np.maximum(lms, 0))
-    m2 = np.array([
-        [0.2104542553, 0.7936177850, -0.0040720468],
-        [1.9779984951, -2.4285922050, 0.4505937099],
-        [0.0259040371, 0.7827717662, -0.8086757660]
-    ])
-    return np.dot(m2, lms_cube)
+def process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced):
+    """
+    Converts raw DNG to 16-bit TIFF, applies gel multiplication, and accumulates exposures.
+    """
+    if not os.path.exists(buffer_file):
+        return False
+        
+    with rawpy.imread(buffer_file) as raw:
+        img = cv2.cvtColor(raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16), cv2.COLOR_RGB2BGR)
+        
+    if mono_forced:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-def oklab_to_linear_srgb(lab):
-    m1 = np.array([
-        [1.0, 0.3963377774, 0.2158037573],
-        [1.0, -0.1055613458, -0.0638541728],
-        [1.0, -0.0894841775, -1.2914855480]
-    ])
-    lms_cube = np.dot(m1, lab)
-    lms = lms_cube**3
-    m2 = np.array([
-        [4.0767416621, -3.3077115913, 0.2309699292],
-        [-1.2684380046, 2.6097574011, -0.3413193965],
-        [-0.0041960863, -0.7034190430, 1.7076127025]
-    ])
-    return np.dot(m2, lms)
+    gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
+    img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
 
-def get_perceptual_color(t, c1, c2):
-    lab1 = linear_srgb_to_oklab(np.array(c1))
-    lab2 = linear_srgb_to_oklab(np.array(c2))
-    mixed_lab = lab1 + (lab2 - lab1) * t
-    return np.clip(oklab_to_linear_srgb(mixed_lab), 0, 1)
+    if os.path.exists(output_file):
+        existing = cv2.imread(output_file, cv2.IMREAD_UNCHANGED)
+        if existing is not None and existing.shape == img.shape:
+            img = cv2.add(existing, img)
+            
+    cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+    os.remove(buffer_file)
+    return True
+
+def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced):
+    """
+    Generates an 8-bit JPEG preview directly from the sensor DNG.
+    """
+    if not os.path.exists(buffer_file):
+        return False
+        
+    with rawpy.imread(buffer_file) as raw:
+        img = cv2.cvtColor(raw.postprocess(gamma=(1,1), no_auto_bright=True), cv2.COLOR_RGB2BGR)
+        
+    if mono_forced:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
+    img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
+
+    cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+    os.remove(buffer_file)
+    return True
+
+def write_screen_capture(pixels, width, height, static_dir):
+    """
+    Writes raw Pygame/ModernGL screen buffers to a JPEG.
+    """
+    cap = np.frombuffer(pixels, dtype='u1').reshape(height, width, 3)[::-1]
+    cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), cv2.cvtColor(cap, cv2.COLOR_RGB2BGR))
