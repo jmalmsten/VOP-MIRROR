@@ -1,3 +1,7 @@
+# DISCLAIMER!
+
+I have made this thing public long before anything is stable or even properly documented. Read on and follow at your own mental and hardware risk. I take no responsibilities for whatever strange code is in here. If you brick something. I have no clue why. 
+
 # VOP
 
 The VOP, or Video Optical Printer. 
