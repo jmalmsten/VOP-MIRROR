@@ -1,22 +1,55 @@
-/* VOP Module: style.css - v0.0.7 */
-body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
+/* VOP Module:     style.css
+Version:        v0.0.19
+Description:    Centralized stylesheet for the VOP Web Interface.
+                Strictly defines grid layouts, table column widths, and component styling
+                to prevent UI elements from shifting during state updates.
+*/
 
-/* Main Grid: 2 Columns, Auto Rows */
+/* Base Document Setup */
+body { 
+    background: #0b0b0b; 
+    color: #ddd; 
+    font-family: sans-serif; 
+    margin: 0; 
+    padding: 20px; 
+}
+
+/* Main Layout Grid: Divides the screen into the large left working area and the 380px right control panel. */
 .container { 
-    max-width: 1600px; 
+    max-width: 1800px; 
     margin: 0 auto; 
     display: grid; 
-    grid-template-columns: 1fr 380px; /* Slightly wider sidebar */
+    grid-template-columns: 1fr 380px; 
     gap: 20px; 
 }
 
-.vop-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
+/* UI FIX: Clean Inputs
+Removes the default webkit/moz spinner arrows (up/down buttons) inside number inputs.
+This maximizes the horizontal space available for the actual text characters.
+*/
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+    -webkit-appearance: none; 
+    margin: 0; 
+}
+input[type=number] { 
+    -moz-appearance: textfield; 
+}
 
-/* --- Top Left: Preview --- */
-/* Reduced height from 80vh to 55vh */
+/* --- HEADER & PREVIEW AREAS --- */
+.vop-header { 
+    grid-column: 1 / -1; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    border-bottom: 1px solid #333; 
+    padding-bottom: 10px; 
+    margin-bottom: 10px; 
+}
+
 .preview-area { 
-    background: #000; 
-    border: 1px solid #333; 
+    background: #222; 
+    border: 1px solid #444; 
     display: flex; 
     align-items: center; 
     justify-content: center; 
@@ -25,11 +58,26 @@ body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; pad
     overflow: hidden; 
     position: relative; 
 }
-#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
-.preview-overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; font-size: 0.8em; pointer-events: none; }
 
-/* --- Top Right: Controls --- */
-/* Matches Preview height, scrollable if needed */
+/* The probe image uses object-fit: contain to ensure the aspect ratio is preserved without stretching. */
+#probe_img { 
+    max-width: 100%; 
+    max-height: 100%; 
+    object-fit: contain; 
+    display: none; 
+    box-shadow: 0 0 20px #000; 
+}
+
+.preview-overlay { 
+    position: absolute; 
+    top: 10px; 
+    left: 10px; 
+    background: rgba(0,0,0,0.7); 
+    padding: 5px 10px; 
+    font-size: 0.8em; 
+    pointer-events: none; 
+}
+
 .controls-area { 
     display: flex; 
     flex-direction: column; 
@@ -39,57 +87,274 @@ body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; pad
     padding-right: 5px; 
 }
 
-/* --- Bottom: Exposure Sheet --- */
-/* Spans full width */
-.sheet-section {
-    grid-column: 1 / -1;
+/* --- THE SHEET (TABLE) --- */
+.sheet-section { 
+    grid-column: 1 / -1; 
     background: #111; 
-    padding: 15px; 
+    padding: 0; /* Padding removed to allow the table to sit flush against the scroll boundaries */
     border-radius: 4px; 
-    border: 1px solid #222;
-    min-height: 300px;
+    border: 1px solid #222; 
+    height: 500px; 
+    overflow-y: auto; 
+    overflow-x: auto; 
+    position: relative;
 }
 
-/* --- UI Elements --- */
-.group-box { background: #151515; padding: 15px; border-radius: 4px; border: 1px solid #222; }
-.group-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; }
+.vop-table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    font-size: 0.85em; 
+    table-layout: fixed; /* Enforces strict adherence to the defined column pixel widths */
+}
 
-.input-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px; }
-.c-box { display: flex; flex-direction: column; }
-.c-box label { font-size: 0.6em; color: #888; margin-bottom: 4px; }
-.c-box input, .c-box select { background: #222; border: 1px solid #444; color: #0cf; padding: 4px; border-radius: 3px; font-size: 0.85em; }
-.c-box input[type="color"] { padding: 0; height: 24px; width: 100%; cursor: pointer; }
+/* Sticky Header: Keeps the column labels locked to the top of the container while scrolling through rows. */
+.vop-table thead th {
+    position: sticky; 
+    top: 0; 
+    background: #1a1a1a; 
+    z-index: 10;
+    padding: 8px 4px; 
+    border-bottom: 2px solid #444; 
+    color: #888;
+    font-size: 0.75em; 
+    text-transform: uppercase; 
+    text-align: center;
+}
 
-.upload-cluster { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: end; }
-.upload-btn { background: #222; border: 1px solid #444; color: #ccc; cursor: pointer; padding: 0; border-radius: 3px; font-size: 0.75em; height: 24px; line-height: 24px; }
-.upload-btn:hover { background: #0cf; color: #000; }
+.vop-table tbody td { 
+    padding: 4px; 
+    border-bottom: 1px solid #222; 
+    background: #111; 
+}
 
-.vop-sheet { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+/* Input Styling inside the Table */
+.vop-table input[type="text"], 
+.vop-table input[type="number"], 
+.vop-table select { 
+    background: #000; 
+    border: 1px solid #333; 
+    color: #fff; 
+    padding: 4px; 
+    width: 100%; 
+    border-radius: 2px; 
+    font-family: monospace; 
+    font-size: 1.0em; 
+    box-sizing: border-box; 
+    text-align: center; 
+    height: 26px;
+}
 
-/* Grid columns: #, Frame, Mode, CRN, STP, Pos, Rot, ProjGel, CamGel, Exp, SD, Ph, Del */
-/* Added 35px for STP column */
-.sheet-row { display: grid; grid-template-columns: 20px 50px 35px 20px 35px 1fr 1fr 30px 30px 40px 40px 40px 20px; gap: 4px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
+/* Spatial arrays (POS/ROT) are left-aligned because long comma-separated strings are difficult to read when centered. */
+.vop-table input[type="text"] { 
+    text-align: left; 
+}
 
-.sheet-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
-.sheet-row input[type="text"], .sheet-row input[type="number"], .sheet-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 2px; width: 100%; border-radius: 2px; font-family: monospace; font-size: 0.9em; }
-.sheet-row input[type="checkbox"] { width: auto; margin: 0 auto; display: block; }
+.vop-table input[type="checkbox"] { 
+    display: block; 
+    margin: 0 auto; 
+    width: 16px; 
+    height: 16px; 
+}
 
-.row-index { color: #333; font-weight: bold; text-align: center; }
-.row-center { text-align: center; }
-
-.snap-btn { background: #222; color: #0cf; padding: 1px 4px; font-size: 0.7em; border: 1px solid #444; border-radius: 3px; cursor: pointer; }
+/* Table Buttons */
+.snap-btn { 
+    background: #222; 
+    color: #0cf; 
+    border: 1px solid #444; 
+    border-radius: 3px; 
+    cursor: pointer; 
+    width: 100%; 
+    height: 26px; 
+    font-size: 0.8em; 
+}
 .snap-btn:hover { background: #0cf; color: #000; }
-.del-btn { background: #300; color: #f44; border: 1px solid #500; border-radius: 3px; cursor: pointer; font-weight: bold; padding: 0 4px; font-size: 0.8em; }
-.del-btn:hover { background: #f00; color: #fff; }
-.k-fr { display: flex; gap: 2px; align-items: center; }
 
-.add-row { margin-top: 10px; text-align: center; }
-.add-btn { background: #111; border: 1px solid #333; color: #666; width: 100%; padding: 6px; cursor: pointer; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+.del-btn { 
+    background: #300; 
+    color: #f44; 
+    border: 1px solid #500; 
+    border-radius: 3px; 
+    cursor: pointer; 
+    font-weight: bold; 
+    width: 100%; 
+    height: 26px; 
+}
+.del-btn:hover { background: #f00; color: #fff; }
+
+.add-row { 
+    margin-top: 10px; 
+    text-align: center; 
+    grid-column: 1 / -1; 
+    margin-bottom: 20px; 
+}
+
+.add-btn { 
+    background: #111; 
+    border: 1px solid #333; 
+    color: #666; 
+    width: 100%; 
+    padding: 8px; 
+    cursor: pointer; 
+    text-transform: uppercase; 
+    font-size: 0.75em; 
+    letter-spacing: 1px; 
+}
 .add-btn:hover { background: #222; color: #fff; border-color: #555; }
 
-.status-bar { grid-column: 1 / -1; background: #1a1a1a; border: 1px solid #333; padding: 5px 10px; font-size: 0.8em; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.progress-container { flex-grow: 1; margin: 0 15px; background: #000; height: 6px; border-radius: 3px; overflow: hidden; }
-.progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.3s; }
+/* --- COLUMN WIDTHS --- */
+/* Strictly fixed pixel widths utilizing CSS nth-child to guarantee the header (th) 
+and data rows (td) never misalign, regardless of scrollbar presence. 
+*/
+.vop-table th:nth-child(1), .vop-table td:nth-child(1) { width: 30px; }   /* IDX: Row index number */
+.vop-table th:nth-child(2), .vop-table td:nth-child(2) { width: 80px; }   /* FR: Master Frame (Expanded to 80px) */
+.vop-table th:nth-child(3), .vop-table td:nth-child(3) { width: 40px; }   /* GO: Snap playhead button */
+.vop-table th:nth-child(4), .vop-table td:nth-child(4) { width: 50px; }   /* MOD: Interpolation Mode */
+.vop-table th:nth-child(5), .vop-table td:nth-child(5) { width: 30px; }   /* C: Corner Flag */
+.vop-table th:nth-child(6), .vop-table td:nth-child(6) { width: 50px; }   /* SRC: Source Anchor */
+.vop-table th:nth-child(7), .vop-table td:nth-child(7) { width: 40px; }   /* STP: Source Step */
+.vop-table th:nth-child(8), .vop-table td:nth-child(8) { width: 180px; }  /* POS: X,Y,Z */
+.vop-table th:nth-child(9), .vop-table td:nth-child(9) { width: 160px; }  /* ROT: Pitch,Yaw,Roll */
+.vop-table th:nth-child(10), .vop-table td:nth-child(10) { width: 35px; } /* PG: Proj Gel */
+.vop-table th:nth-child(11), .vop-table td:nth-child(11) { width: 35px; } /* CG: Cam Gel */
+.vop-table th:nth-child(12), .vop-table td:nth-child(12) { width: 50px; } /* EXP: Shutter duration */
+.vop-table th:nth-child(13), .vop-table td:nth-child(13) { width: 50px; } /* SD: Scale Dampening */
+.vop-table th:nth-child(14), .vop-table td:nth-child(14) { width: 50px; } /* PH: Shutter Phase */
+.vop-table th:nth-child(15), .vop-table td:nth-child(15) { width: 30px; } /* DEL: Delete Row */
 
-.probe-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-.action-btn { background: #0cf; color: #000; border: none; padding: 8px; border-radius: 3px; cursor: pointer; font-weight: bold; text-
+/* --- CHEAT SHEET --- */
+.cheat-sheet {
+    grid-column: 1 / -1; 
+    background: #0a0a0a; 
+    border: 1px solid #222; 
+    padding: 15px; 
+    border-radius: 4px;
+    display: grid; 
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+    gap: 10px; 
+    font-size: 0.8em; 
+    color: #888;
+}
+.cheat-item strong { 
+    color: #0cf; 
+    display: inline-block; 
+    width: 40px; 
+}
+
+/* --- UI COMPONENTS (Group Boxes, Upload Buttons) --- */
+.status-bar { 
+    grid-column: 1 / -1; 
+    background: #1a1a1a; 
+    border: 1px solid #333; 
+    padding: 5px 10px; 
+    font-size: 0.8em; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    margin-bottom: 10px; 
+}
+
+.progress-container { 
+    flex-grow: 1; 
+    margin: 0 15px; 
+    background: #000; 
+    height: 6px; 
+    border-radius: 3px; 
+    overflow: hidden; 
+}
+
+.progress-fill { 
+    height: 100%; 
+    background: #0cf; 
+    width: 0%; 
+    transition: width 0.3s; 
+}
+
+.group-box { 
+    background: #151515; 
+    padding: 15px; 
+    border-radius: 4px; 
+    border: 1px solid #222; 
+}
+
+.group-title { 
+    font-size: 0.7em; 
+    color: #555; 
+    text-transform: uppercase; 
+    margin-bottom: 10px; 
+    border-bottom: 1px solid #222; 
+    padding-bottom: 5px; 
+}
+
+.input-row { 
+    display: grid; 
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); 
+    gap: 8px; 
+}
+
+.c-box { 
+    display: flex; 
+    flex-direction: column; 
+}
+
+.c-box label { 
+    font-size: 0.6em; 
+    color: #888; 
+    margin-bottom: 4px; 
+}
+
+.c-box input, .c-box select { 
+    background: #222; 
+    border: 1px solid #444; 
+    color: #0cf; 
+    padding: 4px; 
+    border-radius: 3px; 
+    font-size: 0.85em; 
+}
+
+.c-box input[type="color"] { 
+    padding: 0; 
+    height: 24px; 
+    width: 100%; 
+    cursor: pointer; 
+}
+
+.upload-cluster { 
+    display: grid; 
+    grid-template-columns: 1fr 70px; 
+    gap: 8px; 
+    align-items: end; 
+}
+
+.upload-btn { 
+    background: #222; 
+    border: 1px solid #444; 
+    color: #ccc; 
+    cursor: pointer; 
+    padding: 0; 
+    border-radius: 3px; 
+    font-size: 0.75em; 
+    height: 24px; 
+    line-height: 24px; 
+}
+.upload-btn:hover { background: #0cf; color: #000; }
+
+.probe-controls { 
+    display: grid; 
+    grid-template-columns: 1fr 1fr; 
+    gap: 10px; 
+    margin-bottom: 10px; 
+}
+
+.action-btn { 
+    background: #0cf; 
+    color: #000; 
+    border: none; 
+    padding: 8px; 
+    border-radius: 3px; 
+    cursor: pointer; 
+    font-weight: bold; 
+    text-transform: uppercase; 
+    font-size: 0.8em; 
+    width: 100%; 
+}
+.action-btn:hover { background: #fff; }

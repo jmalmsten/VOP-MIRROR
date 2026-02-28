@@ -1,175 +1,212 @@
 """
 VOP Module:     app.py
-Version:        v0.9.14
-Description:    Video Baking & Optical Printer Logic.
+Version:        v0.1.0
+Description:    Flask Web Server and UI Router.
+                Handles incoming requests from the browser, reads/writes JSON job states,
+                and dispatches execution commands to the engine via subprocess isolation.
 """
-import subprocess, os, json, time, glob, shutil, threading, logging
-from flask import Flask, render_template, request, jsonify, send_from_directory
-from werkzeug.utils import secure_filename
+import os
+import json
+import subprocess
+import time
+from flask import Flask, jsonify, request, render_template
 
 app = Flask(__name__)
-log = logging.getLogger('werkzeug')
-log.addFilter(lambda r: "/status" not in r.getMessage())
 
+# Absolute paths based on the location of this script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ENGINE_PATH = os.path.join(BASE_DIR, "engine.py")
-CURRENT_FILE = os.path.join(BASE_DIR, "current_job.json")
-CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
-WORKPRINT_DIR = os.path.join(BASE_DIR, "WorkPrints")
+CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
+CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
+DEFAULT_JOB_FILE = os.path.join(BASE_DIR, "default_job.json")
 
-# Expanded for video
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'tif', 'tiff', 'mp4', 'mov', 'mkv', 'avi'}
+# Ensure required directories exist
+os.makedirs(PROJ_MAG_DIR, exist_ok=True)
+os.makedirs(CAM_MAG_DIR, exist_ok=True)
 
-progress_state = {"current": 0, "total": 0, "msg": "Idle", "status": "idle", "eta": 0, "disk": "0 GB", "latest_wp": ""}
+# Global reference to the engine subprocess
+engine_process = None
 
-def init_state():
-    for d in [CAM_MAG_DIR, PROJ_MAG_DIR, WORKPRINT_DIR]: os.makedirs(d, exist_ok=True)
-    if not os.path.exists(CURRENT_FILE):
-        with open(CURRENT_FILE, 'w') as f: json.dump({"v": "0.9.14", "last_sync": 0}, f)
-
-init_state()
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def run_job_thread(data):
-    global progress_state
-    
-    # Track-based range finding
-    frames = []
-    for k, v in data.items():
-        if k.startswith('f') and k[1:].isdigit() and str(v).strip():
-            try: frames.append(int(v))
-            except: pass
-    
-    if not frames:
-        print("CRITICAL: No valid frames found.")
-        return
-
-    f_start, f_end = min(frames), max(frames)
-    total = (f_end - f_start) + 1
-    
-    progress_state.update({"current": 0, "total": total, "status": "running", "msg": "Exposing..."})
-    
-    if os.path.exists("/tmp/vop_heartbeat"): os.remove("/tmp/vop_heartbeat")
-    
-    with open("/tmp/vop_job.json", 'w') as f: json.dump(data, f)
-    proc = subprocess.Popen(["python3", ENGINE_PATH, "--job", "/tmp/vop_job.json"])
-    start_time = time.time()
-    
-    processed = 0
-    while proc.poll() is None:
-        if os.path.exists("/tmp/vop_heartbeat"):
-            processed += 1
-            os.remove("/tmp/vop_heartbeat")
-            progress_state["current"] = processed
-            if processed > 0:
-                avg = (time.time() - start_time) / processed
-                progress_state["eta"] = int(avg * (total - processed))
-        time.sleep(0.5)
-
-    if proc.returncode == 0:
-        if len(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif"))) > 0:
-            progress_state["msg"] = "Workprinting..."
-            wp_name = f"vop_wp_{time.strftime('%H%M%S')}.mp4"
-            subprocess.run(["ffmpeg", "-y", "-framerate", str(data.get('fps', 24)), "-pattern_type", "glob", "-i", os.path.join(CAM_MAG_DIR, "*.tif"),
-                            "-vf", "scale=2048:1536,format=yuv420p", "-c:v", "libx264", "-crf", "23", os.path.join(WORKPRINT_DIR, wp_name)])
-            progress_state["latest_wp"] = wp_name
-            progress_state.update({"status": "idle", "msg": "COMPLETE", "current": total, "eta": 0})
-    else:
-        progress_state.update({"status": "idle", "msg": "ABORTED", "current": 0, "eta": 0})
-
-@app.route('/upload_target', methods=['POST'])
-def upload_target():
-    if 'file' not in request.files: return jsonify({"status": "NO FILE"}), 400
-    file = request.files['file']
-    if file.filename == '': return jsonify({"status": "NO NAME"}), 400
-    
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        ext = filename.rsplit('.', 1)[1].lower()
-        
-        # 1. NUKE MAG
-        for f in os.listdir(PROJ_MAG_DIR):
-            os.remove(os.path.join(PROJ_MAG_DIR, f))
-        
-        save_path = os.path.join(PROJ_MAG_DIR, filename)
-        file.save(save_path)
-        
-        final_target = filename # Default to the file itself
-        
-        # 2. VIDEO BAKING (If video)
-        if ext in ['mp4', 'mov', 'mkv', 'avi']:
-            progress_state["status"] = "busy"
-            progress_state["msg"] = "Baking Video..."
+def load_job_state():
+    """
+    State Loader with Fallback Logic.
+    Attempts to load the user's active session ('current_job.json').
+    If the file is missing or corrupted, it falls back to the safe defaults ('default_job.json').
+    """
+    # Attempt to load the active session first
+    if os.path.exists(CURRENT_JOB_FILE):
+        try:
+            with open(CURRENT_JOB_FILE, "r") as f: 
+                return json.load(f)
+        except json.JSONDecodeError:
+            pass # File was corrupted or empty, proceed to fallback
             
-            # Output pattern: frame_0001.tif
-            # We use TIFF (LZW or None) for speed/quality balance
-            subprocess.run([
-                "ffmpeg", "-i", save_path, 
-                "-compression_algo", "lzw", 
-                os.path.join(PROJ_MAG_DIR, "frame_%04d.tif")
-            ])
-            
-            # Remove original video to save space/confusion? 
-            # Let's keep it for reference, but target the sequence.
-            # os.remove(save_path) 
-            
-            final_target = "SEQUENCE" # Signal to UI/Engine that we are in Sequence Mode
-            
-            progress_state["status"] = "idle"
-            progress_state["msg"] = "Ready"
+    # Fallback to the default job template
+    if os.path.exists(DEFAULT_JOB_FILE):
+        try:
+            with open(DEFAULT_JOB_FILE, "r") as f: 
+                return json.load(f)
+        except json.JSONDecodeError:
+            pass
 
-        return jsonify({"status": "SUCCESS", "filename": final_target})
-    return jsonify({"status": "BAD TYPE"}), 400
+    # Ultimate fallback if everything is missing
+    return {}
 
-@app.route('/status')
+@app.route('/', methods=['GET'])
+def index():
+    """Serves the main HTML user interface."""
+    return render_template('index.html')
+
+@app.route('/status', methods=['GET'])
 def get_status():
-    free_gb = shutil.disk_usage(BASE_DIR).free / (1024.0**3)
-    progress_state["disk"] = f"{free_gb:.1f} GB"
-    with open(CURRENT_FILE, 'r') as f: params = json.load(f)
-    return jsonify({**progress_state, "params": params})
+    """
+    Polled every second by main.js. 
+    Provides the current UI parameter state and engine progress data.
+    """
+    global engine_process
+    
+    # Always read the latest parameters from disk to support multi-device syncing.
+    params = load_job_state()
+    
+    # Calculate available disk space on the root partition.
+    try:
+        statvfs = os.statvfs('/')
+        disk_free = (statvfs.f_frsize * statvfs.f_bavail) / (1024**3)
+        disk_str = f"FREE: {disk_free:.1f}GB"
+    except:
+        disk_str = "DISK UNKNOWN"
 
-@app.route('/preview', methods=['POST'])
-def preview():
-    if progress_state["status"] == "running": return jsonify({"status": "BUSY"}), 423
-    data = request.json
-    with open(CURRENT_FILE, 'w') as f: json.dump(data, f, indent=4)
-    with open("/tmp/vop_job.json", 'w') as f: json.dump(data, f)
-    subprocess.run(["python3", ENGINE_PATH, "--job", "/tmp/vop_job.json"])
-    return jsonify({"status": "SUCCESS"})
+    # Determine if the engine subprocess is currently running.
+    status = "idle"
+    msg = "VOP Engine Ready"
+    
+    if engine_process is not None:
+        if engine_process.poll() is None:
+            status = "running"
+            msg = "Engine Executing..."
+        else:
+            status = "idle"
+            msg = "Execution Complete."
+            engine_process = None
+
+    # Retrieve progress from the heartbeat file written by the engine.
+    current_frame = 0
+    if os.path.exists("/tmp/vop_heartbeat"):
+        try:
+            with open("/tmp/vop_heartbeat", "r") as f:
+                current_frame = int(f.read().strip())
+        except:
+            pass
+
+    return jsonify({
+        "status": status, 
+        "msg": msg, 
+        "current": current_frame, 
+        "total": 0, # Total frames would be calculated dynamically in a full implementation
+        "eta": 0,
+        "disk": disk_str,
+        "params": params
+    })
 
 @app.route('/sync_state', methods=['POST'])
 def sync_state():
+    """
+    Receives state updates pushed by the UI and writes them to the current job file.
+    """
+    new_state = request.json
+    
+    # Write directly to the active session file.
+    with open(CURRENT_JOB_FILE, "w") as f:
+        json.dump(new_state, f, indent=4)
+        
+    # Echo back the timestamp to confirm the write was successful.
+    return jsonify({"status": "ok", "new_sync": new_state.get('last_sync', 0)})
+
+@app.route('/preview', methods=['POST'])
+def preview():
+    """
+    Triggers a single-frame operation. 
+    This handles both 'Proj Probe' (synthetic render) and 'Cam View' (physical hardware capture).
+    """
     data = request.json
-    with open(CURRENT_FILE, 'r') as f: server_data = json.load(f)
-    if data.get('force_overwrite') or float(data.get('last_sync', 0)) >= float(server_data.get('last_sync', 0)):
-        data['last_sync'] = time.time()
-        with open(CURRENT_FILE, 'w') as f: json.dump(data, f, indent=4)
-        return jsonify({"status": "SUCCESS", "new_sync": data['last_sync']})
-    return jsonify({"status": "CONFLICT", "server_params": server_data}), 409
+    
+    # Write the job parameters to a temporary file for the engine to consume.
+    job_file = "/tmp/vop_job.json"
+    with open(job_file, "w") as f:
+        json.dump(data, f)
+        
+    # Dispatch the engine script as a blocking subprocess. 
+    # Because it is a preview, we wait for it to finish so the UI knows exactly when the image is ready.
+    subprocess.run(["python3", os.path.join(BASE_DIR, "engine.py"), "--job", job_file])
+    return jsonify({"status": "ok"})
 
 @app.route('/execute_sequence', methods=['POST'])
-def execute():
-    threading.Thread(target=run_job_thread, args=(request.json,)).start()
-    return jsonify({"status": "STARTED"})
+def execute_sequence():
+    """
+    Triggers a full timeline sequence render.
+    """
+    global engine_process
+    data = request.json
+    
+    # Prevent starting a new job if the engine is already running.
+    if engine_process is not None and engine_process.poll() is None:
+         return jsonify({"status": "error", "msg": "Engine is already running."}), 400
+
+    job_file = "/tmp/vop_job.json"
+    with open(job_file, "w") as f:
+        json.dump(data, f)
+        
+    # Dispatch the engine script as a non-blocking background process.
+    engine_process = subprocess.Popen(["python3", os.path.join(BASE_DIR, "engine.py"), "--job", job_file])
+    return jsonify({"status": "started"})
+
+@app.route('/upload_target', methods=['POST'])
+def upload_target():
+    """
+    Receives image files from the browser and saves them to the ProjMag.
+    """
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+        
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+        
+    # Clear out old files from the magazine to prevent clutter.
+    for f in os.listdir(PROJ_MAG_DIR):
+        os.remove(os.path.join(PROJ_MAG_DIR, f))
+        
+    # Save the new file.
+    filename = file.filename
+    file.save(os.path.join(PROJ_MAG_DIR, filename))
+    
+    return jsonify({"status": "ok", "filename": filename})
 
 @app.route('/panic', methods=['POST'])
 def panic():
-    subprocess.run(["pkill", "-9", "-f", "engine.py"])
-    subprocess.run(["pkill", "-9", "-f", "rpicam-still"])
-    return jsonify({"status": "ABORTED"})
+    """
+    Emergency stop. Kills the Python engine process and any hanging camera processes.
+    """
+    global engine_process
+    if engine_process is not None:
+        engine_process.kill()
+        engine_process = None
+        
+    # Force kill any rogue rpicam-still processes at the system level.
+    subprocess.run(["pkill", "-9", "rpicam-still"])
+    return jsonify({"status": "panic_executed"})
 
 @app.route('/nuke_mag', methods=['POST'])
-def nuke():
-    for f in glob.glob(os.path.join(CAM_MAG_DIR, "*.tif")): os.remove(f)
-    return jsonify({"status": "CLEAN"})
+def nuke_mag():
+    """
+    Wipes all accumulated TIFF exposures from the CamMag directory.
+    """
+    for f in os.listdir(CAM_MAG_DIR):
+        if f.endswith(".tif"):
+            os.remove(os.path.join(CAM_MAG_DIR, f))
+    return jsonify({"status": "mag_cleared"})
 
-@app.route('/')
-def index(): return render_template('index.html')
-
-@app.route('/download/<path:filename>')
-def download(filename): return send_from_directory(WORKPRINT_DIR, filename, as_attachment=True)
-
-if __name__ == "__main__": app.run(host='0.0.0.0', port=5000)
+if __name__ == '__main__':
+    # Binds the Flask server to all interfaces (0.0.0.0) on port 5000, 
+    # allowing access from the laptop, phone, or any other device on the local network.
+    app.run(host='0.0.0.0', port=5000)
