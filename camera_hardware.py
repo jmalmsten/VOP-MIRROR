@@ -1,51 +1,69 @@
 """
 VOP Module:     camera_hardware.py
-Version:        v0.0.6
+Version:        v0.0.7
 Description:    Subprocess execution and timing for the IMX477 sensor.
-                This module isolates the hardware triggers to ensure strict adherence 
-                to the VOP execution timing rules.
+                This is the only module allowed to talk to the physical camera hardware.
 """
-# subprocess is used to spawn new processes, connect to their input/output/error pipes, 
-# and obtain their return codes.
+# subprocess is used to spawn background terminal commands from within Python.
 import subprocess
-# time is used for execution blocking (sleep).
+# time is used to explicitly block/pause the Python script execution.
 import time
 
 def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x1520"):
     """
     Executes rpicam-still in an independent parallel process.
-    By using subprocess.Popen instead of subprocess.run, the Python script continues 
-    executing immediately rather than waiting for the camera capture to finish.
+    We use Popen instead of .run() so Python doesn't freeze while the camera exposes.
     """
+    
+    # BUGFIX: The RAW DNG Quirks
+    # rpicam-still requires a "primary" output file (usually a JPEG) to attach the RAW data to.
+    # If we just give it a .dng extension without the --raw flag, it saves a JPEG and names it .dng.
+    # Here, we swap the .dng extension for .jpg to create a "dummy" primary file.
+    dummy_jpg = output_path.replace(".dng", ".jpg")
+    
+    # Construct the terminal command as a list of strings for absolute safety against shell injection.
     cmd = [
         "rpicam-still",
-        # --immediate bypasses the ISP (Image Signal Processor) auto-exposure and auto-focus 
-        # convergence routines, forcing the camera to capture exactly when commanded.
+        # --immediate skips the 2-3 second "warm up" phase where the camera tries to guess exposure.
         "--immediate",
-        # --shutter expects microseconds. We multiply the milliseconds value by 1000.
+        
+        # --shutter defines the exact duration the sensor gathers light. It requires microseconds.
+        # (Milliseconds * 1000 = Microseconds)
         "--shutter", str(int(total_ms * 1000)),
-        # --gain locks the analog sensor gain to the value provided in the UI.
+        
+        # --gain locks the analog ISO gain applied directly to the sensor pixels.
         "--gain", str(gain),
-        # --awbgains locks the red and blue white balance multipliers to prevent color shifting.
+        
+        # --awbgains locks the Red and Blue multipliers to prevent color shifting mid-sequence.
         "--awbgains", f"{awb_r},{awb_b}",
-        # --denoise off and -n (no preview) bypass internal processing to guarantee maximum speed 
-        # and raw data integrity (VOP Rule #4).
+        
+        # --denoise off disables spatial/temporal blurring, retaining true optical grain.
         "--denoise", "off",
+        
+        # -n disables the on-screen preview window, saving massive amounts of GPU bandwidth.
         "-n",
-        # Explicitly define the sensor readout resolution.
+        
+        # Explicitly define the sensor readout resolution. 2028x1520 forces the 12-bit RAW mode on the IMX477.
         "--width", resolution.split('x')[0],
         "--height", resolution.split('x')[1],
-        # -o specifies the output file path.
-        "-o", output_path
+        
+        # THE CRITICAL FIX: --raw forces the generation of the Adobe DNG file.
+        "--raw",
+        
+        # -o writes the dummy JPEG. Because --raw is active, rpicam-still will automatically
+        # create a second file with the exact same name, but with a .dng extension.
+        # That .dng file is the one the rest of the VOP engine will use.
+        "-o", dummy_jpg
     ]
-    # Spawns the process and returns the process handle so the main engine can monitor its completion.
+    
+    # Launch the command in the background and return the process handle to the engine.
     return subprocess.Popen(cmd)
 
 def wait_for_sensor_prime():
     """
-    Blocks execution to accommodate the 700ms sensor initialization offset.
-    VOP Rule #6: The IMX477 requires ~700 milliseconds from the moment the process is launched 
-    until the sensor actually begins recording photons. We sleep the engine thread here so the 
-    projector graphics do not begin rendering before the sensor is ready.
+    Blocks execution to accommodate the sensor initialization offset.
+    VOP Rule #6: It takes the IMX477 about 700 milliseconds to wake up, allocate memory,
+    and begin receiving photons after the command is sent. We sleep the script here
+    so the projector doesn't flash the image before the camera is actually looking.
     """
     time.sleep(0.7)
