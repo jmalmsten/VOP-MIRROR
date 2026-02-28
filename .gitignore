@@ -13,6 +13,8 @@ vop_focus_tests/
 *.tif
 *.png
 *.mp4
+*.mov
+*.mkv
 
 # --- Python Junk ---
 __pycache__/
