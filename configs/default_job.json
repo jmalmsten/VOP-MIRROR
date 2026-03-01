@@ -1,0 +1,29 @@
+{
+    "probe_frame": "1",
+    "probe_sub": "0.0",
+    "fov": "45",
+    "fps": "24",
+    "gain": "1",
+    "awb_r": "3.18",
+    "awb_b": "1.45",
+    "coord_scale": "1.000",
+    "image": "",
+    "cam_res": "2028x1520",
+    "mono_mode": "off",
+    "tiff_compression": "zip",
+    
+    "f1": "1",
+    "m1": "S",
+    "crn1": false,
+    "src1": "-1",
+    "stp1": "1",
+    "p1": "0,0,-1.0",
+    "r1": "0,0,0",
+    "c1_hex": "#ffffff",
+    "cg1_hex": "#ffffff",
+    "s1": "1.0",
+    "sd1": "1.0",
+    "ph1": "0.5",
+    
+    "last_sync": 0
+}

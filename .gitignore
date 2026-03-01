@@ -13,14 +13,18 @@ vop_focus_tests/
 *.tif
 *.png
 *.mp4
+*.mov
+*.mkv
+current_job.json
 
 # --- Python Junk ---
-__pychache__/
+__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 
 # --- System & Trash Junk ---
+.fuse_hidden*
 #Ignore the hidden trash folders created by Linux file managers
 .Trash-*/
 .trash/
