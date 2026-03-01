@@ -1,15 +1,24 @@
 """
 VOP Module:     app.py
-Version:        v0.1.0
+Version:        v0.1.4
 Description:    Flask Web Server and UI Router.
-                Handles incoming requests from the browser, reads/writes JSON job states,
-                and dispatches execution commands to the engine via subprocess isolation.
+                Handles incoming requests, state sync, and subprocess isolation.
+                Includes Workprint serving and OpenCV aspect ratio calculation.
 """
 import os
 import json
 import subprocess
 import time
-from flask import Flask, jsonify, request, render_template
+import logging
+import cv2
+import glob
+from flask import Flask, jsonify, request, render_template, send_from_directory
+
+# --- TERMINAL CLEANUP ---
+# Flask uses the 'werkzeug' logger to print every GET/POST request.
+# Setting this to ERROR suppresses the constant 200 OK heartbeat spam.
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 
@@ -20,11 +29,12 @@ CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 DEFAULT_JOB_FILE = os.path.join(BASE_DIR, "default_job.json")
 
-# Ensure required directories exist
+# Ensure required directories exist on boot
 os.makedirs(PROJ_MAG_DIR, exist_ok=True)
 os.makedirs(CAM_MAG_DIR, exist_ok=True)
+os.makedirs(os.path.join(BASE_DIR, "WorkPrints"), exist_ok=True)
 
-# Global reference to the engine subprocess
+# Global reference to the engine subprocess so we can monitor or kill it
 engine_process = None
 
 def load_job_state():
@@ -33,7 +43,6 @@ def load_job_state():
     Attempts to load the user's active session ('current_job.json').
     If the file is missing or corrupted, it falls back to the safe defaults ('default_job.json').
     """
-    # Attempt to load the active session first
     if os.path.exists(CURRENT_JOB_FILE):
         try:
             with open(CURRENT_JOB_FILE, "r") as f: 
@@ -41,7 +50,6 @@ def load_job_state():
         except json.JSONDecodeError:
             pass # File was corrupted or empty, proceed to fallback
             
-    # Fallback to the default job template
     if os.path.exists(DEFAULT_JOB_FILE):
         try:
             with open(DEFAULT_JOB_FILE, "r") as f: 
@@ -49,7 +57,6 @@ def load_job_state():
         except json.JSONDecodeError:
             pass
 
-    # Ultimate fallback if everything is missing
     return {}
 
 @app.route('/', methods=['GET'])
@@ -60,12 +67,10 @@ def index():
 @app.route('/status', methods=['GET'])
 def get_status():
     """
-    Polled every second by main.js. 
-    Provides the current UI parameter state and engine progress data.
+    The Silent Heartbeat. Polled every second by main.js. 
+    Provides the current UI parameter state, engine progress data, and latest workprint.
     """
     global engine_process
-    
-    # Always read the latest parameters from disk to support multi-device syncing.
     params = load_job_state()
     
     # Calculate available disk space on the root partition.
@@ -76,10 +81,10 @@ def get_status():
     except:
         disk_str = "DISK UNKNOWN"
 
-    # Determine if the engine subprocess is currently running.
     status = "idle"
     msg = "VOP Engine Ready"
     
+    # Check if the execution engine is actively running
     if engine_process is not None:
         if engine_process.poll() is None:
             status = "running"
@@ -98,15 +103,42 @@ def get_status():
         except:
             pass
 
+    # NEW: Find the most recent workprint in the WorkPrints directory
+    latest_wp = None
+    wp_list = glob.glob(os.path.join(BASE_DIR, "WorkPrints", "*.mp4"))
+    if wp_list:
+        # Get the file with the newest creation/modification time
+        latest_wp = os.path.basename(max(wp_list, key=os.path.getctime))
+
     return jsonify({
-        "status": status, 
-        "msg": msg, 
-        "current": current_frame, 
-        "total": 0, # Total frames would be calculated dynamically in a full implementation
-        "eta": 0,
-        "disk": disk_str,
-        "params": params
+        "status": status, "msg": msg, "current": current_frame, 
+        "total": 0, "eta": 0, "disk": disk_str, "params": params,
+        "latest_wp": latest_wp # Pass the filename to the UI
     })
+
+@app.route('/get_img_aspect', methods=['GET'])
+def get_img_aspect():
+    """
+    Reads the physical pixel dimensions of the current image using OpenCV
+    so the UI can mathematically calculate a zero-crop frustum fit.
+    """
+    job = load_job_state()
+    img_name = job.get('image', '')
+    if not img_name:
+        return jsonify({'aspect': 1.0})
+        
+    img_path = os.path.join(PROJ_MAG_DIR, img_name)
+    aspect = 1.0
+    if os.path.exists(img_path):
+        try:
+            img = cv2.imread(img_path)
+            if img is not None:
+                h, w = img.shape[:2]
+                aspect = w / h
+        except Exception as e:
+            print(f"[ERROR] Could not calculate aspect ratio: {e}")
+            
+    return jsonify({'aspect': aspect})
 
 @app.route('/sync_state', methods=['POST'])
 def sync_state():
@@ -114,29 +146,29 @@ def sync_state():
     Receives state updates pushed by the UI and writes them to the current job file.
     """
     new_state = request.json
-    
-    # Write directly to the active session file.
     with open(CURRENT_JOB_FILE, "w") as f:
         json.dump(new_state, f, indent=4)
-        
-    # Echo back the timestamp to confirm the write was successful.
     return jsonify({"status": "ok", "new_sync": new_state.get('last_sync', 0)})
 
 @app.route('/preview', methods=['POST'])
 def preview():
     """
-    Triggers a single-frame operation. 
-    This handles both 'Proj Probe' (synthetic render) and 'Cam View' (physical hardware capture).
+    Triggers a single-frame operation ('Proj Probe' or 'Cam View').
+    Dispatched as a blocking subprocess so the UI waits for it to finish.
     """
     data = request.json
+    req_type = data.get('type', 'unknown')
+    target_frame = data.get('probe_frame', 1)
     
-    # Write the job parameters to a temporary file for the engine to consume.
+    if req_type == 'cam_preview':
+        print(f"\n[UI ACTION] Button Pressed: CAM VIEW (Frame: {target_frame})")
+    else:
+        print(f"\n[UI ACTION] Button Pressed: PROJ PROBE (Frame: {target_frame})")
+        
     job_file = "/tmp/vop_job.json"
     with open(job_file, "w") as f:
         json.dump(data, f)
         
-    # Dispatch the engine script as a blocking subprocess. 
-    # Because it is a preview, we wait for it to finish so the UI knows exactly when the image is ready.
     subprocess.run(["python3", os.path.join(BASE_DIR, "engine.py"), "--job", job_file])
     return jsonify({"status": "ok"})
 
@@ -144,19 +176,20 @@ def preview():
 def execute_sequence():
     """
     Triggers a full timeline sequence render.
+    Dispatched as a non-blocking background process.
     """
     global engine_process
     data = request.json
+    print("\n[UI ACTION] Button Pressed: SEQUENCE RENDER")
     
-    # Prevent starting a new job if the engine is already running.
     if engine_process is not None and engine_process.poll() is None:
+         print("[ERROR] Attempted to start sequence, but engine is already running.")
          return jsonify({"status": "error", "msg": "Engine is already running."}), 400
 
     job_file = "/tmp/vop_job.json"
     with open(job_file, "w") as f:
         json.dump(data, f)
         
-    # Dispatch the engine script as a non-blocking background process.
     engine_process = subprocess.Popen(["python3", os.path.join(BASE_DIR, "engine.py"), "--job", job_file])
     return jsonify({"status": "started"})
 
@@ -165,6 +198,7 @@ def upload_target():
     """
     Receives image files from the browser and saves them to the ProjMag.
     """
+    print("\n[UI ACTION] Uploading new file to ProjMag...")
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
         
@@ -172,27 +206,24 @@ def upload_target():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
         
-    # Clear out old files from the magazine to prevent clutter.
     for f in os.listdir(PROJ_MAG_DIR):
         os.remove(os.path.join(PROJ_MAG_DIR, f))
         
-    # Save the new file.
     filename = file.filename
     file.save(os.path.join(PROJ_MAG_DIR, filename))
-    
+    print(f"[UI ACTION] Upload complete: {filename}")
     return jsonify({"status": "ok", "filename": filename})
 
 @app.route('/panic', methods=['POST'])
 def panic():
     """
-    Emergency stop. Kills the Python engine process and any hanging camera processes.
+    Emergency stop. Kills the Python engine process and any hanging camera hardware processes.
     """
+    print("\n[UI ACTION] Button Pressed: PANIC STOP!")
     global engine_process
     if engine_process is not None:
         engine_process.kill()
         engine_process = None
-        
-    # Force kill any rogue rpicam-still processes at the system level.
     subprocess.run(["pkill", "-9", "rpicam-still"])
     return jsonify({"status": "panic_executed"})
 
@@ -201,12 +232,21 @@ def nuke_mag():
     """
     Wipes all accumulated TIFF exposures from the CamMag directory.
     """
+    print("\n[UI ACTION] Button Pressed: NUKE MAG (Clearing TIFFs)")
     for f in os.listdir(CAM_MAG_DIR):
         if f.endswith(".tif"):
             os.remove(os.path.join(CAM_MAG_DIR, f))
     return jsonify({"status": "mag_cleared"})
 
+# NEW: Route to allow the browser to download/play the mp4 workprints
+@app.route('/workprints/<filename>')
+def serve_workprint(filename):
+    return send_from_directory(os.path.join(BASE_DIR, "WorkPrints"), filename)
+
 if __name__ == '__main__':
-    # Binds the Flask server to all interfaces (0.0.0.0) on port 5000, 
-    # allowing access from the laptop, phone, or any other device on the local network.
+    print("=========================================")
+    print(" VOP Server is online.")
+    print(" Heartbeat logging is silenced.")
+    print(" UI available at: http://<PI_IP>:5000")
+    print("=========================================")
     app.run(host='0.0.0.0', port=5000)

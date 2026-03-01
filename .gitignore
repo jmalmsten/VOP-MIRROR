@@ -15,6 +15,7 @@ vop_focus_tests/
 *.mp4
 *.mov
 *.mkv
+current_job.json
 
 # --- Python Junk ---
 __pycache__/
