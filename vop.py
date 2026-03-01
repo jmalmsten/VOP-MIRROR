@@ -1,17 +1,19 @@
 """
 VOP Module:     vop.py
-Version:        v0.1.6
-Description:    Flask Web Server and UI Router.
-                Handles incoming requests, state sync, and subprocess isolation.
-                Includes Workprint serving and Smart ETA/Storage tracking.
+Version:        v0.1.8
+Description:    Main Entry Point. Flask Web Server.
+                Restored terminal logging for UI actions.
 """
 import os
+import sys
 import json
 import subprocess
 import time
 import logging
 import cv2
 import glob
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 from flask import Flask, jsonify, request, render_template, send_from_directory
 
 log = logging.getLogger('werkzeug')
@@ -34,21 +36,15 @@ engine_process = None
 def load_job_state():
     if os.path.exists(CURRENT_JOB_FILE):
         try:
-            with open(CURRENT_JOB_FILE, "r") as f: 
-                return json.load(f)
-        except json.JSONDecodeError:
-            pass 
-            
+            with open(CURRENT_JOB_FILE, "r") as f: return json.load(f)
+        except: pass 
     if os.path.exists(DEFAULT_JOB_FILE):
         try:
-            with open(DEFAULT_JOB_FILE, "r") as f: 
-                return json.load(f)
-        except json.JSONDecodeError:
-            pass
-
+            with open(DEFAULT_JOB_FILE, "r") as f: return json.load(f)
+        except: pass
     return {}
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def index():
     return render_template('index.html')
 
@@ -56,7 +52,6 @@ def index():
 def get_status():
     global engine_process
     params = load_job_state()
-    
     status = "idle"
     msg = "VOP Engine Ready"
     
@@ -69,11 +64,7 @@ def get_status():
             msg = "Execution Complete."
             engine_process = None
 
-    current_frame = 0
-    total_frames = 0
-    eta = 0
-    est_mb = 0
-    
+    current_frame = total_frames = eta = est_mb = 0
     if os.path.exists("/tmp/vop_heartbeat"):
         try:
             with open("/tmp/vop_heartbeat", "r") as f:
@@ -82,36 +73,29 @@ def get_status():
                 total_frames = hb.get("total", 0)
                 eta = hb.get("eta", 0)
                 est_mb = hb.get("est_mb", 0)
-        except json.JSONDecodeError:
-            pass 
+        except: pass
 
     try:
         statvfs = os.statvfs('/')
         disk_free = (statvfs.f_frsize * statvfs.f_bavail) / (1024**3)
         disk_str = f"FREE: {disk_free:.1f}GB"
-        if est_mb > 0:
-            disk_str += f" | EST JOB SIZE: {est_mb}MB"
-    except:
-        disk_str = "DISK UNKNOWN"
+        if est_mb > 0: disk_str += f" | EST JOB SIZE: {est_mb}MB"
+    except: disk_str = "DISK UNKNOWN"
 
     latest_wp = None
     wp_list = glob.glob(os.path.join(BASE_DIR, "WorkPrints", "*.mp4"))
     if wp_list:
         latest_wp = os.path.basename(max(wp_list, key=os.path.getctime))
 
-    return jsonify({
-        "status": status, "msg": msg, "current": current_frame, 
-        "total": total_frames, "eta": eta, "disk": disk_str, "params": params,
-        "latest_wp": latest_wp 
-    })
+    return jsonify({"status": status, "msg": msg, "current": current_frame, 
+                    "total": total_frames, "eta": eta, "disk": disk_str, 
+                    "params": params, "latest_wp": latest_wp})
 
 @app.route('/get_img_aspect', methods=['GET'])
 def get_img_aspect():
     job = load_job_state()
     img_name = job.get('image', '')
-    if not img_name:
-        return jsonify({'aspect': 1.0})
-        
+    if not img_name: return jsonify({'aspect': 1.0})
     img_path = os.path.join(PROJ_MAG_DIR, img_name)
     aspect = 1.0
     if os.path.exists(img_path):
@@ -120,9 +104,7 @@ def get_img_aspect():
             if img is not None:
                 h, w = img.shape[:2]
                 aspect = w / h
-        except Exception as e:
-            print(f"[ERROR] Could not calculate aspect ratio: {e}")
-            
+        except: pass
     return jsonify({'aspect': aspect})
 
 @app.route('/sync_state', methods=['POST'])
@@ -138,54 +120,40 @@ def preview():
     req_type = data.get('type', 'unknown')
     target_frame = data.get('probe_frame', 1)
     
+    # RESTORED AUDIT LOGGING
     if req_type == 'cam_preview':
         print(f"\n[UI ACTION] Button Pressed: CAM VIEW (Frame: {target_frame})")
     else:
         print(f"\n[UI ACTION] Button Pressed: PROJ PROBE (Frame: {target_frame})")
-        
+
     job_file = "/tmp/vop_job.json"
-    with open(job_file, "w") as f:
-        json.dump(data, f)
-        
-    # ROUTING CHANGE: Pointing to modules/engine.py
+    with open(job_file, "w") as f: json.dump(data, f)
     subprocess.run(["python3", os.path.join(BASE_DIR, "modules", "engine.py"), "--job", job_file])
     return jsonify({"status": "ok"})
 
 @app.route('/execute_sequence', methods=['POST'])
 def execute_sequence():
     global engine_process
-    data = request.json
-    print("\n[UI ACTION] Button Pressed: SEQUENCE RENDER")
-    
     if engine_process is not None and engine_process.poll() is None:
          print("[ERROR] Attempted to start sequence, but engine is already running.")
          return jsonify({"status": "error", "msg": "Engine is already running."}), 400
-
+    
+    print("\n[UI ACTION] Button Pressed: SEQUENCE RENDER")
+    data = request.json
     job_file = "/tmp/vop_job.json"
-    with open(job_file, "w") as f:
-        json.dump(data, f)
-        
-    # ROUTING CHANGE: Pointing to modules/engine.py
+    with open(job_file, "w") as f: json.dump(data, f)
     engine_process = subprocess.Popen(["python3", os.path.join(BASE_DIR, "modules", "engine.py"), "--job", job_file])
     return jsonify({"status": "started"})
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
     print("\n[UI ACTION] Uploading new file to ProjMag...")
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-        
+    if 'file' not in request.files: return jsonify({"error": "No file"}), 400
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-        
-    for f in os.listdir(PROJ_MAG_DIR):
-        os.remove(os.path.join(PROJ_MAG_DIR, f))
-        
-    filename = file.filename
-    file.save(os.path.join(PROJ_MAG_DIR, filename))
-    print(f"[UI ACTION] Upload complete: {filename}")
-    return jsonify({"status": "ok", "filename": filename})
+    for f in os.listdir(PROJ_MAG_DIR): os.remove(os.path.join(PROJ_MAG_DIR, f))
+    file.save(os.path.join(PROJ_MAG_DIR, file.filename))
+    print(f"[UI ACTION] Upload complete: {file.filename}")
+    return jsonify({"status": "ok", "filename": file.filename})
 
 @app.route('/panic', methods=['POST'])
 def panic():
@@ -201,8 +169,7 @@ def panic():
 def nuke_mag():
     print("\n[UI ACTION] Button Pressed: NUKE MAG (Clearing TIFFs)")
     for f in os.listdir(CAM_MAG_DIR):
-        if f.endswith(".tif"):
-            os.remove(os.path.join(CAM_MAG_DIR, f))
+        if f.endswith(".tif"): os.remove(os.path.join(CAM_MAG_DIR, f))
     return jsonify({"status": "mag_cleared"})
 
 @app.route('/workprints/<filename>')
@@ -211,8 +178,7 @@ def serve_workprint(filename):
 
 if __name__ == '__main__':
     print("=========================================")
-    print(" VOP Server is online.")
-    print(" Heartbeat logging is silenced.")
+    print(" VOP Server (v0.1.8) is online.")
     print(" UI available at: http://<PI_IP>:5000")
     print("=========================================")
     app.run(host='0.0.0.0', port=5000)

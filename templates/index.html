@@ -28,23 +28,22 @@
 
         <div class="controls-area">
             
-            <div class="probe-controls">
-                <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
-                <button class="action-btn secondary" onclick="runTask('cam_preview')">Cam View</button>
-                <button class="action-btn" onclick="runTask('execute')" style="grid-column: 1 / -1; background: #0f0; color: #000;">RENDER SEQUENCE</button>
-                <button class="action-btn danger" onclick="panic()">PANIC STOP</button>
-                <button class="action-btn danger" onclick="nukeMag()">NUKE MAG</button>
-            </div>
-
             <div class="group-box">
-                <div class="group-title">Manual Probe Override</div>
-                <div class="input-row">
+                <div class="group-title">Engine Controls</div>
+                <div class="probe-controls">
+                    <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
+                    <button class="action-btn secondary" onclick="runTask('cam_preview')">Cam View</button>
+                    <button class="action-btn" onclick="runTask('execute')" style="grid-column: 1 / -1; background: #0f0; color: #000;">RENDER SEQUENCE</button>
+                    <button class="action-btn danger" onclick="panic()">PANIC STOP</button>
+                    <button class="action-btn danger" onclick="nukeMag()">NUKE MAG</button>
+                </div>
+                <div class="input-row" style="margin-top: 10px; border-top: 1px solid #222; padding-top: 10px;">
                     <div class="c-box">
                         <label>Target Frame</label>
                         <input type="number" id="probe_frame" value="1">
                     </div>
                     <div class="c-box">
-                        <label>Subframe (0.0 - 1.0)</label>
+                        <label>Subframe</label>
                         <input type="number" step="0.1" id="probe_sub" value="0.0">
                     </div>
                 </div>
@@ -53,39 +52,21 @@
             <div class="group-box">
                 <div class="group-title">Hardware & Globals</div>
                 <div class="input-row">
-                    <div class="c-box">
-                        <label>Cam Res</label>
-                        <input type="text" id="cam_res" value="2028x1520">
-                    </div>
-                    <div class="c-box">
-                        <label>FPS</label>
-                        <input type="number" id="fps" value="24">
-                    </div>
-                    <div class="c-box">
-                        <label>Gain</label>
-                        <input type="number" step="0.1" id="gain" value="1.0">
-                    </div>
-                    <div class="c-box">
-                        <label>AWB R</label>
-                        <input type="number" step="0.01" id="awb_r" value="3.18">
-                    </div>
-                    <div class="c-box">
-                        <label>AWB B</label>
-                        <input type="number" step="0.01" id="awb_b" value="1.45">
-                    </div>
+                    <div class="c-box"><label>FPS</label><input type="number" id="fps" value="24"></div>
+                    <div class="c-box"><label>Gain</label><input type="number" step="0.1" id="gain" value="1.0"></div>
+                    <div class="c-box"><label>AWB R</label><input type="number" step="0.01" id="awb_r" value="3.18"></div>
+                    <div class="c-box"><label>AWB B</label><input type="number" step="0.01" id="awb_b" value="1.45"></div>
+                    <div class="c-box"><label>Proj FOV</label><input type="number" id="fov" value="45"></div>
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <div class="c-box"><label>Cam Res</label><input type="text" id="cam_res" value="2028x1520"></div>
                     <div class="c-box">
                         <label>Mono</label>
-                        <select id="mono_mode">
-                            <option value="off">Off</option>
-                            <option value="on">On</option>
-                        </select>
+                        <select id="mono_mode"><option value="off">Off</option><option value="on">On</option></select>
                     </div>
                     <div class="c-box">
-                        <label>TIFF</label>
-                        <select id="tiff_compression">
-                            <option value="zip">ZIP</option>
-                            <option value="none">None</option>
-                        </select>
+                        <label>Compression</label>
+                        <select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select>
                     </div>
                 </div>
             </div>
@@ -104,29 +85,22 @@
                     </div>
                 </div>
                 <div class="input-row" style="margin-top: 10px;">
-                    <div class="c-box">
-                        <label>Proj FOV</label>
-                        <input type="number" id="fov" value="45">
-                    </div>
-                    <div class="c-box">
-                        <label>World Scale</label>
-                        <input type="number" step="0.0001" id="coord_scale" value="1.0"> 
-                    </div>
-                    <div class="c-box">
-                        <label>&nbsp;</label>
-                        <button class="action-btn secondary" onclick="calcFitScale()">FIT FOV</button>
-                    </div>
+                    <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="coord_scale" value="1.0"></div>
+                    <div class="c-box" style="justify-content: flex-end;"><button class="action-btn secondary" style="height: 26px; padding: 0; font-size: 0.7em;" onclick="calcFitScale()">FIT FOV</button></div>
                 </div>
             </div>
             
-        </div> <div class="sheets-area">
+        </div>
+
+        <div class="sheets-area">
             <div class="sheet-container">
                 {% include 'sections/exp-sheet.html' %}
             </div>
-
             {% include 'sections/cheat-sheet.html' %}
         </div>
 
-    </div> <script src="{{ url_for('static', filename='main.js') }}"></script>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

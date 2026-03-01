@@ -1,8 +1,8 @@
 /* VOP Module:     main.js
-Version:        v0.0.41
+Version:        v0.0.42
 Description:    Frontend application logic. Handles dynamic HTML generation,
                 multi-device state synchronization via timestamps, and UI events.
-                Grid-aligned with exp-sheet.html for flawless CSS layout.
+                Restored SRC and STP inputs to maintain step-printing logic context.
 */
 
 let local_sync_ts = 0; 
@@ -62,7 +62,6 @@ async function calcFitScale() {
     }
 }
 
-// FIXED: Perfectly aligned to the 12-column CSS Grid defined in style.css
 function createRowHTML(i) {
     return `
         <div class="sheet-row" id="row_${i}">
@@ -82,6 +81,8 @@ function createRowHTML(i) {
             <div class="row-center">
                 <input id="crn${i}" type="checkbox" title="Corner" onchange="triggerSync()">
             </div>
+            <div title="Source Anchor (-1 Auto)"><input id="src${i}" type="number" step="1" value="-1" oninput="triggerSync()"></div>
+            <div title="Source Step"><input id="stp${i}" type="number" step="1" value="1" oninput="triggerSync()"></div>
             <div><input id="p${i}" type="text" value="0,0,-1.5" oninput="triggerSync()"></div>
             <div><input id="r${i}" type="text" value="0,0,0" oninput="triggerSync()"></div>
             <div><input id="c${i}_hex" type="color" value="#ffffff" title="ProjGel" onchange="triggerSync()"></div>
@@ -98,17 +99,13 @@ function addKeyframe(skipSync = false) {
     const prevId = keyframeCount;
     keyframeCount++;
     
-    // Explicitly targeting the sheet_body div from exp-sheet.html
     const container = document.getElementById('sheet_body');
     const template = document.createElement('template');
     template.innerHTML = createRowHTML(keyframeCount);
-    
-    // Append the newly generated row
     container.appendChild(template.content.firstElementChild);
     
-    // Clone properties from the previous row if it exists
     if (prevId > 0) {
-        const fieldsToClone = ['m', 'crn', 'p', 'r', 'c_hex', 'cg_hex', 's', 'sd', 'ph'];
+        const fieldsToClone = ['m', 'crn', 'src', 'stp', 'p', 'r', 'c_hex', 'cg_hex', 's', 'sd', 'ph'];
         fieldsToClone.forEach(f => {
             const isHex = f.includes('_hex');
             const baseStr = f.replace('_hex', '');
