@@ -1,8 +1,8 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.85-stable
+Version:        v0.0.86-stable
 Description:    Primary execution loop. Dependencies isolated to external modules.
-                Includes Smart ETA JSON heartbeat generator.
+                Path logic updated to run securely from inside the /modules/ directory.
 """
 import os
 import sys
@@ -24,7 +24,6 @@ def log_audit(msg):
     print(f"[{time.strftime('%H:%M:%S')}] AUDIT: {msg}")
 
 def save_frame_async(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced):
-    # Removed raw heartbeat string writing from here to avoid breaking the JSON structure.
     try:
         cutil.process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced)
     except Exception as e: 
@@ -34,7 +33,9 @@ def run_vop_engine(job_path):
     with open(job_path, 'r') as f: 
         job_data = json.load(f)
         
-    base_path = os.path.dirname(os.path.abspath(__file__))
+    # ROUTING CHANGE: Engine now steps up one directory to access the main repo root
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     cam_mag_dir = os.path.join(base_path, "CamMag")
     proj_mag_dir = os.path.join(base_path, "ProjMag")
     static_dir = os.path.join(base_path, "static")
@@ -179,7 +180,6 @@ def run_vop_engine(job_path):
         
         log_audit(f"Beginning Render Sequence: Frames {f_start} to {f_end} ({total_frames} total)")
         
-        # --- SMART ESTIMATOR TRACKING ---
         seq_start_time = time.time()
         frames_done = 0
         total_size_bytes = 0
@@ -188,12 +188,10 @@ def run_vop_engine(job_path):
             execute_exposure(f)
             frames_done += 1
             
-            # 1. Calculate Time ETA
             elapsed = time.time() - seq_start_time
             avg_time = elapsed / frames_done
             eta_sec = int(avg_time * (total_frames - frames_done))
             
-            # 2. Calculate Space Estimate
             out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
             if os.path.exists(out_f):
                 total_size_bytes += os.path.getsize(out_f)
@@ -201,7 +199,6 @@ def run_vop_engine(job_path):
             avg_size = total_size_bytes / frames_done
             est_remaining_mb = (avg_size * (total_frames - frames_done)) / (1024 * 1024)
             
-            # 3. Write structured JSON to the heartbeat
             hb_data = {
                 "current": frames_done,
                 "total": total_frames,
