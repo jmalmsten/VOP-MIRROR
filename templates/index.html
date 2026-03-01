@@ -3,110 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VOP v0.9.13</title>
+    <title>VOP Engine</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
-        <header class="vop-header">
-            <h1>VOP <small style="color:#555">v0.9.13</small></h1>
-            <div id="sync_indicator" style="color:#0f0; font-size:0.8em; font-family: monospace;">● SYNCED</div>
-        </header>
+        
+        <div class="vop-header">
+            <h2>VOP Engine v0.4.1</h2>
+            <div id="sync_indicator" style="color: #666; font-size: 0.8em;">○ OFFLINE</div>
+        </div>
 
         <div class="status-bar">
-            <span id="st_msg">Idle</span>
-            <div class="progress-container"><div id="st_bar" class="progress-fill"></div></div>
-            <a id="wp_download" href="#" style="color:#0cf; text-decoration:none; display:none;">DOWNLOAD</a>
+            <div id="st_msg">Initializing...</div>
+            <div class="progress-container">
+                <div id="st_bar" class="progress-fill"></div>
+            </div>
         </div>
 
         <div class="preview-area">
-            <img id="probe_img" src="" alt="Probe Capture">
-            <div class="preview-overlay">
-                <span id="preview_type">NO SIGNAL</span>
-                <span style="opacity:0.6"> | F:</span> <span id="val_probe_frame">--</span>
-                <span style="opacity:0.6"> | S:</span> <span id="val_probe_sub">--</span>
-            </div>
+            <div class="preview-overlay" id="preview_type">IDLE</div>
+            <img id="probe_img" alt="Live Preview">
         </div>
 
         <div class="controls-area">
             
-            <div class="group-box">
-                <div class="group-title">Probe & Action</div>
-                <div class="probe-controls">
-                    <button class="action-btn" onclick="runTask('preview')">PROJ PROBE</button>
-                    <button class="action-btn secondary" onclick="runTask('cam_preview')">CAM VIEW</button>
-                </div>
-                <div class="input-row" style="margin-bottom:10px;">
-                    <div class="c-box"><label>PRB FRAME</label><input id="probe_frame" type="number" value="1"></div>
-                    <div class="c-box"><label>PRB SUB</label><input id="probe_sub" type="number" step="0.01" value="0.0"></div>
-                </div>
-                <div class="probe-controls">
-                    <button class="action-btn" style="background:#0a0; color:#fff;" onclick="runTask('execute')">RUN SEQUENCE</button>
-                    <button class="action-btn danger" onclick="panic()">PANIC STOP</button>
-                </div>
-                <button class="action-btn secondary" style="margin-top:5px; width:100%;" onclick="nukeMag()">NUKE MAG</button>
+            <div class="probe-controls">
+                <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
+                <button class="action-btn secondary" onclick="runTask('cam_preview')">Cam View</button>
+                <button class="action-btn" onclick="runTask('execute')" style="grid-column: 1 / -1; background: #0f0; color: #000;">RENDER SEQUENCE</button>
+                <button class="action-btn danger" onclick="panic()">PANIC STOP</button>
+                <button class="action-btn danger" onclick="nukeMag()">NUKE MAG</button>
             </div>
 
             <div class="group-box">
-                <div class="group-title">Hardware</div>
+                <div class="group-title">Manual Probe Override</div>
                 <div class="input-row">
-                    <div class="c-box"><label>FOV</label><input id="fov" type="number" step="0.1"></div>
-                    <div class="c-box"><label>FPS</label><input id="fps" type="number"></div>
-                    <div class="c-box"><label>GAIN</label><input id="gain" type="number" step="0.1"></div>
-                </div>
-                <div class="input-row" style="margin-top:8px;">
-                     <div class="c-box"><label>AWB R</label><input id="awb_r" type="number" step="0.01"></div>
-                    <div class="c-box"><label>AWB B</label><input id="awb_b" type="number" step="0.01"></div>
-                </div>
-                
-                <div class="input-row" style="margin-top:10px; background:#222; padding:5px; border-radius:3px;">
-                    <div class="c-box" style="flex-grow:1;">
-                        <label style="color:#aaa;">WORLD SCALE</label>
-                        <input id="coord_scale" type="number" step="0.001" value="1.0" style="color:#0f0; border:none; background:transparent; font-weight:bold;">
-                    </div>
-                    <button class="upload-btn" onclick="calcFitScale()" style="width:auto; padding:0 10px;" title="Normalize so Z=-1 fits screen">FIT</button>
-                </div>
-
-                 <div class="upload-cluster" style="margin-top:10px;">
                     <div class="c-box">
-                        <label>PROJ IMAGE</label><input id="image" type="text">
+                        <label>Target Frame</label>
+                        <input type="number" id="probe_frame" value="1">
                     </div>
-                    <div>
-                        <input type="file" id="file_input" style="display: none;" accept=".png,.jpg,.jpeg">
+                    <div class="c-box">
+                        <label>Subframe (0.0 - 1.0)</label>
+                        <input type="number" step="0.1" id="probe_sub" value="0.0">
+                    </div>
+                </div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-title">Hardware & Globals</div>
+                <div class="input-row">
+                    <div class="c-box">
+                        <label>Cam Res</label>
+                        <input type="text" id="cam_res" value="2028x1520">
+                    </div>
+                    <div class="c-box">
+                        <label>FPS</label>
+                        <input type="number" id="fps" value="24">
+                    </div>
+                    <div class="c-box">
+                        <label>Gain</label>
+                        <input type="number" step="0.1" id="gain" value="1.0">
+                    </div>
+                    <div class="c-box">
+                        <label>AWB R</label>
+                        <input type="number" step="0.01" id="awb_r" value="3.18">
+                    </div>
+                    <div class="c-box">
+                        <label>AWB B</label>
+                        <input type="number" step="0.01" id="awb_b" value="1.45">
+                    </div>
+                    <div class="c-box">
+                        <label>Mono</label>
+                        <select id="mono_mode">
+                            <option value="off">Off</option>
+                            <option value="on">On</option>
+                        </select>
+                    </div>
+                    <div class="c-box">
+                        <label>TIFF</label>
+                        <select id="tiff_compression">
+                            <option value="zip">ZIP</option>
+                            <option value="none">None</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-title">Projection Target</div>
+                <div class="upload-cluster">
+                    <div class="c-box">
+                        <label>Active Image (ProjMag)</label>
+                        <input type="text" id="image" readonly>
+                    </div>
+                    <div class="c-box">
+                        <label>&nbsp;</label>
+                        <input type="file" id="file_input" style="display:none;">
                         <button class="upload-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
                     </div>
                 </div>
-            </div>
-
-            <div class="group-box">
-                <div class="group-title">Process</div>
-                <div class="input-row">
-                    <div class="c-box"><label>RES</label>
-                        <select id="cam_res">
-                            <option value="4056x3040">4K</option>
-                            <option value="2028x1520" selected>2K</option>
-                        </select>
+                <div class="input-row" style="margin-top: 10px;">
+                    <div class="c-box">
+                        <label>Proj FOV</label>
+                        <input type="number" id="fov" value="45">
                     </div>
-                    <div class="c-box"><label>MONO</label>
-                        <select id="mono_mode">
-                            <option value="off">RGB</option>
-                            <option value="on">Mono</option>
-                        </select>
+                    <div class="c-box">
+                        <label>World Scale</label>
+                        <input type="number" step="0.0001" id="coord_scale" value="1.0"> 
                     </div>
-                    <div class="c-box"><label>ZIP</label>
-                        <select id="tiff_compression"><option value="none">No</option><option value="zip">Yes</option></select>
+                    <div class="c-box">
+                        <label>&nbsp;</label>
+                        <button class="action-btn secondary" onclick="calcFitScale()">FIT FOV</button>
                     </div>
                 </div>
             </div>
+            
+        </div> <div class="sheets-area">
+            <div class="sheet-container">
+                {% include 'sections/exp-sheet.html' %}
+            </div>
 
+            {% include 'sections/cheat-sheet.html' %}
         </div>
 
-        <div class="sheet-section">
-            <div class="group-title">EXPOSURE SHEET</div>
-            {% include 'sections/sheet.html' %}
-        </div>
-
-    </div>
-    <script src="{{ url_for('static', filename='main.js') }}"></script>
+    </div> <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

@@ -1,360 +1,105 @@
-/* VOP Module:     style.css
-Version:        v0.0.19
-Description:    Centralized stylesheet for the VOP Web Interface.
-                Strictly defines grid layouts, table column widths, and component styling
-                to prevent UI elements from shifting during state updates.
-*/
+/* VOP Module: style.css - v0.0.9 */
+body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
+.container { max-width: 1600px; margin: 0 auto; display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
 
-/* Base Document Setup */
-body { 
-    background: #0b0b0b; 
-    color: #ddd; 
-    font-family: sans-serif; 
-    margin: 0; 
-    padding: 20px; 
-}
+/* --- Header & Layout --- */
+.vop-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
 
-/* Main Layout Grid: Divides the screen into the large left working area and the 380px right control panel. */
-.container { 
-    max-width: 1800px; 
-    margin: 0 auto; 
-    display: grid; 
-    grid-template-columns: 1fr 380px; 
-    gap: 20px; 
-}
+/* Changed background from #000 to #1a1a1a to reveal image edges */
+.preview-area { background: #1a1a1a; border: 1px solid #333; display: flex; align-items: center; justify-content: center; min-height: 400px; max-height: 55vh; overflow: hidden; position: relative; }
+#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+.preview-overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; font-size: 0.8em; pointer-events: none; }
 
-/* UI FIX: Clean Inputs
-Removes the default webkit/moz spinner arrows (up/down buttons) inside number inputs.
-This maximizes the horizontal space available for the actual text characters.
-*/
-input[type=number]::-webkit-inner-spin-button, 
-input[type=number]::-webkit-outer-spin-button { 
-    -webkit-appearance: none; 
-    margin: 0; 
-}
-input[type=number] { 
-    -moz-appearance: textfield; 
-}
+.controls-area { display: flex; flex-direction: column; gap: 15px; max-height: 55vh; overflow-y: auto; padding-right: 5px; }
 
-/* --- HEADER & PREVIEW AREAS --- */
-.vop-header { 
-    grid-column: 1 / -1; 
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    border-bottom: 1px solid #333; 
-    padding-bottom: 10px; 
-    margin-bottom: 10px; 
-}
+/* --- Forms & Controls --- */
+.group-box { background: #151515; padding: 15px; border-radius: 4px; border: 1px solid #222; }
+.group-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; }
 
-.preview-area { 
-    background: #222; 
-    border: 1px solid #444; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    min-height: 400px; 
-    height: 55vh; 
-    overflow: hidden; 
-    position: relative; 
-}
+.input-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px; }
+.input-row .c-box button { height: 26px; line-height: 26px; padding: 0; }
+.c-box { display: flex; flex-direction: column; }
+.c-box label { font-size: 0.6em; color: #888; margin-bottom: 4px; }
+.c-box input, .c-box select { background: #222; border: 1px solid #444; color: #0cf; padding: 4px; border-radius: 3px; font-size: 0.85em; }
 
-/* The probe image uses object-fit: contain to ensure the aspect ratio is preserved without stretching. */
-#probe_img { 
-    max-width: 100%; 
-    max-height: 100%; 
-    object-fit: contain; 
-    display: none; 
-    box-shadow: 0 0 20px #000; 
-}
+/* Clean up default color inputs globally */
+.c-box input[type="color"] { -webkit-appearance: none; padding: 0; height: 24px; width: 100%; cursor: pointer; border: 1px solid #444; border-radius: 3px; }
+.c-box input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
+.c-box input[type="color"]::-webkit-color-swatch { border: none; border-radius: 2px; }
 
-.preview-overlay { 
-    position: absolute; 
-    top: 10px; 
-    left: 10px; 
-    background: rgba(0,0,0,0.7); 
-    padding: 5px 10px; 
-    font-size: 0.8em; 
-    pointer-events: none; 
-}
-
-.controls-area { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 15px; 
-    height: 55vh; 
-    overflow-y: auto; 
-    padding-right: 5px; 
-}
-
-/* --- THE SHEET (TABLE) --- */
-.sheet-section { 
-    grid-column: 1 / -1; 
-    background: #111; 
-    padding: 0; /* Padding removed to allow the table to sit flush against the scroll boundaries */
-    border-radius: 4px; 
-    border: 1px solid #222; 
-    height: 500px; 
-    overflow-y: auto; 
-    overflow-x: auto; 
-    position: relative;
-}
-
-.vop-table { 
-    width: 100%; 
-    border-collapse: collapse; 
-    font-size: 0.85em; 
-    table-layout: fixed; /* Enforces strict adherence to the defined column pixel widths */
-}
-
-/* Sticky Header: Keeps the column labels locked to the top of the container while scrolling through rows. */
-.vop-table thead th {
-    position: sticky; 
-    top: 0; 
-    background: #1a1a1a; 
-    z-index: 10;
-    padding: 8px 4px; 
-    border-bottom: 2px solid #444; 
-    color: #888;
-    font-size: 0.75em; 
-    text-transform: uppercase; 
-    text-align: center;
-}
-
-.vop-table tbody td { 
-    padding: 4px; 
-    border-bottom: 1px solid #222; 
-    background: #111; 
-}
-
-/* Input Styling inside the Table */
-.vop-table input[type="text"], 
-.vop-table input[type="number"], 
-.vop-table select { 
-    background: #000; 
-    border: 1px solid #333; 
-    color: #fff; 
-    padding: 4px; 
-    width: 100%; 
-    border-radius: 2px; 
-    font-family: monospace; 
-    font-size: 1.0em; 
-    box-sizing: border-box; 
-    text-align: center; 
-    height: 26px;
-}
-
-/* Spatial arrays (POS/ROT) are left-aligned because long comma-separated strings are difficult to read when centered. */
-.vop-table input[type="text"] { 
-    text-align: left; 
-}
-
-.vop-table input[type="checkbox"] { 
-    display: block; 
-    margin: 0 auto; 
-    width: 16px; 
-    height: 16px; 
-}
-
-/* Table Buttons */
-.snap-btn { 
-    background: #222; 
-    color: #0cf; 
-    border: 1px solid #444; 
-    border-radius: 3px; 
-    cursor: pointer; 
-    width: 100%; 
-    height: 26px; 
-    font-size: 0.8em; 
-}
-.snap-btn:hover { background: #0cf; color: #000; }
-
-.del-btn { 
-    background: #300; 
-    color: #f44; 
-    border: 1px solid #500; 
-    border-radius: 3px; 
-    cursor: pointer; 
-    font-weight: bold; 
-    width: 100%; 
-    height: 26px; 
-}
-.del-btn:hover { background: #f00; color: #fff; }
-
-.add-row { 
-    margin-top: 10px; 
-    text-align: center; 
-    grid-column: 1 / -1; 
-    margin-bottom: 20px; 
-}
-
-.add-btn { 
-    background: #111; 
-    border: 1px solid #333; 
-    color: #666; 
-    width: 100%; 
-    padding: 8px; 
-    cursor: pointer; 
-    text-transform: uppercase; 
-    font-size: 0.75em; 
-    letter-spacing: 1px; 
-}
-.add-btn:hover { background: #222; color: #fff; border-color: #555; }
-
-/* --- COLUMN WIDTHS --- */
-/* Strictly fixed pixel widths utilizing CSS nth-child to guarantee the header (th) 
-and data rows (td) never misalign, regardless of scrollbar presence. 
-*/
-.vop-table th:nth-child(1), .vop-table td:nth-child(1) { width: 30px; }   /* IDX: Row index number */
-.vop-table th:nth-child(2), .vop-table td:nth-child(2) { width: 80px; }   /* FR: Master Frame (Expanded to 80px) */
-.vop-table th:nth-child(3), .vop-table td:nth-child(3) { width: 40px; }   /* GO: Snap playhead button */
-.vop-table th:nth-child(4), .vop-table td:nth-child(4) { width: 50px; }   /* MOD: Interpolation Mode */
-.vop-table th:nth-child(5), .vop-table td:nth-child(5) { width: 30px; }   /* C: Corner Flag */
-.vop-table th:nth-child(6), .vop-table td:nth-child(6) { width: 50px; }   /* SRC: Source Anchor */
-.vop-table th:nth-child(7), .vop-table td:nth-child(7) { width: 40px; }   /* STP: Source Step */
-.vop-table th:nth-child(8), .vop-table td:nth-child(8) { width: 180px; }  /* POS: X,Y,Z */
-.vop-table th:nth-child(9), .vop-table td:nth-child(9) { width: 160px; }  /* ROT: Pitch,Yaw,Roll */
-.vop-table th:nth-child(10), .vop-table td:nth-child(10) { width: 35px; } /* PG: Proj Gel */
-.vop-table th:nth-child(11), .vop-table td:nth-child(11) { width: 35px; } /* CG: Cam Gel */
-.vop-table th:nth-child(12), .vop-table td:nth-child(12) { width: 50px; } /* EXP: Shutter duration */
-.vop-table th:nth-child(13), .vop-table td:nth-child(13) { width: 50px; } /* SD: Scale Dampening */
-.vop-table th:nth-child(14), .vop-table td:nth-child(14) { width: 50px; } /* PH: Shutter Phase */
-.vop-table th:nth-child(15), .vop-table td:nth-child(15) { width: 30px; } /* DEL: Delete Row */
-
-/* --- CHEAT SHEET --- */
-.cheat-sheet {
-    grid-column: 1 / -1; 
-    background: #0a0a0a; 
-    border: 1px solid #222; 
-    padding: 15px; 
-    border-radius: 4px;
-    display: grid; 
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-    gap: 10px; 
-    font-size: 0.8em; 
-    color: #888;
-}
-.cheat-item strong { 
-    color: #0cf; 
-    display: inline-block; 
-    width: 40px; 
-}
-
-/* --- UI COMPONENTS (Group Boxes, Upload Buttons) --- */
-.status-bar { 
-    grid-column: 1 / -1; 
-    background: #1a1a1a; 
-    border: 1px solid #333; 
-    padding: 5px 10px; 
-    font-size: 0.8em; 
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    margin-bottom: 10px; 
-}
-
-.progress-container { 
-    flex-grow: 1; 
-    margin: 0 15px; 
-    background: #000; 
-    height: 6px; 
-    border-radius: 3px; 
-    overflow: hidden; 
-}
-
-.progress-fill { 
-    height: 100%; 
-    background: #0cf; 
-    width: 0%; 
-    transition: width 0.3s; 
-}
-
-.group-box { 
-    background: #151515; 
-    padding: 15px; 
-    border-radius: 4px; 
-    border: 1px solid #222; 
-}
-
-.group-title { 
-    font-size: 0.7em; 
-    color: #555; 
-    text-transform: uppercase; 
-    margin-bottom: 10px; 
-    border-bottom: 1px solid #222; 
-    padding-bottom: 5px; 
-}
-
-.input-row { 
-    display: grid; 
-    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); 
-    gap: 8px; 
-}
-
-.c-box { 
-    display: flex; 
-    flex-direction: column; 
-}
-
-.c-box label { 
-    font-size: 0.6em; 
-    color: #888; 
-    margin-bottom: 4px; 
-}
-
-.c-box input, .c-box select { 
-    background: #222; 
-    border: 1px solid #444; 
-    color: #0cf; 
-    padding: 4px; 
-    border-radius: 3px; 
-    font-size: 0.85em; 
-}
-
-.c-box input[type="color"] { 
-    padding: 0; 
-    height: 24px; 
-    width: 100%; 
-    cursor: pointer; 
-}
-
-.upload-cluster { 
-    display: grid; 
-    grid-template-columns: 1fr 70px; 
-    gap: 8px; 
-    align-items: end; 
-}
-
-.upload-btn { 
-    background: #222; 
-    border: 1px solid #444; 
-    color: #ccc; 
-    cursor: pointer; 
-    padding: 0; 
-    border-radius: 3px; 
-    font-size: 0.75em; 
-    height: 24px; 
-    line-height: 24px; 
-}
+/* Upload Cluster */
+.upload-cluster { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: end; }
+.upload-btn { background: #222; border: 1px solid #444; color: #ccc; cursor: pointer; padding: 0; border-radius: 3px; font-size: 0.75em; height: 26px; line-height: 26px; }
 .upload-btn:hover { background: #0cf; color: #000; }
 
-.probe-controls { 
-    display: grid; 
-    grid-template-columns: 1fr 1fr; 
-    gap: 10px; 
-    margin-bottom: 10px; 
-}
+/* --- Sheets Area (Full Width) --- */
+.sheets-area { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 20px; margin-top: 10px; }
 
-.action-btn { 
-    background: #0cf; 
-    color: #000; 
-    border: none; 
-    padding: 8px; 
-    border-radius: 3px; 
-    cursor: pointer; 
-    font-weight: bold; 
-    text-transform: uppercase; 
-    font-size: 0.8em; 
+/* --- Exposure Sheet --- */
+.sheet-container { background: #111; padding: 10px; border-radius: 4px; border: 1px solid #222; overflow-x: auto; display: flex; flex-direction: column; align-items: center; }
+
+.vop-sheet { width: 100%; max-width: 1100px; min-width: 950px; font-size: 0.85em; margin: 0 auto; }
+
+.sheet-row { display: grid; grid-template-columns: 30px 80px 60px 30px 1fr 1fr 40px 40px 60px 60px 60px 30px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
+
+.sheet-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
+.sheet-row input[type="text"], .sheet-row input[type="number"], .sheet-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 2px; width: 100%; border-radius: 2px; font-family: monospace; font-size: 0.9em; box-sizing: border-box; }
+.sheet-row input[type="checkbox"] { width: auto; margin: 0 auto; display: block; }
+
+/* Explicit styling to strip out bulky browser color picker padding in the sheet */
+.sheet-row input[type="color"] { 
+    -webkit-appearance: none; 
+    border: 1px solid #333; 
+    background: #1a1a1a; 
+    padding: 0; 
     width: 100%; 
+    height: 24px; 
+    border-radius: 2px; 
+    cursor: pointer; 
+    box-sizing: border-box; 
 }
+.sheet-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
+.sheet-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 1px; }
+
+/* Classes for JS generated elements */
+.row-index { color: #333; font-weight: bold; text-align: center; }
+.row-center { text-align: center; }
+
+/* Buttons inside sheet */
+.snap-btn { background: #222; color: #0cf; padding: 1px 4px; font-size: 0.7em; border: 1px solid #444; border-radius: 3px; cursor: pointer; }
+.snap-btn:hover { background: #0cf; color: #000; }
+.del-btn { background: #300; color: #f44; border: 1px solid #500; border-radius: 3px; cursor: pointer; font-weight: bold; padding: 0 4px; font-size: 0.8em; }
+.del-btn:hover { background: #f00; color: #fff; }
+.k-fr { display: flex; gap: 2px; align-items: center; }
+
+/* Add Row Button */
+.add-row { margin-top: 10px; text-align: center; width: 100%; max-width: 1100px; }
+.add-btn { background: #111; border: 1px solid #333; color: #666; width: 100%; padding: 6px; cursor: pointer; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+.add-btn:hover { background: #222; color: #fff; border-color: #555; }
+
+/* --- Status & Probe Controls --- */
+.status-bar { grid-column: 1 / -1; background: #1a1a1a; border: 1px solid #333; padding: 5px 10px; font-size: 0.8em; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.progress-container { flex-grow: 1; margin: 0 15px; background: #000; height: 6px; border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.3s; }
+
+.probe-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.action-btn { background: #0cf; color: #000; border: none; padding: 8px; border-radius: 3px; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 0.8em; width: 100%; }
 .action-btn:hover { background: #fff; }
+.action-btn.secondary { background: #333; color: #ccc; }
+.action-btn.secondary:hover { background: #444; color: #fff; }
+.action-btn.danger { background: #500; color: #faa; }
+.action-btn.danger:hover { background: #f00; color: #fff; }
+
+/* --- Cheat Sheet Section --- */
+.cheat-sheet-section { padding: 15px; background: #0d0d0d; border: 1px solid #222; border-radius: 4px; color: #888; }
+.cs-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; font-weight: bold; }
+.cs-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 0.75em; }
+.cs-item strong { color: #aaa; margin-right: 5px; }
+
+/* --- Responsive --- */
+@media (max-width: 1000px) {
+    .container { grid-template-columns: 1fr; }
+    .controls-area { height: auto; max-height: none; overflow: visible; }
+    .preview-area { min-height: 400px; max-height: none; }
+    .cs-grid { grid-template-columns: 1fr; } 
+}

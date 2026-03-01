@@ -1,14 +1,14 @@
 /* VOP Module:     main.js
-Version:        v0.0.40
+Version:        v0.0.41
 Description:    Frontend application logic. Handles dynamic HTML generation,
                 multi-device state synchronization via timestamps, and UI events.
-                Includes zero-crop frustum scaling and dynamic Workprint link generation.
+                Grid-aligned with exp-sheet.html for flawless CSS layout.
 */
 
 let local_sync_ts = 0; 
 let last_known_state_str = "";
 let keyframeCount = 0;
-let isFirstLoad = true; // Guarantees the UI populates on fresh boot
+let isFirstLoad = true;
 
 function formatTime(seconds) {
     if (!seconds || seconds < 0) return "00:00:00";
@@ -19,11 +19,6 @@ function formatTime(seconds) {
 }
 
 async function calcFitScale() {
-    /* Zero-Crop Frustum Scaling Math.
-    Calculates both vertical and horizontal constraints based on the 
-    camera sensor aspect ratio and the physical image aspect ratio,
-    selecting the minimum scale to guarantee no cropping occurs.
-    */
     const fovVal = parseFloat(document.getElementById('fov').value);
     const scaleInput = document.getElementById('coord_scale');
     if (!fovVal) return;
@@ -39,7 +34,7 @@ async function calcFitScale() {
 
     const camResStr = document.getElementById('cam_res').value || "2028x1520";
     const camRes = camResStr.split('x');
-    let camAspect = 1.333; // Default 4:3
+    let camAspect = 1.333; 
     if (camRes.length === 2) {
         camAspect = parseFloat(camRes[0]) / parseFloat(camRes[1]);
     }
@@ -67,32 +62,35 @@ async function calcFitScale() {
     }
 }
 
+// FIXED: Perfectly aligned to the 12-column CSS Grid defined in style.css
 function createRowHTML(i) {
     return `
-        <tr id="row_${i}">
-            <td class="row-index">${i}</td>
-            <td><input id="f${i}" type="number" onchange="updateProbeRange()" oninput="triggerSync()"></td>
-            <td><button class="snap-btn" onclick="jumpToFrame('f${i}')">GO</button></td>
-            <td>
+        <div class="sheet-row" id="row_${i}">
+            <div class="row-index">${i}</div>
+            <div class="k-fr">
+                <input id="f${i}" type="number" onchange="updateProbeRange()" oninput="triggerSync()">
+                <button class="snap-btn" onclick="jumpToFrame('f${i}')">GO</button>
+            </div>
+            <div>
                 <select id="m${i}" title="Interpolation Mode" onchange="triggerSync()">
                     <option value="S">Smth</option>
                     <option value="L">Lin</option>
                     <option value="I">In</option>
                     <option value="O">Out</option>
                 </select>
-            </td>
-            <td><input id="crn${i}" type="checkbox" title="Corner" onchange="triggerSync()"></td>
-            <td><input id="src${i}" type="number" step="1" title="Source Anchor (-1 Auto)" oninput="triggerSync()"></td>
-            <td><input id="stp${i}" type="number" step="1" value="1" title="Source Step" oninput="triggerSync()"></td>
-            <td><input id="p${i}" type="text" value="0,0,-1" oninput="triggerSync()"></td>
-            <td><input id="r${i}" type="text" value="0,0,0" oninput="triggerSync()"></td>
-            <td><input id="c${i}_hex" type="color" value="#ffffff" title="ProjGel" onchange="triggerSync()"></td>
-            <td><input id="cg${i}_hex" type="color" value="#ffffff" title="CamGel" onchange="triggerSync()"></td>
-            <td><input id="s${i}" type="number" step="0.1" value="1.0" oninput="triggerSync()"></td>
-            <td><input id="sd${i}" type="number" step="0.1" value="1.0" oninput="triggerSync()"></td>
-            <td><input id="ph${i}" type="number" step="0.1" value="0.5" oninput="triggerSync()"></td>
-            <td>${i > 1 ? `<button class="del-btn" onclick="removeKeyframe(${i})">×</button>` : ''}</td>
-        </tr>
+            </div>
+            <div class="row-center">
+                <input id="crn${i}" type="checkbox" title="Corner" onchange="triggerSync()">
+            </div>
+            <div><input id="p${i}" type="text" value="0,0,-1.5" oninput="triggerSync()"></div>
+            <div><input id="r${i}" type="text" value="0,0,0" oninput="triggerSync()"></div>
+            <div><input id="c${i}_hex" type="color" value="#ffffff" title="ProjGel" onchange="triggerSync()"></div>
+            <div><input id="cg${i}_hex" type="color" value="#ffffff" title="CamGel" onchange="triggerSync()"></div>
+            <div><input id="s${i}" type="number" step="0.1" value="1.0" oninput="triggerSync()"></div>
+            <div><input id="sd${i}" type="number" step="0.1" value="1.0" oninput="triggerSync()"></div>
+            <div><input id="ph${i}" type="number" step="0.1" value="0.5" oninput="triggerSync()"></div>
+            <div>${i > 1 ? `<button class="del-btn" onclick="removeKeyframe(${i})">×</button>` : ''}</div>
+        </div>
     `;
 }
 
@@ -100,13 +98,17 @@ function addKeyframe(skipSync = false) {
     const prevId = keyframeCount;
     keyframeCount++;
     
+    // Explicitly targeting the sheet_body div from exp-sheet.html
     const container = document.getElementById('sheet_body');
     const template = document.createElement('template');
     template.innerHTML = createRowHTML(keyframeCount);
+    
+    // Append the newly generated row
     container.appendChild(template.content.firstElementChild);
     
+    // Clone properties from the previous row if it exists
     if (prevId > 0) {
-        const fieldsToClone = ['m', 'crn', 'stp', 'p', 'r', 'c_hex', 'cg_hex', 's', 'sd', 'ph'];
+        const fieldsToClone = ['m', 'crn', 'p', 'r', 'c_hex', 'cg_hex', 's', 'sd', 'ph'];
         fieldsToClone.forEach(f => {
             const isHex = f.includes('_hex');
             const baseStr = f.replace('_hex', '');
@@ -298,13 +300,10 @@ setInterval(async () => {
         
         if (st.status === 'running' || st.status === 'busy') {
             const timeStr = formatTime(st.eta);
-            // Used innerHTML to consistently allow HTML tags if needed
             if (msgEl) msgEl.innerHTML = `${st.msg} [${st.current}/${st.total}] REMAINING: ${timeStr} | ${st.disk}`;
             if (bar) bar.style.width = (st.total > 0 ? (st.current/st.total*100) : 100) + "%";
         } else {
-            // NEW: Generate a clickable link if a workprint exists
             let wpLink = st.latest_wp ? ` | <a href="/workprints/${st.latest_wp}" target="_blank" style="color:#0cf; text-decoration:none; font-weight:bold;">▶ VIEW LATEST WORKPRINT</a>` : "";
-            
             if (msgEl) msgEl.innerHTML = `${st.msg} | ${st.disk}${wpLink}`;
             if (bar) bar.style.width = "0%";
         }
