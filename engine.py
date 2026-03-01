@@ -1,8 +1,8 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.84-stable
+Version:        v0.0.85-stable
 Description:    Primary execution loop. Dependencies isolated to external modules.
-                Includes decoupled EXP (Exposure Time in seconds) and SD (Smear Distance).
+                Includes Smart ETA JSON heartbeat generator.
 """
 import os
 import sys
@@ -23,12 +23,10 @@ os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 def log_audit(msg): 
     print(f"[{time.strftime('%H:%M:%S')}] AUDIT: {msg}")
 
-def save_frame_async(buffer_file, output_file, tiff_flag, cam_gel_rgb, frame_num, mono_forced):
+def save_frame_async(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced):
+    # Removed raw heartbeat string writing from here to avoid breaking the JSON structure.
     try:
-        success = cutil.process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced)
-        if success:
-            with open("/tmp/vop_heartbeat", "w") as f: 
-                f.write(str(frame_num))
+        cutil.process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced)
     except Exception as e: 
         log_audit(f"Save Error: {e}")
 
@@ -79,23 +77,15 @@ def run_vop_engine(job_path):
         tex, aspect_ratio = tex_mgr.load(playhead)
 
         center_st = timeline.get_state(frame_num)
-        
-        # --- DECOUPLED EXPOSURE & SMEAR LOGIC ---
-        # Note: 's' in the JSON key maps to EXP (Exposure Time in seconds)
         exp_sec = float(center_st['s'])  
         sd_frames = float(center_st['sd']) 
         ph_offset = float(center_st['ph']) 
         
-        # Calculate mathematical start and end points on the timeline based ONLY on Smear Distance (SD).
-        # If SD = 0, t_start and t_end equal frame_num, resulting in zero geometry movement.
         t_start = frame_num - (sd_frames * ph_offset)
         t_end = frame_num + (sd_frames * (1.0 - ph_offset))
         
-        # Calculate the physical duration the camera shutter is open based ONLY on EXP.
         x_ms = exp_sec * 1000.0
         total_ms = x_ms + 1000.0
-        
-        # Calculate how many subframes to render during the exposure
         num_steps = int(x_ms / 16.666) + 1
         path_cache = []
 
@@ -144,7 +134,7 @@ def run_vop_engine(job_path):
             cutil.generate_sensor_preview(buf_f, static_dir, avg_cg, mono_active)
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
-            save_frame_async(buf_f, out_f, tiff_flag, avg_cg, frame_num, mono_active)
+            save_frame_async(buf_f, out_f, tiff_flag, avg_cg, mono_active)
 
     if job_data.get('type') == 'preview':
         if not job_data.get('image'):
@@ -185,10 +175,44 @@ def run_vop_engine(job_path):
         if not all_frames: return
         
         f_start, f_end = min(all_frames), max(all_frames)
+        total_frames = f_end - f_start + 1
         
-        log_audit(f"Beginning Render Sequence: Frames {f_start} to {f_end}")
+        log_audit(f"Beginning Render Sequence: Frames {f_start} to {f_end} ({total_frames} total)")
+        
+        # --- SMART ESTIMATOR TRACKING ---
+        seq_start_time = time.time()
+        frames_done = 0
+        total_size_bytes = 0
+
         for f in range(f_start, f_end + 1):
             execute_exposure(f)
+            frames_done += 1
+            
+            # 1. Calculate Time ETA
+            elapsed = time.time() - seq_start_time
+            avg_time = elapsed / frames_done
+            eta_sec = int(avg_time * (total_frames - frames_done))
+            
+            # 2. Calculate Space Estimate
+            out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
+            if os.path.exists(out_f):
+                total_size_bytes += os.path.getsize(out_f)
+            
+            avg_size = total_size_bytes / frames_done
+            est_remaining_mb = (avg_size * (total_frames - frames_done)) / (1024 * 1024)
+            
+            # 3. Write structured JSON to the heartbeat
+            hb_data = {
+                "current": frames_done,
+                "total": total_frames,
+                "eta": eta_sec,
+                "est_mb": round(est_remaining_mb, 1)
+            }
+            try:
+                with open("/tmp/vop_heartbeat", "w") as hbf:
+                    json.dump(hb_data, hbf)
+            except Exception as e:
+                log_audit(f"Heartbeat write failed: {e}")
             
         log_audit("Sequence Complete. Compiling FFmpeg Workprint...")
         
