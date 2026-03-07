@@ -1,16 +1,25 @@
 """
 VOP Module:     interpolator.py
-Version:        v0.2.7
+Version:        v0.2.9
 Description:    Timeline state evaluation. 
-                Converted Dual-Key offsets into fully interpolated tracks for sub-frame tweening.
+                Decoupled MDS start/stop colors from the Master node color 
+                to prevent channel-clamping during multiplication.
 """
 import numpy as np
 
 def hex_to_rgb(h):
+    """
+    Converts a standard HTML hex color string (e.g. #FF0000) from the UI
+    into a normalized numpy float array [1.0, 0.0, 0.0] for the math operations.
+    """
     h = h.lstrip('#')
     return np.array([int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)], dtype='f4')
 
 def ensure_vec3(arr_str, default_z=0.0):
+    """
+    Sanity check for 3D coordinates. Evaluates UI string inputs and 
+    pads missing axes to prevent matrix transformation crashes.
+    """
     try:
         parts = arr_str.split(',') if isinstance(arr_str, str) else arr_str
         vals = [float(x) for x in parts]
@@ -22,12 +31,19 @@ def ensure_vec3(arr_str, default_z=0.0):
         return np.array([0.0, 0.0, default_z], dtype='f4')
 
 def linear_to_oklab(rgb):
+    """
+    Converts Linear RGB into the Oklab perceptual color space.
+    Required for accurate, perceptually uniform color transitions without brightness dips.
+    """
     m1 = np.array([[0.41222, 0.53633, 0.05145], [0.21190, 0.68071, 0.10740], [0.08830, 0.28172, 0.62998]], dtype='f4')
     m2 = np.array([[0.21045, 0.79362, -0.00407], [1.97799, -2.42860, 0.45060], [0.02590, 0.78277, -0.80867]], dtype='f4')
     lms = np.dot(m1, rgb)
     return np.dot(m2, np.cbrt(np.maximum(lms, 0)))
 
 def oklab_to_linear(lab):
+    """
+    Converts Oklab perceptual color space back into Linear RGB for the GPU shader.
+    """
     m1_inv = np.array([[1.0, 0.39633, 0.21580], [1.0, -0.10556, -0.06385], [1.0, -0.08948, -1.29148]], dtype='f4')
     m2_inv = np.array([[4.07674, -3.30771, 0.23097], [-1.26843, 2.60975, -0.34131], [-0.00419, -0.70347, 1.70760]], dtype='f4')
     return np.clip(np.dot(m2_inv, np.dot(m1_inv, lab) ** 3), 0.0, 1.0)
@@ -36,7 +52,7 @@ class Timeline:
     def __init__(self, job_data):
         self.job = job_data
         
-        # CRITICAL FIX: Add full tracking channels for all Dual-Key properties
+        # Initialize dictionary arrays to hold keyframes for every spatial and temporal property
         self.tracks = {
             'pos': [], 'rot': [], 'pg': [], 'cg': [], 'exp': [], 'sd': [], 'ph': [], 'src': [], 'stp': [],
             'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
@@ -67,6 +83,7 @@ class Timeline:
             src = float(job_data.get(f"{prefix}src{idx}", -1.0))
             stp = float(job_data.get(f"{prefix}stp{idx}", 1.0))
             
+            # Master node tracks
             self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(p_str, -1.0)})
             self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(r_str, 0.0)})
             self.tracks['pg'].append({'f': f_val, 'val': hex_to_rgb(pg_hex)})
@@ -77,7 +94,7 @@ class Timeline:
             self.tracks['src'].append({'f': f_val, 'val': src})
             self.tracks['stp'].append({'f': f_val, 'val': stp})
 
-            # Append the Dual-Key values directly into their respective interpolation tracks
+            # Sub-node (Dual-Key) tracks extracted directly from UI JSON
             start_p = ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"), 0.0)
             stop_p = ensure_vec3(job_data.get(f"{prefix}stop_p{idx}", "0,0,0"), 0.0)
             start_r = ensure_vec3(job_data.get(f"{prefix}start_r{idx}", "0,0,0"), 0.0)
@@ -96,10 +113,15 @@ class Timeline:
             self.tracks['start_cg'].append({'f': f_val, 'val': start_cg})
             self.tracks['stop_cg'].append({'f': f_val, 'val': stop_cg})
 
+        # Ensure temporal chronological order for evaluation
         for track in self.tracks.values():
             track.sort(key=lambda x: x['f'])
 
     def _get_val(self, key, t, color=False):
+        """
+        Locates the specific interpolation value for a given frame 't'.
+        Handles hold frames by returning the outer bounds if 't' exceeds track limits.
+        """
         track = self.tracks.get(key, [])
         if not track: return None
         if t <= track[0]['f']: return track[0]['val']
@@ -110,22 +132,31 @@ class Timeline:
                 break
         alpha = (t - k1['f']) / (k2['f'] - k1['f'])
         if color:
+            # Color vectors must be evaluated in Oklab to prevent muddy gradients.
             return oklab_to_linear(linear_to_oklab(k1['val']) + (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
         return k1['val'] + (k2['val'] - k1['val']) * alpha
 
     def get_state(self, t):
+        """
+        Returns the absolute Master keyframe parameters for a specific float time 't'.
+        """
         if not any(self.tracks.values()): return self.get_default_state()
         return {
             'p': self._get_val('pos', t), 'r': self._get_val('rot', t),
+            'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
             'pg': self._get_val('pg', t, True), 'cg': self._get_val('cg', t, True),
             'exp': float(self._get_val('exp', t) or 1.0), 'sd': float(self._get_val('sd', t) or 1.0),
             'ph': float(self._get_val('ph', t) or 0.5)
         }
 
     def get_mds_state(self, frame_num, t_norm):
+        """
+        Calculates the exact sub-frame parameter offset for Dual-Key evaluations.
+        't_norm' represents the shutter fraction (0.0 to 1.0) inside the current exposure.
+        """
         st_base = self.get_state(frame_num)
         
-        # Dynamically calculate the tweened Dual-Key offset for this specific timeline frame
+        # 1. Evaluate the tweened position of the Master bounds at this exact frame
         start_p = self._get_val('start_p', frame_num)
         stop_p = self._get_val('stop_p', frame_num)
         start_r = self._get_val('start_r', frame_num)
@@ -135,30 +166,47 @@ class Timeline:
         start_cg = self._get_val('start_cg', frame_num, True)
         stop_cg = self._get_val('stop_cg', frame_num, True)
         
-        p_val = st_base['p'] + start_p + (stop_p - start_p) * t_norm
-        r_val = st_base['r'] + start_r + (stop_r - start_r) * t_norm
+        # 2. Interpolate from Start to Stop using the fractional shutter progression
+        local_p = start_p + (stop_p - start_p) * t_norm
+        local_r = start_r + (stop_r - start_r) * t_norm
         
+        # 3. Oklab evaluation for exact color shifts inside the physical smear
         c_start_lab = linear_to_oklab(start_c)
         c_stop_lab = linear_to_oklab(stop_c)
         c_lerp = oklab_to_linear(c_start_lab + (c_stop_lab - c_start_lab) * t_norm)
-        pg_val = st_base['pg'] * c_lerp
+        
+        # CRITICAL FIX: Treat Dual-Key color attributes as absolute overrides.
+        # Do NOT multiply by st_base['pg'] to avoid clamping the RGB channels to zero.
+        pg_val = c_lerp 
 
         cg_start_lab = linear_to_oklab(start_cg)
         cg_stop_lab = linear_to_oklab(stop_cg)
         cg_lerp = oklab_to_linear(cg_start_lab + (cg_stop_lab - cg_start_lab) * t_norm)
-        cg_val = st_base['cg'] * cg_lerp
+        cg_val = cg_lerp 
         
-        return {'p': p_val, 'r': r_val, 'pg': pg_val, 'cg': cg_val, 
-                'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']}
+        return {
+            'p': st_base['p'], 'r': st_base['r'], 
+            'lp': local_p, 'lr': local_r, 
+            'pg': pg_val, 'cg': cg_val, 
+            'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
+        }
 
     def get_default_state(self):
+        """
+        Fallback safe dictionary if tracks fail to populate.
+        """
         return {
             'p': np.array([0, 0, -1.0], dtype='f4'), 'r': np.array([0, 0, 0], dtype='f4'),
+            'lp': np.array([0, 0, 0], dtype='f4'), 'lr': np.array([0, 0, 0], dtype='f4'),
             'pg': np.array([1, 1, 1], dtype='f4'), 'cg': np.array([1, 1, 1], dtype='f4'),
             'exp': 1.0, 'sd': 1.0, 'ph': 0.5
         }
 
     def calculate_playhead_at(self, target_frame):
+        """
+        Calculates the active source image playhead.
+        Step (STP) increments from the last defined explicit Source Anchor (SRC).
+        """
         src_track = self.tracks.get('src', [])
         if not src_track: return 0.0
         anchor_val, anchor_frame = 0.0, 1

@@ -1,8 +1,8 @@
 """
 VOP Module:     vop.py
-Version:        v0.2.5
+Version:        v0.2.6
 Description:    Main Entry Point. Flask Web Server.
-                Added synchronous blocking for previews to resolve WebGUI race condition.
+                Restored dynamic WorkPrint scanning for UI link payload.
 """
 import os
 import sys
@@ -10,6 +10,7 @@ import json
 import subprocess
 import logging
 import cv2
+import glob
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 from flask import Flask, jsonify, request, render_template, send_from_directory
@@ -44,9 +45,6 @@ def dispatch_engine(task_type, payload):
     engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
     engine_process = subprocess.Popen([sys.executable, engine_script, "--job", CURRENT_JOB_FILE])
     
-    # CRITICAL FIX: The Race Condition
-    # If this is a preview, block the Flask thread until the subprocess completes.
-    # This guarantees probe_live.jpg is fully written before the UI attempts to load it.
     if task_type in ['preview', 'cam_preview']:
         engine_process.wait()
 
@@ -56,17 +54,33 @@ def index(): return render_template('index.html')
 @app.route('/status', methods=['GET'])
 def status():
     global engine_process
+    
+    wp_dir = os.path.join(BASE_DIR, "WorkPrints")
+    latest_wp = ""
+    try:
+        wps = glob.glob(os.path.join(wp_dir, "*.mp4"))
+        if wps: latest_wp = os.path.basename(max(wps, key=os.path.getctime))
+    except: pass
+
     if engine_process is not None:
         if engine_process.poll() is None:
             try:
                 with open("/tmp/vop_heartbeat", "r") as f:
-                    return jsonify({"status": "rendering", "heartbeat": json.load(f)})
+                    hb = json.load(f)
+                    return jsonify({
+                        "status": "running", 
+                        "current": hb.get("current", 0), 
+                        "total": hb.get("total", 1), 
+                        "eta": hb.get("eta", 0), 
+                        "disk": f"{hb.get('est_mb', 0)} MB", 
+                        "latest_wp": latest_wp
+                    })
             except:
-                return jsonify({"status": "rendering", "heartbeat": {"current": 0, "total": 1, "eta": 0, "est_mb": 0}})
+                return jsonify({"status": "running", "current": 0, "total": 1, "eta": 0, "disk": "0 MB", "latest_wp": latest_wp})
         else:
             engine_process = None
-            return jsonify({"status": "complete"})
-    return jsonify({"status": "idle"})
+            return jsonify({"status": "idle", "latest_wp": latest_wp})
+    return jsonify({"status": "idle", "latest_wp": latest_wp})
 
 @app.route('/get_img_aspect', methods=['GET'])
 def get_img_aspect():
@@ -132,6 +146,6 @@ def serve_workprint(filename):
 
 if __name__ == '__main__':
     print("=========================================")
-    print(" VOP Server (v0.2.5) is online.")
+    print(" VOP Server (v0.2.6) is online.")
     print("=========================================")
     app.run(host='0.0.0.0', port=5000, debug=False)

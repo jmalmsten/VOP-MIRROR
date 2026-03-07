@@ -1,8 +1,8 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.94-stable
+Version:        v0.0.95-stable
 Description:    Primary execution loop. 
-                Forced 4-channel (RGBA) Framebuffer Objects to satisfy VideoCore driver requirements.
+                Restored FFmpeg compilation and implemented hierarchical matrix arguments.
 """
 import os
 import sys
@@ -91,7 +91,9 @@ def run_vop_engine(job_path):
 
                 mvp = vmath.get_frustum_fit_matrix(
                     float(job_data.get('fov', 45)), aspect_ratio, world_scale, 
-                    st_sub['p'], st_sub['r'], WIDTH, HEIGHT
+                    st_sub['p'], st_sub['r'], 
+                    st_sub.get('lp', np.zeros(3, 'f4')), st_sub.get('lr', np.zeros(3, 'f4')),
+                    WIDTH, HEIGHT
                 )
                 
                 prog['filter_color'].write(st_sub['pg'].astype('f4'))
@@ -130,10 +132,11 @@ def run_vop_engine(job_path):
             
         mvp = vmath.get_frustum_fit_matrix(
             float(job_data.get('fov', 45)), aspect_ratio, world_scale, 
-            st['p'], st['r'], WIDTH, HEIGHT
+            st['p'], st['r'], 
+            st.get('lp', np.zeros(3, 'f4')), st.get('lr', np.zeros(3, 'f4')),
+            WIDTH, HEIGHT
         )
         
-        # CRITICAL FIX: Raspberry Pi requires a 4-channel texture for Framebuffers
         fbo_tex = ctx.texture((WIDTH, HEIGHT), 4)
         fbo = ctx.framebuffer(color_attachments=[fbo_tex])
         fbo.use()
@@ -143,7 +146,6 @@ def run_vop_engine(job_path):
         tex.use(0)
         vao.render(moderngl.TRIANGLE_STRIP)
         ctx.finish() 
-        # Read all 4 components from the memory block
         pixels = fbo.read(components=4)
         fbo.release()
         fbo_tex.release()
@@ -170,6 +172,26 @@ def run_vop_engine(job_path):
                 execute_exposure(f)
                 with open("/tmp/vop_heartbeat", "w") as hbf:
                     json.dump({"current": f, "total": f_end, "eta": 0, "est_mb": 0}, hbf)
+                    
+            log_audit("Sequence Complete. Compiling FFmpeg Workprint...")
+            fps = job_data.get('fps', '24')
+            ts = int(time.time())
+            out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
+            
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", 
+                "-framerate", str(fps), 
+                "-pattern_type", "glob", 
+                "-i", os.path.join(cam_mag_dir, "*.tif"),
+                "-c:v", "libx264", 
+                "-pix_fmt", "yuv420p", 
+                out_mp4
+            ]
+            try:
+                subprocess.run(ffmpeg_cmd, check=True)
+                log_audit(f"Workprint Saved: {out_mp4}")
+            except Exception as e:
+                log_audit(f"FFmpeg compile failed: {e}")
 
     tex_mgr.release()
     pygame.quit()
