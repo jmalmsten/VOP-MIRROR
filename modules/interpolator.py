@@ -1,227 +1,172 @@
 """
 VOP Module:     interpolator.py
-Version:        v0.1.11
-Description:    Timeline state evaluation and interpolation mathematics.
-                This reads the exposure sheet and calculates where things should be on frames in-between keys.
+Version:        v0.2.7
+Description:    Timeline state evaluation. 
+                Converted Dual-Key offsets into fully interpolated tracks for sub-frame tweening.
 """
 import numpy as np
 
 def hex_to_rgb(h):
-    """
-    Converts a standard HTML hex color string (e.g. #FF0000) from the UI
-    into a normalized numpy float array [1.0, 0.0, 0.0] for the math operations.
-    """
     h = h.lstrip('#')
-    return np.array([int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)])
+    return np.array([int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)], dtype='f4')
 
-def ensure_vec3(arr, default_val=0.0):
-    """
-    Sanity check for 3D coordinates. If a user accidentally types "0,0" into the POS field
-    instead of "0,0,-1", this function intercepts it and pads the array with a default value
-    so the 3D matrix math doesn't crash from missing axes.
-    """
-    arr = np.array(arr, dtype=float)
-    if arr.ndim != 1: return np.array([default_val]*3)
-    if arr.shape[0] < 3: return np.pad(arr, (0, 3 - arr.shape[0]), 'constant', constant_values=default_val)
-    if arr.shape[0] > 3: return arr[:3]
-    return arr
+def ensure_vec3(arr_str, default_z=0.0):
+    try:
+        parts = arr_str.split(',') if isinstance(arr_str, str) else arr_str
+        vals = [float(x) for x in parts]
+        if len(vals) == 0: return np.array([0.0, 0.0, default_z], dtype='f4')
+        if len(vals) == 1: return np.array([vals[0], 0.0, default_z], dtype='f4')
+        if len(vals) == 2: return np.array([vals[0], vals[1], default_z], dtype='f4')
+        return np.array(vals[:3], dtype='f4')
+    except:
+        return np.array([0.0, 0.0, default_z], dtype='f4')
 
-# --- INTERPOLATION MATHEMATICS ---
-# 't' is always a normalized percentage between 0.0 (start) and 1.0 (end).
+def linear_to_oklab(rgb):
+    m1 = np.array([[0.41222, 0.53633, 0.05145], [0.21190, 0.68071, 0.10740], [0.08830, 0.28172, 0.62998]], dtype='f4')
+    m2 = np.array([[0.21045, 0.79362, -0.00407], [1.97799, -2.42860, 0.45060], [0.02590, 0.78277, -0.80867]], dtype='f4')
+    lms = np.dot(m1, rgb)
+    return np.dot(m2, np.cbrt(np.maximum(lms, 0)))
 
-# Linear Interpolation (Constant Speed)
-def lerp(a, b, t): return a + (b - a) * t
-
-# Smoothstep (Accelerates slowly, cruises, then decelerates to a stop)
-def ease_smooth(t): 
-    ts = max(0, min(1, t))
-    return ts * ts * (3 - 2 * ts)
-
-# Ease In (Starts slow, hits max speed at the end)
-def ease_in(t): 
-    ts = max(0, min(1, t))
-    return ts * ts
-
-# Ease Out (Starts fast, gently coasts to a stop)
-def ease_out(t): 
-    ts = max(0, min(1, t))
-    return 1 - (1 - ts) * (1 - ts)
-
-def catmull_rom(p0, p1, p2, p3, t):
-    """
-    Calculates the spatial coordinates along a Catmull-Rom spline.
-    Unlike standard Bezier curves (where control points just 'pull' the line), 
-    Catmull-Rom guarantees that the curve physically passes exactly through every keyframe.
-    Requires 4 points to calculate curvature: the previous key, start key, end key, and next key.
-    """
-    t2 = t * t
-    t3 = t2 * t
-    return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+def oklab_to_linear(lab):
+    m1_inv = np.array([[1.0, 0.39633, 0.21580], [1.0, -0.10556, -0.06385], [1.0, -0.08948, -1.29148]], dtype='f4')
+    m2_inv = np.array([[4.07674, -3.30771, 0.23097], [-1.26843, 2.60975, -0.34131], [-0.00419, -0.70347, 1.70760]], dtype='f4')
+    return np.clip(np.dot(m2_inv, np.dot(m1_inv, lab) ** 3), 0.0, 1.0)
 
 class Timeline:
-    """
-    Reads the raw JSON dictionary and structures it into traversable animation tracks.
-    """
-    def __init__(self, data):
-        # Create an empty list for every animatable parameter.
+    def __init__(self, job_data):
+        self.job = job_data
+        
+        # CRITICAL FIX: Add full tracking channels for all Dual-Key properties
         self.tracks = {
-            'p': [], 'r': [], 'c': [], 'cg': [], 
-            's': [], 'sd': [], 'ph': [], 'stp': [], 'src': []
+            'pos': [], 'rot': [], 'pg': [], 'cg': [], 'exp': [], 'sd': [], 'ph': [], 'src': [], 'stp': [],
+            'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
+            'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
         }
         
-        # A dictionary of lambda functions. This maps our parameter keys to the functions 
-        # required to safely convert their raw strings into mathematical objects.
-        parsers = {
-            'p':   lambda x: ensure_vec3([float(n) for n in x.split(',') if n.strip()], 0.0),
-            'r':   lambda x: ensure_vec3([float(n) for n in x.split(',') if n.strip()], 0.0) * 360.0,
-            'c':   lambda x: hex_to_rgb(x),
-            'cg':  lambda x: hex_to_rgb(x),
-            's': float, 'sd': float, 'ph': float, 'stp': float, 'src': float
-        }
-
-        # Scan the JSON keys for anything that looks like 'f1', 'f20', etc., 
-        # to determine which keyframe numbers actually exist in the payload.
-        found_indices = set()
-        for k in data.keys():
-            if k.startswith('f') and k[1:].isdigit():
-                found_indices.add(k[1:])
+        self.mode = job_data.get('smear_mode', 'SSS').lower()
+        prefix = "mds_" if self.mode == 'mds' else "sss_"
         
-        # Iterate through our discovered keyframes.
-        for idx in found_indices:
-            frame_str = str(data.get(f'f{idx}', '')).strip()
-            if not frame_str: continue 
+        row_ids = set()
+        for k in job_data.keys():
+            if k.startswith(prefix + "f"):
+                idx = k.replace(prefix + "f", "")
+                if idx.isdigit(): row_ids.add(idx)
+                
+        for idx in sorted(list(row_ids), key=int):
+            f_val = float(job_data.get(f"{prefix}f{idx}", 1.0))
             
-            frame = int(frame_str)
-            # Retrieve the interpolation mode (S, L, I, O)
-            mode = data.get(f'm{idx}', 'S')
-            # Check if the 'Corner' flag is checked for sharp path turns.
-            crn = (str(data.get(f'crn{idx}', '')).lower() == 'true')
-
-            # Populate the tracks
-            for key_type, parser in parsers.items():
-                # Color keys have '_hex' appended in the HTML ID, so we account for that here.
-                lookup_key = f"{key_type}{idx}_hex" if key_type in ['c', 'cg'] else f"{key_type}{idx}"
-                raw_val = str(data.get(lookup_key, '')).strip()
-                if raw_val:
-                    try:
-                        # Parse the value and append the dictionary to the specific track list.
-                        val = parser(raw_val)
-                        self.tracks[key_type].append({'f': frame, 'val': val, 'mode': mode, 'crn': crn})
-                    except: pass
-
-        # Crucial Cleanup: Sort all tracks chronologically by frame number.
-        for k in self.tracks:
-            self.tracks[k].sort(key=lambda x: x['f'])
+            p_str = job_data.get(f"{prefix}p{idx}", "0,0,-1.0")
+            r_str = job_data.get(f"{prefix}r{idx}", "0,0,0")
             
-            # If the user left an entire track blank, inject a safe default at Frame 1 
-            # so the engine doesn't crash when it asks for a value.
-            if not self.tracks[k]:
-                defaults = {
-                    'p': np.array([0.,0.,-10.]), 'r': np.array([0.,0.,0.]),
-                    'c': np.array([1.,1.,1.]), 'cg': np.array([1.,1.,1.]),
-                    's': 1.0, 'sd': 1.0, 'ph': 0.5, 'stp': 1.0, 'src': -1.0
-                }
-                self.tracks[k].append({'f': 1, 'val': defaults[k], 'mode': 'S', 'crn': False})
-
-    def _get_val_at_t(self, track_name, frame_float, is_spatial=False):
-        """
-        The core interpolation engine. Given a track and a precise moment in time,
-        it calculates the exact value required.
-        """
-        track = self.tracks[track_name]
-        if not track: return 0
-        
-        # Clamping: If asking for a frame before the start or after the end, just return the extreme limits.
-        if frame_float <= track[0]['f']: return track[0]['val']
-        if frame_float >= track[-1]['f']: return track[-1]['val']
-        
-        # Iterate through the track to find the two keyframes surrounding the playhead.
-        idx = 0
-        while idx < len(track) - 1 and frame_float > track[idx+1]['f']: idx += 1
-        
-        kA, kB = track[idx], track[idx+1]
-        
-        # Calculate 't' (the percentage of completion between Key A and Key B)
-        seg_len = float(kB['f'] - kA['f'])
-        if seg_len == 0: return kA['val']
-        t = (frame_float - kA['f']) / seg_len
-
-        # Pass 't' through the easing math determined by the UI dropdown mode.
-        mode = kA['mode']
-        t_e = ease_in(t) if mode == 'I' else ease_out(t) if mode == 'O' else t if mode == 'L' else ease_smooth(t)
-
-        if is_spatial:
-            # Spatial tracks require the Catmull-Rom logic.
-            p1, p2 = kA['val'], kB['val']
-            # Re-verify the array shapes just in case.
-            if p1.shape != (3,): p1 = ensure_vec3(p1)
-            if p2.shape != (3,): p2 = ensure_vec3(p2)
+            pg_hex = job_data.get(f"{prefix}c{idx}_hex", job_data.get(f"{prefix}start_c{idx}_hex", "#ffffff"))
+            cg_hex = job_data.get(f"{prefix}cg{idx}_hex", job_data.get(f"{prefix}start_cg{idx}_hex", "#ffffff"))
             
-            kPrev = track[idx-1] if idx > 0 else None
-            # If 'Corner' is checked, we deliberately break the Catmull-Rom curve by mirroring 
-            # the points linearly, resulting in a sharp angle at the keyframe.
-            p0 = p1 + (p1 - p2) if kA['crn'] else (kPrev['val'] if kPrev else p1 - (p2 - p1))
+            exp = float(job_data.get(f"{prefix}s{idx}", job_data.get(f"{prefix}exp{idx}", 1.0)))
+            sd = float(job_data.get(f"{prefix}sd{idx}", 1.0))
+            ph = float(job_data.get(f"{prefix}ph{idx}", 0.5))
+            src = float(job_data.get(f"{prefix}src{idx}", -1.0))
+            stp = float(job_data.get(f"{prefix}stp{idx}", 1.0))
             
-            kNext = track[idx+2] if idx < len(track) - 2 else None
-            p3 = p2 + (p2 - p1) if kB['crn'] else (kNext['val'] if kNext else p2 + (p2 - p1))
-            
-            return catmull_rom(p0, p1, p2, p3, t_e)
-        else:
-            # Non-spatial tracks (like Exposure or Step) just use straight linear mixing.
-            return lerp(kA['val'], kB['val'], t_e)
+            self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(p_str, -1.0)})
+            self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(r_str, 0.0)})
+            self.tracks['pg'].append({'f': f_val, 'val': hex_to_rgb(pg_hex)})
+            self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(cg_hex)})
+            self.tracks['exp'].append({'f': f_val, 'val': exp})
+            self.tracks['sd'].append({'f': f_val, 'val': sd})
+            self.tracks['ph'].append({'f': f_val, 'val': ph})
+            self.tracks['src'].append({'f': f_val, 'val': src})
+            self.tracks['stp'].append({'f': f_val, 'val': stp})
 
-    def get_state(self, frame_float):
-        """
-        Gathers all track evaluations into a single payload dictionary for a specific frame.
-        """
+            # Append the Dual-Key values directly into their respective interpolation tracks
+            start_p = ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"), 0.0)
+            stop_p = ensure_vec3(job_data.get(f"{prefix}stop_p{idx}", "0,0,0"), 0.0)
+            start_r = ensure_vec3(job_data.get(f"{prefix}start_r{idx}", "0,0,0"), 0.0)
+            stop_r = ensure_vec3(job_data.get(f"{prefix}stop_r{idx}", "0,0,0"), 0.0)
+            start_c = hex_to_rgb(job_data.get(f"{prefix}start_c{idx}_hex", "#ffffff"))
+            stop_c = hex_to_rgb(job_data.get(f"{prefix}stop_c{idx}_hex", "#ffffff"))
+            start_cg = hex_to_rgb(job_data.get(f"{prefix}start_cg{idx}_hex", "#ffffff"))
+            stop_cg = hex_to_rgb(job_data.get(f"{prefix}stop_cg{idx}_hex", "#ffffff"))
+            
+            self.tracks['start_p'].append({'f': f_val, 'val': start_p})
+            self.tracks['stop_p'].append({'f': f_val, 'val': stop_p})
+            self.tracks['start_r'].append({'f': f_val, 'val': start_r})
+            self.tracks['stop_r'].append({'f': f_val, 'val': stop_r})
+            self.tracks['start_c'].append({'f': f_val, 'val': start_c})
+            self.tracks['stop_c'].append({'f': f_val, 'val': stop_c})
+            self.tracks['start_cg'].append({'f': f_val, 'val': start_cg})
+            self.tracks['stop_cg'].append({'f': f_val, 'val': stop_cg})
+
+        for track in self.tracks.values():
+            track.sort(key=lambda x: x['f'])
+
+    def _get_val(self, key, t, color=False):
+        track = self.tracks.get(key, [])
+        if not track: return None
+        if t <= track[0]['f']: return track[0]['val']
+        if t >= track[-1]['f']: return track[-1]['val']
+        for i in range(len(track) - 1):
+            if track[i]['f'] <= t <= track[i+1]['f']:
+                k1, k2 = track[i], track[i+1]
+                break
+        alpha = (t - k1['f']) / (k2['f'] - k1['f'])
+        if color:
+            return oklab_to_linear(linear_to_oklab(k1['val']) + (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
+        return k1['val'] + (k2['val'] - k1['val']) * alpha
+
+    def get_state(self, t):
+        if not any(self.tracks.values()): return self.get_default_state()
         return {
-            'p': self._get_val_at_t('p', frame_float, is_spatial=True),
-            'r': self._get_val_at_t('r', frame_float),
-            'c': self._get_val_at_t('c', frame_float),
-            'cg': self._get_val_at_t('cg', frame_float),
-            's': self._get_val_at_t('s', frame_float),
-            'sd': self._get_val_at_t('sd', frame_float),
-            'ph': self._get_val_at_t('ph', frame_float),
-            'stp': self._get_val_at_t('stp', frame_float),
-            'src': self._get_val_at_t('src', frame_float)
+            'p': self._get_val('pos', t), 'r': self._get_val('rot', t),
+            'pg': self._get_val('pg', t, True), 'cg': self._get_val('cg', t, True),
+            'exp': float(self._get_val('exp', t) or 1.0), 'sd': float(self._get_val('sd', t) or 1.0),
+            'ph': float(self._get_val('ph', t) or 0.5)
+        }
+
+    def get_mds_state(self, frame_num, t_norm):
+        st_base = self.get_state(frame_num)
+        
+        # Dynamically calculate the tweened Dual-Key offset for this specific timeline frame
+        start_p = self._get_val('start_p', frame_num)
+        stop_p = self._get_val('stop_p', frame_num)
+        start_r = self._get_val('start_r', frame_num)
+        stop_r = self._get_val('stop_r', frame_num)
+        start_c = self._get_val('start_c', frame_num, True)
+        stop_c = self._get_val('stop_c', frame_num, True)
+        start_cg = self._get_val('start_cg', frame_num, True)
+        stop_cg = self._get_val('stop_cg', frame_num, True)
+        
+        p_val = st_base['p'] + start_p + (stop_p - start_p) * t_norm
+        r_val = st_base['r'] + start_r + (stop_r - start_r) * t_norm
+        
+        c_start_lab = linear_to_oklab(start_c)
+        c_stop_lab = linear_to_oklab(stop_c)
+        c_lerp = oklab_to_linear(c_start_lab + (c_stop_lab - c_start_lab) * t_norm)
+        pg_val = st_base['pg'] * c_lerp
+
+        cg_start_lab = linear_to_oklab(start_cg)
+        cg_stop_lab = linear_to_oklab(stop_cg)
+        cg_lerp = oklab_to_linear(cg_start_lab + (cg_stop_lab - cg_start_lab) * t_norm)
+        cg_val = st_base['cg'] * cg_lerp
+        
+        return {'p': p_val, 'r': r_val, 'pg': pg_val, 'cg': cg_val, 
+                'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']}
+
+    def get_default_state(self):
+        return {
+            'p': np.array([0, 0, -1.0], dtype='f4'), 'r': np.array([0, 0, 0], dtype='f4'),
+            'pg': np.array([1, 1, 1], dtype='f4'), 'cg': np.array([1, 1, 1], dtype='f4'),
+            'exp': 1.0, 'sd': 1.0, 'ph': 0.5
         }
 
     def calculate_playhead_at(self, target_frame):
-        """
-        The 'Dumb Stepper' algorithm.
-        This calculates which frame from the ProjMag folder should be loaded, based on 
-        the explicit SRC anchors and the cumulative STP (Step) values.
-        """
-        src_track = self.tracks['src']
-        anchor_val = 0.0
-        anchor_frame = 1
-        
-        # 1. FIND THE ANCHOR
-        # We loop backwards through the SRC track. We want the most recent keyframe 
-        # that occurred BEFORE OR ON our current target_frame, that is NOT set to -1 (Auto).
-        best_k = None
+        src_track = self.tracks.get('src', [])
+        if not src_track: return 0.0
+        anchor_val, anchor_frame = 0.0, 1
         for k in reversed(src_track):
             if k['f'] <= target_frame and k['val'] >= 0:
-                best_k = k
+                anchor_val, anchor_frame = k['val'], k['f']
                 break
-        
-        if best_k:
-            anchor_val = best_k['val']
-            anchor_frame = best_k['f']
-        else:
-            # Fallback: Start at 0 on frame 1.
-            anchor_val = 0.0 
-            anchor_frame = 1
-            
-        current_playhead = anchor_val
-        
-        # 2. INTEGRATE THE STEPS
-        # We start at the anchor value, and for every frame between the anchor and our current frame,
-        # we ask the interpolator for the Step Value, and add it. 
-        # This allows you to smoothly transition from Step 1 to Step 0 (freeze frame) over time.
         if target_frame > anchor_frame:
             for f in range(int(anchor_frame), int(target_frame)):
-                step = self._get_val_at_t('stp', float(f))
-                current_playhead += step
-                
-        return current_playhead
+                anchor_val += self._get_val('stp', f)
+        return anchor_val

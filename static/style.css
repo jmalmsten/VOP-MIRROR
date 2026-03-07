@@ -1,59 +1,49 @@
-/* VOP Module: style.css - v0.0.10 */
 body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
 .container { max-width: 1600px; margin: 0 auto; display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
-
 .vop-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
-
 .preview-area { background: #1a1a1a; border: 1px solid #333; display: flex; align-items: center; justify-content: center; min-height: 400px; max-height: 55vh; overflow: hidden; position: relative; }
 #probe_img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
 .preview-overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; font-size: 0.8em; pointer-events: none; }
-
 .controls-area { display: flex; flex-direction: column; gap: 15px; max-height: 55vh; overflow-y: auto; padding-right: 5px; }
-
 .group-box { background: #151515; padding: 15px; border-radius: 4px; border: 1px solid #222; }
 .group-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; }
-
 .input-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px; }
 .input-row .c-box button { height: 26px; line-height: 26px; padding: 0; }
 .c-box { display: flex; flex-direction: column; }
 .c-box label { font-size: 0.6em; color: #888; margin-bottom: 4px; }
 .c-box input, .c-box select { background: #222; border: 1px solid #444; color: #0cf; padding: 4px; border-radius: 3px; font-size: 0.85em; }
-
 .c-box input[type="color"] { -webkit-appearance: none; padding: 0; height: 24px; width: 100%; cursor: pointer; border: 1px solid #444; border-radius: 3px; }
 .c-box input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
 .c-box input[type="color"]::-webkit-color-swatch { border: none; border-radius: 2px; }
-
 .upload-cluster { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: end; }
 .upload-btn { background: #222; border: 1px solid #444; color: #ccc; cursor: pointer; padding: 0; border-radius: 3px; font-size: 0.75em; height: 26px; line-height: 26px; }
 .upload-btn:hover { background: #0cf; color: #000; }
-
 .sheets-area { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 20px; margin-top: 10px; }
-
 .sheet-container { background: #111; padding: 10px; border-radius: 4px; border: 1px solid #222; overflow-x: auto; display: flex; flex-direction: column; align-items: center; }
 
-/* Increased max-width from 1100 to 1250 to cleanly fit the two restored columns */
 .vop-sheet { width: 100%; max-width: 1250px; min-width: 1050px; font-size: 0.85em; margin: 0 auto; }
-
-/* Expanded grid to 14 columns to include SRC and STP */
 .sheet-row { display: grid; grid-template-columns: 30px 80px 60px 30px 50px 50px 1fr 1fr 40px 40px 60px 60px 60px 30px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
 
-.sheet-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
+.mds-header { grid-template-columns: 30px 80px 60px 30px 80px 1fr 1fr 40px 40px 60px 30px; }
+.mds-master-row { grid-template-columns: 30px 80px 60px 30px 80px 1fr 1fr 40px 40px 60px 30px; background: #151a22; border-bottom: none; border-top: 2px solid #2a3a4a; padding-top: 8px; }
+.mds-sub-row { grid-template-columns: 30px 80px 60px 30px 80px 1fr 1fr 40px 40px 60px 30px; background: #0b0f14; border-bottom: 1px solid #1a2a3a; }
+.mds-sub-row .row-index { color: #0cf; padding-left: 10px; font-weight: normal; }
+.node-label { color: #888; font-size: 0.8em; text-align: center; text-transform: uppercase; font-weight: bold; background: #222; border-radius: 2px; padding: 2px; }
+
+.sheet-header, .mds-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
 .sheet-row input[type="text"], .sheet-row input[type="number"], .sheet-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 2px; width: 100%; border-radius: 2px; font-family: monospace; font-size: 0.9em; box-sizing: border-box; }
 .sheet-row input[type="checkbox"] { width: auto; margin: 0 auto; display: block; }
-
 .sheet-row input[type="color"] { -webkit-appearance: none; border: 1px solid #333; background: #1a1a1a; padding: 0; width: 100%; height: 24px; border-radius: 2px; cursor: pointer; box-sizing: border-box; }
 .sheet-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
 .sheet-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 1px; }
 
 .row-index { color: #333; font-weight: bold; text-align: center; }
 .row-center { text-align: center; }
-
 .snap-btn { background: #222; color: #0cf; padding: 1px 4px; font-size: 0.7em; border: 1px solid #444; border-radius: 3px; cursor: pointer; }
 .snap-btn:hover { background: #0cf; color: #000; }
 .del-btn { background: #300; color: #f44; border: 1px solid #500; border-radius: 3px; cursor: pointer; font-weight: bold; padding: 0 4px; font-size: 0.8em; }
 .del-btn:hover { background: #f00; color: #fff; }
 .k-fr { display: flex; gap: 2px; align-items: center; }
-
 .add-row { margin-top: 10px; text-align: center; width: 100%; max-width: 1250px; margin-left: auto; margin-right: auto; }
 .add-btn { background: #111; border: 1px solid #333; color: #666; width: 100%; padding: 6px; cursor: pointer; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
 .add-btn:hover { background: #222; color: #fff; border-color: #555; }
@@ -61,7 +51,6 @@ body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; pad
 .status-bar { grid-column: 1 / -1; background: #1a1a1a; border: 1px solid #333; padding: 5px 10px; font-size: 0.8em; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .progress-container { flex-grow: 1; margin: 0 15px; background: #000; height: 6px; border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.3s; }
-
 .probe-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
 .action-btn { background: #0cf; color: #000; border: none; padding: 8px; border-radius: 3px; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 0.8em; width: 100%; }
 .action-btn:hover { background: #fff; }

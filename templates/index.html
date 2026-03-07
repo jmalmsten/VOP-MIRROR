@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VOP Engine</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
 </head>
 <body>
     <div class="container">
@@ -15,7 +15,7 @@
         </div>
 
         <div class="status-bar">
-            <div id="st_msg">Initializing...</div>
+            <div id="st_msg">Ready...</div>
             <div class="progress-container">
                 <div id="st_bar" class="progress-fill"></div>
             </div>
@@ -38,14 +38,8 @@
                     <button class="action-btn danger" onclick="nukeMag()">NUKE MAG</button>
                 </div>
                 <div class="input-row" style="margin-top: 10px; border-top: 1px solid #222; padding-top: 10px;">
-                    <div class="c-box">
-                        <label>Target Frame</label>
-                        <input type="number" id="probe_frame" value="1">
-                    </div>
-                    <div class="c-box">
-                        <label>Subframe</label>
-                        <input type="number" step="0.1" id="probe_sub" value="0.0">
-                    </div>
+                    <div class="c-box"><label>Target Frame</label><input type="number" id="probe_frame" value="1"></div>
+                    <div class="c-box"><label>Subframe</label><input type="number" step="0.1" id="probe_sub" value="0.0"></div>
                 </div>
             </div>
 
@@ -68,23 +62,24 @@
                         <label>Compression</label>
                         <select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select>
                     </div>
+                    <div class="c-box">
+                        <label>Smear Mode</label>
+                        <select id="smear_mode" style="background: #311; border-color: #f44; color: #fff; font-weight: bold;">
+                            <option value="SSS">SuperSmear (SSS)</option>
+                            <option value="MDS">MultiDimensional (MDS)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
             <div class="group-box">
                 <div class="group-title">Projection Target</div>
                 <div class="upload-cluster">
-                    <div class="c-box">
-                        <label>Active Image (ProjMag)</label>
-                        <input type="text" id="image" readonly>
-                    </div>
-                    <div class="c-box">
-                        <label>&nbsp;</label>
-                        <input type="file" id="file_input" style="display:none;">
-                        <button class="upload-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
-                    </div>
+                    <div class="c-box"><label>Active Image</label><input type="text" id="image" readonly></div>
+                    <div class="c-box"><label>&nbsp;</label><input type="file" id="file_input" style="display:none;"><button class="upload-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button></div>
                 </div>
                 <div class="input-row" style="margin-top: 10px;">
+                    <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="coord_scale" value="1.0"></div>
                     <div class="c-box" style="justify-content: flex-end;"><button class="action-btn secondary" style="height: 26px; padding: 0; font-size: 0.7em;" onclick="calcFitScale()">FIT FOV</button></div>
                 </div>
@@ -93,14 +88,17 @@
         </div>
 
         <div class="sheets-area">
-            <div class="sheet-container">
-                {% include 'sections/exp-sheet.html' %}
+            <div class="sheet-container" id="sss_wrapper">
+                {% include 'sections/sss-xsheet.html' %}
+            </div>
+            <div class="sheet-container" id="mds_wrapper" style="display:none; background: #0a1118; border-color: #1a2a3a;">
+                {% include 'sections/mds-xsheet.html' %}
             </div>
             {% include 'sections/cheat-sheet.html' %}
         </div>
 
     </div>
 
-    <script src="{{ url_for('static', filename='main.js') }}"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=4"></script>
 </body>
 </html>
