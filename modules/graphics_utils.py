@@ -1,86 +1,98 @@
 """
 VOP Module:     graphics_utils.py
-Version:        v0.0.7
-Description:    Encapsulates ModernGL context, shaders, and texture caching.
-                Corrected UV mapping to render right-side up.
+Description:    GL Pipeline management.
+                Enforces #version 300 es and overrides ModernGL's default 330 requirement.
+                Added vertical flip to OpenCV image loading to match OpenGL texture coords.
 """
-import os
-import pygame
 import moderngl
 import numpy as np
-
-VERTEX_SHADER = """#version 300 es
-in vec3 in_position; 
-in vec2 in_texcoord; 
-out vec2 v_tex; 
-uniform mat4 mvp;
-void main() { 
-    gl_Position = mvp * vec4(in_position, 1.0); 
-    v_tex = in_texcoord; 
-}
-"""
-
-FRAGMENT_SHADER = """#version 300 es
-precision highp float; 
-in vec2 v_tex; 
-out vec4 f_col; 
-uniform sampler2D texture0; 
-uniform vec3 filter_color; 
-void main() { 
-    vec4 base = texture(texture0, v_tex);
-    f_col = vec4(base.rgb * filter_color, base.a);
-}
-"""
+import os
+import cv2
 
 def init_render_pipeline():
+    vert = """
+    #version 300 es
+    layout (location = 0) in vec2 in_vert;
+    layout (location = 1) in vec2 in_tex;
+    uniform mat4 mvp;
+    out vec2 v_tex;
+    void main() {
+        gl_Position = mvp * vec4(in_vert, 0.0, 1.0);
+        v_tex = in_tex;
+    }
+    """
+    
+    frag = """
+    #version 300 es
+    precision mediump float;
+    uniform sampler2D TexUnit;
+    uniform vec3 filter_color;
+    in vec2 v_tex;
+    out vec4 f_color;
+    void main() {
+        vec4 tex_col = texture(TexUnit, v_tex);
+        f_color = tex_col * vec4(filter_color, 1.0);
+    }
+    """
+    
+    # Override ModernGL's default requirement of 330
     ctx = moderngl.create_context(require=300)
     
-    ctx.pack_alignment = 1
-    ctx.unpack_alignment = 1
-    ctx.enable(moderngl.BLEND) 
+    prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
     
-    prog = ctx.program(vertex_shader=VERTEX_SHADER, fragment_shader=FRAGMENT_SHADER)
-    
-    # GROUND TRUTH FIX: Corrected UVs to match Pygame's vertical flip
-    vertices = np.array([
-        # X,   Y,   Z,     U,   V
-        -1.0,  1.0, 0.0,   0.0, 1.0,  # Top-Left
-        -1.0, -1.0, 0.0,   0.0, 0.0,  # Bottom-Left
-         1.0,  1.0, 0.0,   1.0, 1.0,  # Top-Right
-         1.0, -1.0, 0.0,   1.0, 0.0   # Bottom-Right
+    verts = np.array([
+        -1.0,  1.0, 0.0, 1.0,
+         1.0,  1.0, 1.0, 1.0,
+        -1.0, -1.0, 0.0, 0.0,
+         1.0, -1.0, 1.0, 0.0
     ], dtype='f4')
     
-    vbo = ctx.buffer(vertices.tobytes())
-    vao = ctx.vertex_array(prog, [(vbo, '3f 2f', 'in_position', 'in_texcoord')])
+    vbo = ctx.buffer(verts)
+    vao = ctx.vertex_array(prog, [(vbo, '2f 2f', 'in_vert', 'in_tex')])
     
     return ctx, prog, vao
 
 class TextureManager:
-    def __init__(self, ctx, proj_mag_dir, job_data):
+    def __init__(self, ctx, proj_dir, job_data):
         self.ctx = ctx
-        self.proj_mag_dir = proj_mag_dir
-        self.target_image = job_data.get('image', '')
-        self.active_tex = None
-        self.aspect_ratio = 1.0
-
-    def load(self, playhead=0.0):
-        if self.active_tex: 
-            self.active_tex.release()
-
-        path = os.path.join(self.proj_mag_dir, self.target_image)
+        self.proj_dir = proj_dir
+        self.bp_dir = os.path.join(os.path.dirname(proj_dir), "ProjBiPack")
+        self.cache = {}
         
-        if os.path.exists(path):
-            img_s = pygame.image.load(path).convert_alpha()
-            iw, ih = img_s.get_size()
-            self.aspect_ratio = float(iw) / float(ih) if ih > 0 else 1.0
-        else:
-            img_s = pygame.Surface((100, 100), pygame.SRCALPHA)
-            img_s.fill((255, 0, 255, 255))
-            self.aspect_ratio = 1.0
+        white = np.ones((1,1,3), dtype='uint8') * 255
+        self.white_tex = ctx.texture((1,1), 3, white.tobytes())
+
+    def load(self, playhead, is_bipack=False):
+        dir_path = self.bp_dir if is_bipack else self.proj_dir
+        if not os.path.exists(dir_path): 
+            return self.white_tex, 1.777
             
-        self.active_tex = self.ctx.texture(img_s.get_size(), 4, pygame.image.tostring(img_s, "RGBA", True))
-        return self.active_tex, self.aspect_ratio
+        files = sorted([f for f in os.listdir(dir_path) if f.lower().endswith(('.png','.jpg','.tif','.tiff'))])
+        if not files: 
+            return self.white_tex, 1.777
+            
+        idx = max(0, min(len(files)-1, int(playhead)))
+        f_path = os.path.join(dir_path, files[idx])
+        
+        if f_path in self.cache: 
+            return self.cache[f_path]
+        
+        img = cv2.imread(f_path)
+        if img is None: 
+            return self.white_tex, 1.777
+            
+        h, w = img.shape[:2]
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # CRITICAL FIX: Flip image vertically to align OpenCV (0,0 top-left) 
+        # with OpenGL (0,0 bottom-left) texture coordinates
+        img = cv2.flip(img, 0)
+        
+        tex = self.ctx.texture((w, h), 3, img.tobytes())
+        self.cache[f_path] = (tex, w/h)
+        return tex, w/h
 
     def release(self):
-        if self.active_tex: 
-            self.active_tex.release()
+        for t, a in self.cache.values(): 
+            t.release()
+        self.white_tex.release()

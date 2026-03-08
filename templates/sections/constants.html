@@ -1,23 +1,30 @@
-<div class="constants-zone">
-    <div class="const-group"><label>FOV</label><input id="fov"></div>
-    <div class="const-group"><label>IMAGE</label><input id="image"></div>
-    <div class="const-group">
-        <label>TIFF COMPRESSION</label>
-        <select id="tiff_compression" onchange="checkStorageCapacity()">
-            <option value="zip">ZIP (Compressed)</option>
-            <option value="none">RAW (Uncompressed)</option>
-        </select>
-    </div>
-    <div class="const-group"><label>WORKPRINT FPS</label><input id="fps" type="number"></div>
-    <div class="const-group"><label>SENSOR GAIN</label><input id="gain"></div>
-    <div class="const-group">
-        <label>AWB GAINS (R/B)</label>
-        <div style="display:flex; gap:2px">
-            <input id="awb_r" placeholder="R"><input id="awb_b" placeholder="B">
+<div class="group-box">
+    <div class="group-title">Hardware Constants</div>
+    <div class="constants-zone">
+        <div class="const-group"><label>FOV</label><input id="fov" type="number" value="45"></div>
+        <div class="const-group"><label>Cam Res</label><input id="cam_res" value="2028x1520"></div>
+        <div class="const-group">
+            <label>TIFF Compression</label>
+            <select id="tiff_compression">
+                <option value="zip">ZIP</option>
+                <option value="none">None</option>
+            </select>
         </div>
-    </div>
-    <div class="const-group">
-        <label>COLOR MODE</label>
-        <select id="c_mode"><option value="linear">LINEAR</option><option value="smooth">SMOOTH</option></select>
+        <div class="const-group"><label>Workprint FPS</label><input id="fps" type="number" value="24"></div>
+        <div class="const-group"><label>Sensor Gain</label><input id="gain" type="number" value="1.0"></div>
+        <div class="const-group">
+            <label>AWB Gains (R/B)</label>
+            <div style="display:flex; gap:2px">
+                <input id="awb_r" placeholder="R" value="1.0">
+                <input id="awb_b" placeholder="B" value="1.0">
+            </div>
+        </div>
+        <div class="const-group">
+            <label>Smear Mode</label>
+            <select id="smear_mode">
+                <option value="MDS">MDS (Dual-Key)</option>
+                <option value="SSS">SSS (Arbitrary)</option>
+            </select>
+        </div>
     </div>
 </div>

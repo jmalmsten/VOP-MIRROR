@@ -2,22 +2,20 @@
     <div class="probe-controls">
         <div class="control-group">
             <label>MASTER FR</label>
-            <input type="range" id="probe_frame" class="wide-slider" oninput="runTask('preview')">
-            <span id="val_probe_frame" class="val-label">1</span>
+            <input type="number" id="probe_frame" min="1" step="1" value="1" style="width: 100%; background: #000; color: #0cf; border: 1px solid #333; padding: 5px; box-sizing: border-box;" onchange="runTask('preview')">
         </div>
         <div class="control-group">
             <label>EXP POINT</label>
-            <input type="range" id="probe_sub" min="0" max="1" step="0.01" value="0.5" class="wide-slider" oninput="runTask('preview')">
-            <span id="val_probe_sub" class="val-label">0.5</span>
+            <input type="number" id="probe_sub" min="0" max="1" step="0.01" value="0.5" style="width: 100%; background: #000; color: #0cf; border: 1px solid #333; padding: 5px; box-sizing: border-box;" onchange="runTask('preview')">
         </div>
         <div style="display:flex; gap:10px; margin-top:15px;">
-            <button onclick="runTask('preview')" class="gen-btn">PROBE CAPTURE</button>
-            <button onclick="runTask('cam_preview')" class="cam-btn">CAM VIEW PREVIEW</button>
+            <button onclick="runTask('preview')" class="action-btn">PROBE CAPTURE</button>
+            <button onclick="runTask('cam_preview')" class="action-btn secondary">CAM VIEW PREVIEW</button>
         </div>
     </div>
 
     <div class="probe-view" style="flex: 1; display: flex; flex-direction: column; align-items: center;">
         <img id="probe_img" src="/static/probe_live.jpg" style="max-width:320px; width:100%; border:1px solid #333; display:none; border-radius: 2px;">
-        <span id="preview_type" style="font-size: 0.6em; color: #555; margin-top: 5px; font-family: monospace;"></span>
+        <span id="preview_type" style="font-size: 0.6em; color: #888; margin-top: 5px;">IDLE</span>
     </div>
 </div>

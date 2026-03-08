@@ -1,9 +1,9 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.98-stable
-Description:    Primary execution loop. 
-                Appended the 700ms sync offset to the physical camera shutter argument
-                to prevent the camera from closing before the delayed render loop finishes.
+Version:        v0.1.9
+Description:    Multiplicative Dual-World Engine.
+                Forces GLES 3.0 profile prior to display initialization.
+                Added contextual dark gray background for UI previews to visualize frustum bounds.
 """
 import os
 import sys
@@ -14,6 +14,7 @@ import subprocess
 import pygame
 import numpy as np
 import moderngl
+import cv2
 
 import interpolator
 import vop_math as vmath
@@ -24,20 +25,20 @@ import graphics_utils as gfx
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 
 def log_audit(msg): 
-    print(f"[{time.strftime('%H:%M:%S')}] AUDIT: {msg}")
+    print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}")
 
 def run_vop_engine(job_path):
+    log_audit(f"Engine Starting with Job: {job_path}")
     with open(job_path, 'r') as f: 
         job_data = json.load(f)
-        
+    
     base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cam_mag_dir = os.path.join(base_path, "CamMag")
-    proj_mag_dir = os.path.join(base_path, "ProjMag")
     static_dir = os.path.join(base_path, "static")
+    cam_mag_dir = os.path.join(base_path, "CamMag")
     wp_dir = os.path.join(base_path, "WorkPrints")
-
+    
     timeline = interpolator.Timeline(job_data)
-
+    
     pygame.init()
     pygame.mouse.set_visible(False)
     
@@ -49,70 +50,80 @@ def run_vop_engine(job_path):
     screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
     
     ctx, prog, vao = gfx.init_render_pipeline()
-    tex_mgr = gfx.TextureManager(ctx, proj_mag_dir, job_data)
+    tex_mgr = gfx.TextureManager(ctx, os.path.join(base_path, "ProjMag"), job_data)
     
-    world_scale = float(job_data.get('coord_scale', 1.0))
-    res_str = job_data.get('cam_res', '2028x1520')
+    mag_scale = float(job_data.get('coord_scale', 1.0))
+    bp_scale = float(job_data.get('bipack_coord_scale', 1.0))
+
+    def render_dual_world(frame_num, t_norm, is_preview=False):
+        if timeline.mode == 'mds':
+            st = timeline.get_mds_state(float(frame_num), t_norm)
+        else:
+            st_base = timeline.get_state(frame_num)
+            t_start = frame_num - (st_base['sd'] * st_base['ph'])
+            t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
+            st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
+
+        ph_val = timeline.calculate_playhead_at(frame_num)
+        
+        tex_mag, asp_mag = tex_mgr.load(ph_val, is_bipack=False)
+        tex_bp, asp_bp = tex_mgr.load(ph_val, is_bipack=True)
+
+        bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
+        ctx.clear(*bg_color)
+        
+        # --- PASS 1: PRIMARY PROJECTION MAG ---
+        # Safeguard: If no image is loaded, force scale to 100.0 to create an infinite backlight
+        active_mag_scale = 100.0 if tex_mag == tex_mgr.white_tex else mag_scale
+        
+        mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, active_mag_scale, 
+                                               st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
+        prog['mvp'].write(mvp_mag)
+        prog['filter_color'].write(st['pg'].astype('f4'))
+        tex_mag.use(0)
+        vao.render(moderngl.TRIANGLE_STRIP)
+
+        # --- PASS 2: MULTIPLICATIVE BIPACK LAYER ---
+        ctx.enable(moderngl.BLEND)
+        ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
+        
+        mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
+                                              st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+        prog['mvp'].write(mvp_bp)
+        prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+        tex_bp.use(0)
+        vao.render(moderngl.TRIANGLE_STRIP)
+        
+        ctx.disable(moderngl.BLEND)
 
     def execute_exposure(frame_num, is_preview=False):
-        playhead = timeline.calculate_playhead_at(frame_num)
-        tex, aspect_ratio = tex_mgr.load(playhead)
         st = timeline.get_state(frame_num)
-
-        smear_sec = float(st['exp'])  
-        x_ms = smear_sec * 1000.0
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
         
-        # Render Loop bounds: 500ms header + smear + 500ms tail.
-        total_ms = x_ms + 1000.0
-        
-        # We explicitly add the 700ms sensor sleep offset to the camera argument. 
-        # This keeps the shutter open just long enough to capture the end of the delayed render loop.
-        cam_shutter_ms = total_ms + 700.0
-        
-        sd_frames = float(st.get('sd', 1.0))
-        ph_offset = float(st.get('ph', 0.5))
-        
-        t_start = frame_num - (sd_frames * ph_offset)
-        t_end = frame_num + (sd_frames * (1.0 - ph_offset))
+        log_audit(f"Exposing Frame {frame_num} | Smear: {smr_ms}ms | Shutter Total: {total_ms}ms")
         
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
         
-        cam_proc = hw.trigger_capture(buf_f, cam_shutter_ms, job_data.get('gain', 1.0), 
-                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), res_str)
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0), 
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
         
         hw.wait_for_sensor_prime()
 
         anchor = time.time()
         while (time.time() - anchor) * 1000 < total_ms:
             elapsed = (time.time() - anchor) * 1000
-            ctx.clear(0, 0, 0, 1.0)
             
-            if 500.0 <= elapsed <= (500.0 + x_ms):
-                t_norm = (elapsed - 500.0) / max(1.0, x_ms)
-                
-                if timeline.mode == 'mds':
-                    st_sub = timeline.get_mds_state(float(frame_num), t_norm)
-                else:
-                    t_frame = t_start + (t_end - t_start) * t_norm
-                    st_sub = timeline.get_state(t_frame)
-
-                mvp = vmath.get_frustum_fit_matrix(
-                    float(job_data.get('fov', 45)), aspect_ratio, world_scale, 
-                    st_sub['p'], st_sub['r'], 
-                    st_sub.get('lp', np.zeros(3, 'f4')), st_sub.get('lr', np.zeros(3, 'f4')),
-                    WIDTH, HEIGHT
-                )
-                
-                prog['filter_color'].write(st_sub['pg'].astype('f4'))
-                prog['mvp'].write(mvp)
-                tex.use(0)
-                vao.render(moderngl.TRIANGLE_STRIP)
+            if 500.0 <= elapsed <= (500.0 + smr_ms):
+                t_norm = (elapsed - 500.0) / max(1.0, smr_ms)
+                render_dual_world(frame_num, t_norm, is_preview=False)
+            else:
+                ctx.clear(0.0, 0.0, 0.0, 1.0)
                 
             pygame.display.flip()
         
-        ctx.finish()
         cam_proc.wait() 
-
+        
         if is_preview:
             cutil.generate_sensor_preview(buf_f, static_dir, st['cg'])
         else:
@@ -123,96 +134,42 @@ def run_vop_engine(job_path):
     task = job_data.get('type')
     
     if task == 'preview':
-        frame_t = float(job_data.get('probe_frame', 1))
-        t_norm = float(job_data.get('probe_sub', 0.5))
-        
-        tex, aspect_ratio = tex_mgr.load(0.0)
-        
-        if timeline.mode == 'mds':
-            st = timeline.get_mds_state(frame_t, t_norm)
-        else:
-            sd = timeline.get_state(frame_t).get('sd', 1.0)
-            ph = timeline.get_state(frame_t).get('ph', 0.5)
-            t_start = frame_t - (sd * ph)
-            t_end = frame_t + (sd * (1.0 - ph))
-            st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
-            
-        mvp = vmath.get_frustum_fit_matrix(
-            float(job_data.get('fov', 45)), aspect_ratio, world_scale, 
-            st['p'], st['r'], 
-            st.get('lp', np.zeros(3, 'f4')), st.get('lr', np.zeros(3, 'f4')),
-            WIDTH, HEIGHT
-        )
-        
-        fbo_tex = ctx.texture((WIDTH, HEIGHT), 4)
-        fbo = ctx.framebuffer(color_attachments=[fbo_tex])
-        fbo.use()
-        fbo.clear(0, 0, 0, 1.0)
-        prog['filter_color'].write(st['pg'].astype('f4'))
-        prog['mvp'].write(mvp)
-        tex.use(0)
-        vao.render(moderngl.TRIANGLE_STRIP)
-        ctx.finish() 
-        pixels = fbo.read(components=4)
-        fbo.release()
-        fbo_tex.release()
-        
-        ctx.screen.use()
-        ctx.screen.clear(0, 0, 0, 1.0)
-        prog['filter_color'].write(st['pg'].astype('f4'))
-        prog['mvp'].write(mvp)
-        tex.use(0)
-        vao.render(moderngl.TRIANGLE_STRIP)
-        pygame.display.flip()
+        # Pass is_preview=True to get the dark gray background
+        render_dual_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
         ctx.finish()
         
-        cutil.write_screen_capture(pixels, WIDTH, HEIGHT, static_dir)
+        raw_bytes = ctx.screen.read(components=4)
+        img_data = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((HEIGHT, WIDTH, 4))
+        img_data = cv2.flip(img_data, 0)
+        img_data = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
+        
+        out_file = os.path.join(static_dir, "probe_live.jpg")
+        cv2.imwrite(out_file, img_data)
+        
+        pygame.display.flip()
         
     elif task == 'cam_preview':
         execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
         
     elif task == 'execute':
-        all_frames = [k['f'] for k in timeline.tracks['pos']] if timeline.tracks['pos'] else []
-        if all_frames:
-            f_start, f_end = int(min(all_frames)), int(max(all_frames))
-            
-            with open("/tmp/vop_heartbeat", "w") as hbf:
-                json.dump({"current": f_start, "total": f_end, "eta": 0, "est_mb": 0, "msg": "PREPARING"}, hbf)
-                
-            start_time = time.time()
-            
+        frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))
+        if frames:
+            f_start, f_end = int(min(frames)), int(max(frames))
+            start_t = time.time()
             for f in range(f_start, f_end + 1):
                 execute_exposure(f)
-                
-                frames_done = f - f_start + 1
-                elapsed = time.time() - start_time
-                fps_rate = frames_done / elapsed if elapsed > 0 else 0
-                rem_frames = f_end - f
-                eta_sec = int(rem_frames / fps_rate) if fps_rate > 0 else 0
-                est_mb = frames_done * 15 
+                done = f - f_start + 1
+                rate = done / (time.time() - start_t)
+                eta = int((f_end - f) / rate)
                 
                 with open("/tmp/vop_heartbeat", "w") as hbf:
-                    json.dump({"current": f, "total": f_end, "eta": eta_sec, "est_mb": est_mb, "msg": "RENDERING"}, hbf)
-                    
-            log_audit("Sequence Complete. Compiling FFmpeg Workprint...")
-            fps = job_data.get('fps', '24')
+                    json.dump({"current": f, "total": f_end, "eta": eta, "est_mb": done*15, "msg": "RENDERING"}, hbf)
+            
             ts = int(time.time())
             out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
-            
-            ffmpeg_cmd = [
-                "ffmpeg", "-y", 
-                "-framerate", str(fps), 
-                "-pattern_type", "glob", 
-                "-i", os.path.join(cam_mag_dir, "*.tif"),
-                "-c:v", "libx264", 
-                "-pix_fmt", "yuv420p", 
-                out_mp4
-            ]
-            try:
-                subprocess.run(ffmpeg_cmd, check=True)
-                log_audit(f"Workprint Saved: {out_mp4}")
-            except Exception as e:
-                log_audit(f"FFmpeg compile failed: {e}")
+            ffmpeg_cmd = ["ffmpeg", "-y", "-framerate", str(job_data.get('fps', 24)), "-pattern_type", "glob", 
+                          "-i", os.path.join(cam_mag_dir, "*.tif"), "-c:v", "libx264", "-pix_fmt", "yuv420p", out_mp4]
+            subprocess.run(ffmpeg_cmd)
 
     tex_mgr.release()
     pygame.quit()
@@ -223,5 +180,5 @@ if __name__ == "__main__":
     try:
         run_vop_engine(parser.parse_args().job)
     except Exception as e:
-        log_audit(f"Engine Exception: {e}")
+        log_audit(f"CRITICAL ENGINE FAILURE: {e}")
         sys.exit(1)

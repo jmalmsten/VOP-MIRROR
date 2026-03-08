@@ -2,103 +2,95 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VOP Engine</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4">
+    <title>VOP Engine v0.4.11</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.11">
 </head>
 <body>
     <div class="container">
         
         <div class="vop-header">
-            <h2>VOP Engine v0.4.1</h2>
-            <div id="sync_indicator" style="color: #666; font-size: 0.8em;">○ OFFLINE</div>
+            <h2>VOP Engine v0.4.11</h2>
+            <div id="sync_indicator">○ OFFLINE</div>
         </div>
 
         <div class="status-bar">
             <div id="st_msg">Ready...</div>
-            <div class="progress-container">
-                <div id="st_bar" class="progress-fill"></div>
-            </div>
+            <div class="progress-container"><div id="st_bar" class="progress-fill"></div></div>
+            <button class="action-btn danger" style="width: 80px;" onclick="panic()">PANIC</button>
+            <button class="action-btn secondary" style="width: 80px; margin-left:5px;" onclick="nukeMag()">NUKE CAM</button>
         </div>
 
         <div class="preview-area">
-            <div class="preview-overlay" id="preview_type">IDLE</div>
             <img id="probe_img" alt="Live Preview">
         </div>
 
         <div class="controls-area">
-            
             <div class="group-box">
-                <div class="group-title">Engine Controls</div>
-                <div class="probe-controls">
+                <div class="group-title">Probe / Preview</div>
+                <div class="input-row">
+                    <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
+                    <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
+                </div>
+                <div class="probe-controls" style="margin-top:10px;">
                     <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
                     <button class="action-btn secondary" onclick="runTask('cam_preview')">Cam View</button>
-                    <button class="action-btn" onclick="runTask('execute')" style="grid-column: 1 / -1; background: #0f0; color: #000;">RENDER SEQUENCE</button>
-                    <button class="action-btn danger" onclick="panic()">PANIC STOP</button>
-                    <button class="action-btn danger" onclick="nukeMag()">NUKE MAG</button>
-                </div>
-                <div class="input-row" style="margin-top: 10px; border-top: 1px solid #222; padding-top: 10px;">
-                    <div class="c-box"><label>Target Frame</label><input type="number" id="probe_frame" value="1"></div>
-                    <div class="c-box"><label>Subframe</label><input type="number" step="0.1" id="probe_sub" value="0.0"></div>
+                    <button class="action-btn" onclick="runTask('execute')" style="grid-column: 1/3; background: #080; color:#fff;">Execute Sequence</button>
                 </div>
             </div>
 
             <div class="group-box">
-                <div class="group-title">Hardware & Globals</div>
-                <div class="input-row">
-                    <div class="c-box"><label>FPS</label><input type="number" id="fps" value="24"></div>
-                    <div class="c-box"><label>Gain</label><input type="number" step="0.1" id="gain" value="1.0"></div>
-                    <div class="c-box"><label>AWB R</label><input type="number" step="0.01" id="awb_r" value="3.18"></div>
-                    <div class="c-box"><label>AWB B</label><input type="number" step="0.01" id="awb_b" value="1.45"></div>
-                    <div class="c-box"><label>Proj FOV</label><input type="number" id="fov" value="45"></div>
-                </div>
-                <div class="input-row" style="margin-top: 10px;">
-                    <div class="c-box"><label>Cam Res</label><input type="text" id="cam_res" value="2028x1520"></div>
-                    <div class="c-box">
-                        <label>Mono</label>
-                        <select id="mono_mode"><option value="off">Off</option><option value="on">On</option></select>
-                    </div>
-                    <div class="c-box">
-                        <label>Compression</label>
-                        <select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select>
-                    </div>
-                    <div class="c-box">
-                        <label>Smear Mode</label>
-                        <select id="smear_mode" style="background: #311; border-color: #f44; color: #fff; font-weight: bold;">
-                            <option value="SSS">SuperSmear (SSS)</option>
-                            <option value="MDS">MultiDimensional (MDS)</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <div class="group-box">
-                <div class="group-title">Projection Target</div>
-                <div class="upload-cluster">
-                    <div class="c-box"><label>Active Image</label><input type="text" id="image" readonly></div>
-                    <div class="c-box"><label>&nbsp;</label><input type="file" id="file_input" style="display:none;"><button class="upload-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button></div>
+                <div class="group-title">Projection Mag</div>
+                <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
+                    <div class="c-box" style="flex:1;"><label>Active Image</label><input type="text" id="image" readonly></div>
+                    <input type="file" id="file_input" style="display:none;" onchange="uploadFile('file_input', 'image', '/upload_target')">
+                    <button class="action-btn" style="width:auto; padding: 4px 10px; font-size: 0.7em;" onclick="document.getElementById('file_input').click()">UPLOAD</button>
+                    <button class="action-btn danger" style="width:auto; padding: 4px 10px; font-size: 0.7em;" onclick="nukeProjMag()">NUKE</button>
                 </div>
                 <div class="input-row" style="margin-top: 10px;">
                     <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="coord_scale" value="1.0"></div>
-                    <div class="c-box" style="justify-content: flex-end;"><button class="action-btn secondary" style="height: 26px; padding: 0; font-size: 0.7em;" onclick="calcFitScale()">FIT FOV</button></div>
+                    <div class="c-box" style="justify-content: flex-end;">
+                        <button class="action-btn secondary" style="height: 26px; padding: 0; font-size: 0.7em;" onclick="calcFitScale('coord_scale', 'fit_z', 'proj')">FIT FOV</button>
+                    </div>
                 </div>
             </div>
-            
+
+            <div class="group-box" style="border-left: 3px solid #0cf;">
+                <div class="group-title">Projection BiPack</div>
+                <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
+                    <div class="c-box" style="flex:1;"><label>Active Mask</label><input type="text" id="bipack_image" readonly></div>
+                    <input type="file" id="bp_file_input" style="display:none;" onchange="uploadFile('bp_file_input', 'bipack_image', '/upload_proj_bipack')">
+                    <button class="action-btn" style="width:auto; padding: 4px 10px; font-size: 0.7em;" onclick="document.getElementById('bp_file_input').click()">UPLOAD</button>
+                    <button class="action-btn danger" style="width:auto; padding: 4px 10px; font-size: 0.7em;" onclick="nukeProjBiPack()">NUKE</button>
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="bipack_fit_z" value="-1.0"></div>
+                    <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="bipack_coord_scale" value="1.0"></div>
+                    <div class="c-box" style="justify-content: flex-end;">
+                        <button class="action-btn secondary" style="height: 26px; padding: 0; font-size: 0.7em;" onclick="calcFitScale('bipack_coord_scale', 'bipack_fit_z', 'bipack')">FIT FOV</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-title">Hardware Constants</div>
+                <div class="constants-zone">
+                    <div class="const-group"><label>FOV</label><input id="fov" type="number" value="45"></div>
+                    <div class="const-group"><label>Cam Res</label><input id="cam_res" value="2028x1520"></div>
+                    <div class="const-group"><label>FPS</label><input id="fps" type="number" value="24"></div>
+                    <div class="const-group"><label>Gain</label><input id="gain" type="number" value="1.0"></div>
+                    <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>
+                    <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
+                    <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
+                    <div class="const-group"><label>Mode</label><select id="smear_mode"><option value="MDS">MDS</option><option value="SSS">SSS</option></select></div>
+                </div>
+            </div>
         </div>
 
         <div class="sheets-area">
-            <div class="sheet-container" id="sss_wrapper">
-                {% include 'sections/sss-xsheet.html' %}
-            </div>
-            <div class="sheet-container" id="mds_wrapper" style="display:none; background: #0a1118; border-color: #1a2a3a;">
-                {% include 'sections/mds-xsheet.html' %}
-            </div>
-            {% include 'sections/cheat-sheet.html' %}
+            <div class="sheet-container" id="mds_wrapper">{% include 'sections/mds-xsheet.html' %}</div>
         </div>
-
     </div>
-
-    <script src="{{ url_for('static', filename='main.js') }}?v=4"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=63"></script>
 </body>
 </html>
