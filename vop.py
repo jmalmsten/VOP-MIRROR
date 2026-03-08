@@ -1,8 +1,8 @@
 """
 VOP Module:     vop.py
-Version:        v0.2.6
+Version:        v0.2.7
 Description:    Main Entry Point. Flask Web Server.
-                Restored dynamic WorkPrint scanning for UI link payload.
+                Synchronized heartbeat payload keys for frontend UI parsing.
 """
 import os
 import sys
@@ -73,10 +73,16 @@ def status():
                         "total": hb.get("total", 1), 
                         "eta": hb.get("eta", 0), 
                         "disk": f"{hb.get('est_mb', 0)} MB", 
+                        "msg": hb.get("msg", "RENDERING"),
                         "latest_wp": latest_wp
                     })
             except:
-                return jsonify({"status": "running", "current": 0, "total": 1, "eta": 0, "disk": "0 MB", "latest_wp": latest_wp})
+                return jsonify({
+                    "status": "running", 
+                    "current": 0, "total": 1, "eta": 0, "disk": "0 MB", 
+                    "msg": "STARTING...", 
+                    "latest_wp": latest_wp
+                })
         else:
             engine_process = None
             return jsonify({"status": "idle", "latest_wp": latest_wp})
@@ -146,6 +152,6 @@ def serve_workprint(filename):
 
 if __name__ == '__main__':
     print("=========================================")
-    print(" VOP Server (v0.2.6) is online.")
+    print(" VOP Server (v0.2.7) is online.")
     print("=========================================")
     app.run(host='0.0.0.0', port=5000, debug=False)

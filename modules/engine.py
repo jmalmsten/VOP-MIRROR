@@ -1,8 +1,9 @@
 """
 VOP Module:     engine.py
-Version:        v0.0.95-stable
+Version:        v0.0.98-stable
 Description:    Primary execution loop. 
-                Restored FFmpeg compilation and implemented hierarchical matrix arguments.
+                Appended the 700ms sync offset to the physical camera shutter argument
+                to prevent the camera from closing before the delayed render loop finishes.
 """
 import os
 import sys
@@ -60,7 +61,13 @@ def run_vop_engine(job_path):
 
         smear_sec = float(st['exp'])  
         x_ms = smear_sec * 1000.0
+        
+        # Render Loop bounds: 500ms header + smear + 500ms tail.
         total_ms = x_ms + 1000.0
+        
+        # We explicitly add the 700ms sensor sleep offset to the camera argument. 
+        # This keeps the shutter open just long enough to capture the end of the delayed render loop.
+        cam_shutter_ms = total_ms + 700.0
         
         sd_frames = float(st.get('sd', 1.0))
         ph_offset = float(st.get('ph', 0.5))
@@ -70,7 +77,7 @@ def run_vop_engine(job_path):
         
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
         
-        cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0), 
+        cam_proc = hw.trigger_capture(buf_f, cam_shutter_ms, job_data.get('gain', 1.0), 
                                       job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), res_str)
         
         hw.wait_for_sensor_prime()
@@ -168,10 +175,24 @@ def run_vop_engine(job_path):
         all_frames = [k['f'] for k in timeline.tracks['pos']] if timeline.tracks['pos'] else []
         if all_frames:
             f_start, f_end = int(min(all_frames)), int(max(all_frames))
+            
+            with open("/tmp/vop_heartbeat", "w") as hbf:
+                json.dump({"current": f_start, "total": f_end, "eta": 0, "est_mb": 0, "msg": "PREPARING"}, hbf)
+                
+            start_time = time.time()
+            
             for f in range(f_start, f_end + 1):
                 execute_exposure(f)
+                
+                frames_done = f - f_start + 1
+                elapsed = time.time() - start_time
+                fps_rate = frames_done / elapsed if elapsed > 0 else 0
+                rem_frames = f_end - f
+                eta_sec = int(rem_frames / fps_rate) if fps_rate > 0 else 0
+                est_mb = frames_done * 15 
+                
                 with open("/tmp/vop_heartbeat", "w") as hbf:
-                    json.dump({"current": f, "total": f_end, "eta": 0, "est_mb": 0}, hbf)
+                    json.dump({"current": f, "total": f_end, "eta": eta_sec, "est_mb": est_mb, "msg": "RENDERING"}, hbf)
                     
             log_audit("Sequence Complete. Compiling FFmpeg Workprint...")
             fps = job_data.get('fps', '24')
