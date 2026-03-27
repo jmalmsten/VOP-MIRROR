@@ -31,3 +31,6 @@ __pycache__/
 .DS_Store
 # Ignore local VSCodium settings
 .vscode/
+
+# Ignore the dump.txt's
+*dump.txt
