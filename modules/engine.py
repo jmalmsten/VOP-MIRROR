@@ -72,28 +72,29 @@ def run_vop_engine(job_path):
         bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
         ctx.clear(*bg_color)
         
-        # --- PASS 1: PRIMARY PROJECTION MAG ---
-        # Safeguard: If no image is loaded, force scale to 100.0 to create an infinite backlight
-        active_mag_scale = 100.0 if tex_mag == tex_mgr.white_tex else mag_scale
-        
-        mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, active_mag_scale, 
-                                               st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
-        prog['mvp'].write(mvp_mag)
-        prog['filter_color'].write(st['pg'].astype('f4'))
-        tex_mag.use(0)
-        vao.render(moderngl.TRIANGLE_STRIP)
-
-        # --- PASS 2: MULTIPLICATIVE BIPACK LAYER ---
-        ctx.enable(moderngl.BLEND)
-        ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
-        
-        mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
-                                              st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+        # --- PASS 1: MULTIPLICATIVE BIPACK LAYER (Drawn first) ---
+        # Draws naturally over the black void.
+        mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale,
+                                               st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
         prog['mvp'].write(mvp_bp)
         prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
         tex_bp.use(0)
         vao.render(moderngl.TRIANGLE_STRIP)
+
+        # --- PASS 2: PRIMARY PROJECTION MAG ---
+        ctx.enable(moderngl.BLEND)
+        ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
+
+        # Safeguard: If no image is loaded, force scale to 100.0 to create an infinite backlight
+        active_mag_scale = 100.0 if tex_mag == tex_mgr.white_tex else mag_scale
+
+        mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, active_mag_scale,
+                                               st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
         
+        prog['mvp'].write(mvp_mag)
+        prog['filter_color']. write(st['pg'].astype('f4'))
+        tex_mag.use(0)
+        vao.render(moderngl.TRIANGLE_STRIP)
         ctx.disable(moderngl.BLEND)
 
     def execute_exposure(frame_num, is_preview=False):
