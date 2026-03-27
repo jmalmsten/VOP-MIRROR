@@ -157,14 +157,8 @@ setInterval(async () => {
         const r = await fetch('/status');
         const st = await r.json();
         
+        // Input-overwriting loop has been removed here.
         if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
-            for (const [k, v] of Object.entries(st.params)) {
-                const el = document.getElementById(k);
-                if (el) {
-                    if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
-                    else el.value = v;
-                }
-            }
             document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
             isFirstLoad = false;
         }
