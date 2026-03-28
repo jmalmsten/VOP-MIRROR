@@ -60,41 +60,31 @@ function nukeProjBiPack() {
 async function calcFitScale(scaleId, fitZId, magType) {
     const fov = parseFloat(document.getElementById('fov').value);
     const zDist = Math.abs(parseFloat(document.getElementById(fitZId).value)) || 1.0;
-    
-    // Projector HDMI output aspect ratio (1920x1080)
-    const projAspect = 1920.0 / 1080.0;
 
-    const r = await fetch(`/get_img_aspect?mag=${magType}`);
-    const data = await r.json();
-    const imgAspect = data.aspect || 1.777;
+    // 1. Get the aspect ratio of the loaded image
+    const aspectReq = await fetch(`/get_img_aspect?mag=${magType}`);
+    const aspectData = await aspectReq.json();
+    const imgAspect = aspectData.aspect || 1.777;
 
-    // 1. Mirror vop_math.py logic at Z=1.0
-    const fovRad = (fov * Math.PI / 180.0);
-    const frustumH_at_1 = 2.0 * Math.tan(fovRad / 2.0);
-    const frustumW_at_1 = frustumH_at_1 * projAspect;
+    // 2. Ping the Python backend to calculate the exact static scale
+    try {
+        const fitReq = await fetch('/calculate_fit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect })
+        });
+        const fitData = await fitReq.json();
 
-    let fitFactor = 1.0;
-    if (imgAspect > frustumW_at_1) {
-        fitFactor = frustumW_at_1 / imgAspect;
+        if (fitData.status === 'ok') {
+            document.getElementById(scaleId).value = fitData.scale.toFixed(4);
+            console.log(`[VOP UI] ${magType.toUpperCase()} Scale Fit to: ${fitData.scale.toFixed(4)}`);
+            await triggerSync();
+        } else {
+            console.error("Fit Calc Error:", fitData.message);
+        }
+    } catch (e) {
+        console.error("Failed to calculate fit", e);
     }
-
-    // 2. Calculate true target bounds at actual Z distance
-    const targetH = zDist * frustumH_at_1;
-    const targetW = zDist * frustumW_at_1;
-
-    // 3. Find scales, accounting for the 2.0 base quad and backend fitFactor
-    const scaleH = targetH / (2.0 * fitFactor);
-    const scaleW = targetW / (2.0 * imgAspect * fitFactor);
-
-    const targetScale = Math.min(scaleH, scaleW);
-    
-    document.getElementById(scaleId).value = targetScale.toFixed(4);
-    
-    console.log(`--- EXACT VOP_MATH FIT FOV AUDIT (${magType.toUpperCase()}) ---`);
-    console.log(`Backend Fit Factor: ${fitFactor.toFixed(4)}`);
-    console.log(`Calculated World Scale: ${targetScale.toFixed(4)}`);
-    
-    await triggerSync();
 }
 
 function addMDSKeyframe() {

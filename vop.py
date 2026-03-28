@@ -12,6 +12,7 @@ import subprocess
 import logging
 import cv2
 import glob
+import math
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 from flask import Flask, jsonify, request, render_template, send_from_directory
@@ -30,6 +31,26 @@ for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "Wo
     os.makedirs(d, exist_ok=True)
 
 engine_process = None
+
+def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
+    z_dist = abs(float(ref_z))
+    if z_dist == 0: z_dist = 0.1 
+        
+    fov_rad = math.radians(float(fov))
+    screen_aspect = screen_width / screen_height
+    
+    # Calculate full physical dimensions of the camera's view
+    frustum_h = 2.0 * z_dist * math.tan(fov_rad / 2.0)
+    frustum_w = frustum_h * screen_aspect
+    
+    # The unscaled OpenGL quad spans from -1 to 1, meaning its base size is 2x2 units.
+    # We calculate the scale required to fit the width and the height separately,
+    # remembering to divide by 2.0 because of the quad's base size.
+    scale_for_width = frustum_w / (2.0 * img_aspect)
+    scale_for_height = frustum_h / 2.0
+    
+    # Return whichever scale is smaller to guarantee it fits entirely (letterbox or pillarbox)
+    return min(scale_for_width, scale_for_height)
 
 def dispatch_engine(task_type, payload):
     global engine_process
@@ -126,6 +147,21 @@ def get_img_aspect():
         
     return jsonify({"aspect": 1.777})
 
+@app.route('/calculate_fit', methods=['POST'])
+def calculate_fit():
+    print("[VOP SERVER] ACTION: CALCULATE FIT FOV")
+    data = request.json
+    try:
+        fov = float(data.get('fov', 45.0))
+        ref_z = float(data.get('ref_z', 1.0))
+        aspect = float(data.get('aspect_ratio', 1.777))
+        
+        req_scale = calculate_static_fit_scale(fov, ref_z, aspect)
+        return jsonify({"status": "ok", "scale": req_scale})
+    except Exception as e:
+        print(f"[VOP SERVER] Fit Calc Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 400
+        
 @app.route('/preview', methods=['POST'])
 def preview():
     dispatch_engine('preview', request.json)
