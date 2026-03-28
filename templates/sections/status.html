@@ -1,34 +1,19 @@
 <div class="control-deck">
     <div class="status-meta">
         <span id="st_msg" class="status-text">IDLE</span>
-        <div class="progress-container">
+        
+        <div class="status-bar-progress">
             <div id="st_bar" class="progress-bar"></div>
         </div>
-        <span id="st_eta" style="font-size: 0.7em; color: #888; white-space: nowrap;"></span>
-    </div>
 
-    <div class="main-actions">
-        <button class="execute-btn" onclick="runTask('execute')">EXECUTE SEQUENCE</button>
+        <span id="st_eta" style="font-size: 0.7em; color: #888; white-space: nowrap;"></span>
+        
         <button class="panic-btn" onclick="panic()">PANIC / ABORT</button>
         <button class="nuke-btn" onclick="nukeMag()">NUKE MAG</button>
+        <button class="nuke-btn" onclick="nukeJob()">NUKE JOB</button>
     </div>
-
-    <div class="workprint-zone">
+    
+    <div class="workprint-zone" style="text-align: left; padding-left: 2px;">
         <a id="wp_download" href="#" style="display:none;" class="download-link"></a>
     </div>
 </div>
-
-<style>
-    .control-deck { background: #1a1a1a; padding: 15px; border-radius: 4px; border: 1px solid #333; margin-bottom: 20px; }
-    .status-meta { display: flex; align-items: center; gap: 20px; margin-bottom: 15px; }
-    .status-text { font-family: monospace; color: #0cf; font-weight: bold; min-width: 120px; }
-    .progress-container { flex-grow: 1; height: 10px; background: #000; border-radius: 5px; overflow: hidden; }
-    .progress-bar { width: 0%; height: 100%; background: #0cf; transition: width 0.3s; }
-    
-    .main-actions { display: flex; gap: 15px; justify-content: center; }
-    .execute-btn { background: #080; color: #fff; padding: 10px 30px; font-weight: bold; }
-    .panic-btn { background: #800; color: #fff; padding: 10px 30px; font-weight: bold; }
-    .nuke-btn { background: #222; color: #f44; padding: 10px 20px; border: 1px solid #444; font-size: 0.8em; }
-    
-    .download-link { display: block; margin-top: 10px; text-align: center; color: #0f0; text-decoration: none; font-size: 0.8em; font-weight: bold; }
-</style>

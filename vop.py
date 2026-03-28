@@ -207,6 +207,13 @@ def nuke_mag():
         if f.endswith(".tif"): os.remove(os.path.join(CAM_MAG_DIR, f))
     return jsonify({"status": "mag_cleared"})
 
+@app.route('/nuke_job', methods=['POST'])
+def nuke_job():
+    print("[VOP SERVER] ACTION: NUKE CURRENT JOB")
+    if os.path.exists(CURRENT_JOB_FILE):
+        os.remove(CURRENT_JOB_FILE)
+    return jsonify({"status": "job_nuked"})
+
 @app.route('/workprints/<filename>')
 def serve_workprint(filename):
     return send_from_directory(os.path.join(BASE_DIR, "WorkPrints"), filename)

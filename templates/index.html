@@ -12,13 +12,16 @@
             <h2>VOP Engine v0.4.11</h2>
             <div id="sync_indicator">○ OFFLINE</div>
         </div>
-
+        <!--
         <div class="status-bar">
             <div id="st_msg">Ready...</div>
             <div class="progress-container"><div id="st_bar" class="progress-fill"></div></div>
             <button class="action-btn danger" style="width: 80px;" onclick="panic()">PANIC</button>
             <button class="action-btn secondary" style="width: 80px; margin-left:5px;" onclick="nukeMag()">NUKE CAM</button>
         </div>
+        -->
+
+        {% include 'sections/status.html' %}
 
         <div class="preview-area">
             <img id="probe_img" alt="Live Preview">

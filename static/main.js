@@ -57,6 +57,13 @@ function nukeProjBiPack() {
     triggerSync();
 }
 
+async function nukeJob() {
+    if (confirm("Reset current session to default_job.json? This cannot be undone.")) {
+        await fetch('/nuke_job', {method: 'POST'});
+        window.location.reload(); // Triggers the fresh /status check
+    }
+}
+
 async function calcFitScale(scaleId, fitZId, magType) {
     const fov = parseFloat(document.getElementById('fov').value);
     const zDist = Math.abs(parseFloat(document.getElementById(fitZId).value)) || 1.0;
