@@ -97,13 +97,25 @@ async function calcFitScale(scaleId, fitZId, magType) {
 function addMDSKeyframe() {
     mdsMasterCount++;
     const idx = mdsMasterCount;
+
+    // Logic to find the last frame number in the sheet
+    let nextFrame = 1;
+    const existingFrames = Array.from(document.querySelectorAll('input[id^="mds_f"]'))
+        .map(input => parseInt(input.value))
+        .filter(val => !isNaN(val));
+    
+    if (existingFrames.length > 0) {
+        // Take the highest current frame number and add 1
+        nextFrame = Math.max(...existingFrames) + 1;
+    }
+
     const body = document.getElementById('mds_sheet_body');
     const row = document.createElement('div');
     row.className = 'mds-keyframe-group';
     row.innerHTML = `
         <div class="sheet-row mds-master-row">
             <div class="row-num">${idx}</div>
-            <input type="number" id="mds_f${idx}" value="${idx === 1 ? 1 : (idx-1)*24+24}">
+            <input type="number" id="mds_f${idx}" value="${nextFrame}">
             <select id="mds_m${idx}"><option value="S">S</option><option value="L">L</option></select>
             <input type="checkbox" id="mds_crn${idx}">
             <div class="node-tag master">MST</div>
