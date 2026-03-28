@@ -95,18 +95,50 @@ async function calcFitScale(scaleId, fitZId, magType) {
 }
 
 function addMDSKeyframe() {
-    mdsMasterCount++;
-    const idx = mdsMasterCount;
-
-    // Logic to find the last frame number in the sheet
-    let nextFrame = 1;
-    const existingFrames = Array.from(document.querySelectorAll('input[id^="mds_f"]'))
-        .map(input => parseInt(input.value))
-        .filter(val => !isNaN(val));
+    mdsMasterCount++; // Keeps IDs unique, even after deletions
+    const idx = mdsMasterCount; 
     
-    if (existingFrames.length > 0) {
-        // Take the highest current frame number and add 1
-        nextFrame = Math.max(...existingFrames) + 1;
+    // 1. Identify the physically last row in the list
+    const existingRows = document.querySelectorAll('.mds-keyframe-group');
+    const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
+
+    // 2. Default values for a fresh sheet
+    let vals = {
+        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
+        c: "#ffffff", cg: "#ffffff", s: "1.0", f: 1,
+        sp: "0,0,0", sr: "0,0,0", sbp_p: "0,0,0", sbp_r: "0,0,0", sc: "#ffffff", scg: "#ffffff",
+        ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
+    };
+
+    // 3. CARRY FORWARD: Scrape from the physically lastRow element
+    if (lastRow) {
+        const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
+        const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
+        
+        vals = {
+            m: getV('select[id^="mds_m"]'),
+            crn: getC('input[id^="mds_crn"]'),
+            p: getV('input[id^="mds_p"]'),
+            r: getV('input[id^="mds_r"]'),
+            bp_p: getV('input[id^="mds_bp_p"]'),
+            bp_r: getV('input[id^="mds_bp_r"]'),
+            c: getV('input[id^="mds_c_hex"]'),
+            cg: getV('input[id^="mds_cg_hex"]'),
+            s: getV('input[id^="mds_s"]'),
+            f: parseInt(getV('input[id^="mds_f"]')) + 1,
+            sp: getV('input[id^="mds_start_p"]'),
+            sr: getV('input[id^="mds_start_r"]'),
+            sbp_p: getV('input[id^="mds_start_bp_p"]'),
+            sbp_r: getV('input[id^="mds_start_bp_r"]'),
+            sc: getV('input[id^="mds_start_c_hex"]'),
+            scg: getV('input[id^="mds_start_cg_hex"]'),
+            ep: getV('input[id^="mds_stop_p"]'),
+            er: getV('input[id^="mds_stop_r"]'),
+            ebp_p: getV('input[id^="mds_stop_bp_p"]'),
+            ebp_r: getV('input[id^="mds_stop_bp_r"]'),
+            ec: getV('input[id^="mds_stop_c_hex"]'),
+            ecg: getV('input[id^="mds_stop_cg_hex"]')
+        };
     }
 
     const body = document.getElementById('mds_sheet_body');
@@ -114,49 +146,56 @@ function addMDSKeyframe() {
     row.className = 'mds-keyframe-group';
     row.innerHTML = `
         <div class="sheet-row mds-master-row">
-            <div class="row-num">${idx}</div>
-            <input type="number" id="mds_f${idx}" value="${nextFrame}">
-            <select id="mds_m${idx}"><option value="S">S</option><option value="L">L</option></select>
-            <input type="checkbox" id="mds_crn${idx}">
+            <div class="row-num">?</div>
+            <input type="number" id="mds_f${idx}" value="${vals.f}">
+            <select id="mds_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
+            <input type="checkbox" id="mds_crn${idx}" ${vals.crn?'checked':''}>
             <div class="node-tag master">MST</div>
-            <input id="mds_p${idx}" value="0,0,-1.0">
-            <input id="mds_r${idx}" value="0,0,0">
-            <input id="mds_bp_p${idx}" value="0,0,-1.0" class="bp-input">
-            <input id="mds_bp_r${idx}" value="0,0,0" class="bp-input">
-            <input type="color" id="mds_c${idx}" value="#ffffff" onchange="updateHex(this, 'mds_c${idx}_hex')">
-            <input type="hidden" id="mds_c${idx}_hex" value="#ffffff">
-            <input type="color" id="mds_cg${idx}" value="#ffffff" onchange="updateHex(this, 'mds_cg${idx}_hex')">
-            <input type="hidden" id="mds_cg${idx}_hex" value="#ffffff">
-            <input type="number" step="0.1" id="mds_s${idx}" value="1.0">
-            <button class="del-btn" onclick="this.parentElement.parentElement.remove()">X</button>
+            <input id="mds_p${idx}" value="${vals.p}">
+            <input id="mds_r${idx}" value="${vals.r}">
+            <input id="mds_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
+            <input id="mds_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
+            <input type="color" id="mds_c${idx}" value="${vals.c}" onchange="updateHex(this, 'mds_c${idx}_hex')">
+            <input type="hidden" id="mds_c${idx}_hex" value="${vals.c}">
+            <input type="color" id="mds_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'mds_cg${idx}_hex')">
+            <input type="hidden" id="mds_cg${idx}_hex" value="${vals.cg}">
+            <input type="number" step="0.1" id="mds_s${idx}" value="${vals.s}">
+            <button class="del-btn" onclick="this.parentElement.parentElement.remove(); reindexMDS();">X</button>
         </div>
         <div class="sheet-row mds-smear-row">
             <div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STRT</div>
-            <input id="mds_start_p${idx}" value="0,0,0">
-            <input id="mds_start_r${idx}" value="0,0,0">
-            <input id="mds_start_bp_p${idx}" value="0,0,0" class="bp-input">
-            <input id="mds_start_bp_r${idx}" value="0,0,0" class="bp-input">
-            <input type="color" id="mds_start_c${idx}" value="#ffffff" onchange="updateHex(this, 'mds_start_c${idx}_hex')">
-            <input type="hidden" id="mds_start_c${idx}_hex" value="#ffffff">
-            <input type="color" id="mds_start_cg${idx}" value="#ffffff" onchange="updateHex(this, 'mds_start_cg${idx}_hex')">
-            <input type="hidden" id="mds_start_cg${idx}_hex" value="#ffffff">
+            <input id="mds_start_p${idx}" value="${vals.sp}">
+            <input id="mds_start_r${idx}" value="${vals.sr}">
+            <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
+            <input id="mds_start_bp_r${idx}" value="${vals.sbp_r}" class="bp-input">
+            <input type="color" id="mds_start_c${idx}" value="${vals.sc}" onchange="updateHex(this, 'mds_start_c${idx}_hex')">
+            <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
+            <input type="color" id="mds_start_cg${idx}" value="${vals.scg}" onchange="updateHex(this, 'mds_start_cg${idx}_hex')">
+            <input type="hidden" id="mds_start_cg${idx}_hex" value="${vals.scg}">
             <div></div>
         </div>
         <div class="sheet-row mds-smear-row">
             <div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STOP</div>
-            <input id="mds_stop_p${idx}" value="0,0,0">
-            <input id="mds_stop_r${idx}" value="0,0,0">
-            <input id="mds_stop_bp_p${idx}" value="0,0,0" class="bp-input">
-            <input id="mds_stop_bp_r${idx}" value="0,0,0" class="bp-input">
-            <input type="color" id="mds_stop_c${idx}" value="#ffffff" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
-            <input type="hidden" id="mds_stop_c${idx}_hex" value="#ffffff">
-            <input type="color" id="mds_stop_cg${idx}" value="#ffffff" onchange="updateHex(this, 'mds_stop_cg${idx}_hex')">
-            <input type="hidden" id="mds_stop_cg${idx}_hex" value="#ffffff">
+            <input id="mds_stop_p${idx}" value="${vals.ep}">
+            <input id="mds_stop_r${idx}" value="${vals.er}">
+            <input id="mds_stop_bp_p${idx}" value="${vals.ebp_p}" class="bp-input">
+            <input id="mds_stop_bp_r${idx}" value="${vals.ebp_r}" class="bp-input">
+            <input type="color" id="mds_stop_c${idx}" value="${vals.ec}" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
+            <input type="hidden" id="mds_stop_c${idx}_hex" value="${vals.ec}">
+            <input type="color" id="mds_stop_cg${idx}" value="${vals.ecg}" onchange="updateHex(this, 'mds_stop_cg${idx}_hex')">
+            <input type="hidden" id="mds_stop_cg${idx}_hex" value="${vals.ecg}">
             <div></div>
         </div>`;
     body.appendChild(row);
+    reindexMDS();
+}
+
+function reindexMDS() {
+    document.querySelectorAll('.mds-keyframe-group').forEach((group, i) => {
+        group.querySelector('.row-num').innerText = i + 1;
+    });
 }
 
 function updateHex(el, targetId) { document.getElementById(targetId).value = el.value; triggerSync(); }
