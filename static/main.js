@@ -154,41 +154,38 @@ setInterval(async () => {
         const r = await fetch('/status');
         const st = await r.json();
         
-        /* Restored one-time UI hydration.
-           This loop executes strictly once upon the first payload reception,
-           preventing active user inputs from being overwritten during subsequent polling. */
         if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
             for (const [k, v] of Object.entries(st.params)) {
                 const el = document.getElementById(k);
                 if (el) {
-                    // Type-check to handle boolean attributes vs string values
                     if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
                     else el.value = v;
                 }
             }
             document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
-            isFirstLoad = false; // Locks the gate against future overwrites
+            isFirstLoad = false;
         }
 
         document.getElementById('sync_indicator').innerHTML = st.params ? '<span style="color:#0f0">● ONLINE</span>' : '○ OFFLINE';
         const msgEl = document.getElementById('st_msg');
         const bar = document.getElementById('st_bar');
+        const etaEl = document.getElementById('st_eta');
         
         if (st.status === 'rendering' && st.heartbeat) {
             isEngineRunning = true;
-            msgEl.innerText = `${st.msg} [${st.heartbeat.current}/${st.heartbeat.total}]`;
+            // FIXED: Use st.heartbeat.msg instead of st.msg
+            msgEl.innerText = `${st.heartbeat.msg} [${st.heartbeat.current}/${st.heartbeat.total}]`;
             bar.style.width = (st.heartbeat.current/st.heartbeat.total*100) + "%";
             
-            // Format ETA (HH:MM:SS)
-            const h = Math.floor(st.heartbeat.eta / 3600).toString().padStart(2, '0');
-            const m = Math.floor((st.heartbeat.eta % 3600) / 60).toString().padStart(2, '0');
-            const s = (st.heartbeat.eta % 60).toString().padStart(2, '0');
-
-            // Format Size (MB or GB)
-            const mb = st.heartbeat.est_mb;
-            const sizeStr = mb > 1024 ? (mb / 1024).toFixed(2) + " GB" : mb + " MB";
-
-            document.getElementById('st_eta').innerText = `ETA: ${h}:${m}:${s} | EST: ${sizeStr}`;
+            // Format ETA (HH:MM:SS) - Only if eta exists
+            if (st.heartbeat.eta !== undefined) {
+                const h = Math.floor(st.heartbeat.eta / 3600).toString().padStart(2, '0');
+                const m = Math.floor((st.heartbeat.eta % 3600) / 60).toString().padStart(2, '0');
+                const s = (st.heartbeat.eta % 60).toString().padStart(2, '0');
+                const mb = st.heartbeat.est_mb;
+                const sizeStr = mb > 1024 ? (mb / 1024).toFixed(2) + " GB" : mb + " MB";
+                if (etaEl) etaEl.innerText = `ETA: ${h}:${m}:${s} | TOTAL PROJ: ${sizeStr}`;
+            }
         } else {
             if (isEngineRunning) {
                 document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
@@ -196,7 +193,7 @@ setInterval(async () => {
             }
             msgEl.innerHTML = st.workprint ? `IDLE | <a href="${st.workprint}" target="_blank" style="color:#0cf">VIEW WORKPRINT</a>` : "Ready...";
             bar.style.width = "0%";
-            document.getElementById('st_eta').innerText = ""; // Clear on idle
+            if (etaEl) etaEl.innerText = ""; 
         }
-    } catch(e) {}
+    } catch(e) { console.error("Poll Error:", e); }
 }, 1000);

@@ -96,7 +96,7 @@ def run_vop_engine(job_path):
                                                st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
         
         prog['mvp'].write(mvp_mag)
-        prog['filter_color']. write(st['pg'].astype('f4'))
+        prog['filter_color'].write(st['pg'].astype('f4'))
         tex_mag.use(0)
         vao.render(moderngl.TRIANGLE_STRIP)
 
@@ -168,44 +168,43 @@ def run_vop_engine(job_path):
         execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
         
     elif task == 'execute':
+        # Fix: Ensure we are calculating based on actual frame count, not frame index
         frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))
         if frames:
             f_start, f_end = int(min(frames)), int(max(frames))
             total_frames = f_end - f_start + 1
             start_t = time.time()
-            total_size_bytes = 0 # Track actual cumulative file size
+            total_size_bytes = 0
+            files_found = 0
             
             for f in range(f_start, f_end + 1):
                 execute_exposure(f)
                 done = f - f_start + 1
 
-                # Calculate Time Estimation
+                # 1. Time Estimation (Remaining)
                 elapsed = time.time() - start_t
                 avg_time = elapsed / done
                 eta_sec = int(avg_time * (total_frames - done))
 
-                # Calculate File Size Estimation
+                # 2. File Size Estimation (Total Project Size)
                 out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
                 if os.path.exists(out_f):
                     total_size_bytes += os.path.getsize(out_f)
+                    files_found += 1
                 
-                avg_size = total_size_bytes / done
-                est_rem_mb = (avg_size * (total_frames - done)) / (1024*1024)
+                # Calculate avg based only on files we've successfully measured
+                avg_size = total_size_bytes / max(1, files_found)
+                # We project the total final size of the whole job
+                total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
 
                 with open("/tmp/vop_heartbeat", "w") as hbf:
                     json.dump({
-                        "current": f,
-                        "total": f_end,
+                        "current": done,        # Proper 0-100% progress
+                        "total": total_frames,
                         "eta": eta_sec,
-                        "est_mb": round(est_rem_mb, 1),
+                        "est_mb": round(total_proj_est_mb, 1),
                         "msg": "RENDERING"
                     }, hbf)
-            
-            ts = int(time.time())
-            out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
-            ffmpeg_cmd = ["ffmpeg", "-y", "-framerate", str(job_data.get('fps', 24)), "-pattern_type", "glob", 
-                          "-i", os.path.join(cam_mag_dir, "*.tif"), "-c:v", "libx264", "-pix_fmt", "yuv420p", out_mp4]
-            subprocess.run(ffmpeg_cmd)
 
     tex_mgr.release()
     pygame.quit()
