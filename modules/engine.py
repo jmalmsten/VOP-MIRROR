@@ -171,15 +171,35 @@ def run_vop_engine(job_path):
         frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))
         if frames:
             f_start, f_end = int(min(frames)), int(max(frames))
+            total_frames = f_end - f_start + 1
             start_t = time.time()
+            total_size_bytes = 0 # Track actual cumulative file size
+            
             for f in range(f_start, f_end + 1):
                 execute_exposure(f)
                 done = f - f_start + 1
-                rate = done / (time.time() - start_t)
-                eta = int((f_end - f) / rate)
+
+                # Calculate Time Estimation
+                elapsed = time.time() - start_t
+                avg_time = elapsed / done
+                eta_sec = int(avg_time * (total_frames - done))
+
+                # Calculate File Size Estimation
+                out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
+                if os.path.exists(out_f):
+                    total_size_bytes += os.path.getsize(out_f)
                 
+                avg_size = total_size_bytes / done
+                est_rem_mb = (avg_size * (total_frames - done)) / (1024*1024)
+
                 with open("/tmp/vop_heartbeat", "w") as hbf:
-                    json.dump({"current": f, "total": f_end, "eta": eta, "est_mb": done*15, "msg": "RENDERING"}, hbf)
+                    json.dump({
+                        "current": f,
+                        "total": f_end,
+                        "eta": eta_sec,
+                        "est_mb": round(est_rem_mb, 1),
+                        "msg": "RENDERING"
+                    }, hbf)
             
             ts = int(time.time())
             out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
