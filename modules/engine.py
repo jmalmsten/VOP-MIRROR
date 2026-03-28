@@ -203,7 +203,7 @@ def run_vop_engine(job_path):
                         "total": total_frames,
                         "eta": eta_sec,
                         "est_mb": round(total_proj_est_mb, 1),
-                        "msg": "RENDERING"
+                        "msg": "EXPOSING"
                     }, hbf)
 
             # --- POST-PROCESS: GENERATE WORKPRINT MP4 ---
