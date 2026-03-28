@@ -95,14 +95,13 @@ async function calcFitScale(scaleId, fitZId, magType) {
 }
 
 function addMDSKeyframe() {
-    mdsMasterCount++; // Keeps IDs unique, even after deletions
+    mdsMasterCount++; 
     const idx = mdsMasterCount; 
     
-    // 1. Identify the physically last row in the list
     const existingRows = document.querySelectorAll('.mds-keyframe-group');
     const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
 
-    // 2. Default values for a fresh sheet
+    // Default baseline
     let vals = {
         m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
         c: "#ffffff", cg: "#ffffff", s: "1.0", f: 1,
@@ -110,34 +109,39 @@ function addMDSKeyframe() {
         ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
     };
 
-    // 3. CARRY FORWARD: Scrape from the physically lastRow element
     if (lastRow) {
+        // Scraper helper: looks for an input that starts with the prefix and ends with the suffix
         const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
         const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
         
         vals = {
-            m: getV('select[id^="mds_m"]'),
-            crn: getC('input[id^="mds_crn"]'),
-            p: getV('input[id^="mds_p"]'),
-            r: getV('input[id^="mds_r"]'),
-            bp_p: getV('input[id^="mds_bp_p"]'),
-            bp_r: getV('input[id^="mds_bp_r"]'),
-            c: getV('input[id^="mds_c_hex"]'),
-            cg: getV('input[id^="mds_cg_hex"]'),
-            s: getV('input[id^="mds_s"]'),
-            f: parseInt(getV('input[id^="mds_f"]')) + 1,
-            sp: getV('input[id^="mds_start_p"]'),
-            sr: getV('input[id^="mds_start_r"]'),
-            sbp_p: getV('input[id^="mds_start_bp_p"]'),
-            sbp_r: getV('input[id^="mds_start_bp_r"]'),
-            sc: getV('input[id^="mds_start_c_hex"]'),
-            scg: getV('input[id^="mds_start_cg_hex"]'),
-            ep: getV('input[id^="mds_stop_p"]'),
-            er: getV('input[id^="mds_stop_r"]'),
-            ebp_p: getV('input[id^="mds_stop_bp_p"]'),
-            ebp_r: getV('input[id^="mds_stop_bp_r"]'),
-            ec: getV('input[id^="mds_stop_c_hex"]'),
-            ecg: getV('input[id^="mds_stop_cg_hex"]')
+            m: getV('.mds-master-row select'),
+            crn: getC('.mds-master-row input[type="checkbox"]'),
+            p: getV('.mds-master-row input[id*="_p"]:not([id*="bp"])'),
+            r: getV('.mds-master-row input[id*="_r"]:not([id*="bp"])'),
+            bp_p: getV('.mds-master-row .bp-input[id*="_p"]'),
+            bp_r: getV('.mds-master-row .bp-input[id*="_r"]'),
+            // Fixed Color Selectors: Targets hidden hex fields within specific row types
+            c: getV('.mds-master-row input[id^="mds_c"]:not([id*="cg"])[id$="_hex"]'),
+            cg: getV('.mds-master-row input[id^="mds_cg"][id$="_hex"]'),
+            s: getV('.mds-master-row input[id*="_s"]'),
+            f: parseInt(getV('.mds-master-row input[id*="_f"]')) + 1,
+            
+            // Smear Start Scrapes
+            sp: getV('.mds-smear-row:nth-child(2) input[id*="_p"]:not([id*="bp"])'),
+            sr: getV('.mds-smear-row:nth-child(2) input[id*="_r"]:not([id*="bp"])'),
+            sbp_p: getV('.mds-smear-row:nth-child(2) .bp-input[id*="_p"]'),
+            sbp_r: getV('.mds-smear-row:nth-child(2) .bp-input[id*="_r"]'),
+            sc: getV('.mds-smear-row:nth-child(2) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
+            scg: getV('.mds-smear-row:nth-child(2) input[id*="_cg"][id$="_hex"]'),
+
+            // Smear Stop Scrapes
+            ep: getV('.mds-smear-row:nth-child(3) input[id*="_p"]:not([id*="bp"])'),
+            er: getV('.mds-smear-row:nth-child(3) input[id*="_r"]:not([id*="bp"])'),
+            ebp_p: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_p"]'),
+            ebp_r: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_r"]'),
+            ec: getV('.mds-smear-row:nth-child(3) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
+            ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]')
         };
     }
 
