@@ -82,13 +82,28 @@ def status():
         wps = glob.glob(os.path.join(wp_dir, "*.mp4"))
         if wps: latest_wp = os.path.basename(max(wps, key=os.path.getctime))
     except: pass
-
+    
+    # v0.2.17 Update: Base dictionary merge for robust state hydration
     params = {}
-    if os.path.exists(CURRENT_JOB_FILE):
+    
+    # 1. ALWAYS load the default configuration first to establish the baseline
+    default_job_file = os.path.join(BASE_DIR, "configs", "default_job.json")
+    if os.path.exists(default_job_file):
         try:
-            with open(CURRENT_JOB_FILE, 'r') as f: params = json.load(f)
+            with open(default_job_file, 'r') as f: 
+                params = json.load(f)
         except: pass
 
+    # 2. Layer the active session over the top to overwrite defaults with user choices
+    if os.path.exists(CURRENT_JOB_FILE):
+        try:
+            with open(CURRENT_JOB_FILE, 'r') as f: 
+                active_job = json.load(f)
+                if active_job:
+                    params.update(active_job)
+        except: pass
+
+    # 3. Engine heartbeat check and required Flask return statements
     if engine_process is not None and engine_process.poll() is None:
         try:
             with open("/tmp/vop_heartbeat", "r") as f:

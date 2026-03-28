@@ -147,10 +147,20 @@ setInterval(async () => {
         const r = await fetch('/status');
         const st = await r.json();
         
-        // Input-overwriting loop has been removed here.
+        /* Restored one-time UI hydration.
+           This loop executes strictly once upon the first payload reception,
+           preventing active user inputs from being overwritten during subsequent polling. */
         if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
+            for (const [k, v] of Object.entries(st.params)) {
+                const el = document.getElementById(k);
+                if (el) {
+                    // Type-check to handle boolean attributes vs string values
+                    if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
+                    else el.value = v;
+                }
+            }
             document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
-            isFirstLoad = false;
+            isFirstLoad = false; // Locks the gate against future overwrites
         }
 
         document.getElementById('sync_indicator').innerHTML = st.params ? '<span style="color:#0f0">● ONLINE</span>' : '○ OFFLINE';
