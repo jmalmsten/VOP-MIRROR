@@ -205,7 +205,7 @@ def run_vop_engine(job_path):
                         "est_mb": round(total_proj_est_mb, 1),
                         "msg": "RENDERING"
                     }, hbf)
-                    
+
             # --- POST-PROCESS: GENERATE WORKPRINT MP4 ---
             # Once the frame sequence is fully written to disk, we wrap the TIFFs into a h.264 mp4.
             ts = int(time.time())
@@ -218,7 +218,7 @@ def run_vop_engine(job_path):
                 "-framerate", str(job_data.get('fps', 24)),
                 "-pattern_type", "glob", "-i", os.path.join(cam_mag_dir, "*.tif"),
                 "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                out.mp4
+                out_mp4
             ]
             log_audit(f"Creating Workprint: {out_mp4}")
             subprocess.run(ffmpeg_cmd)
