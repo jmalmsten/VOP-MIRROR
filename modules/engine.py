@@ -51,6 +51,10 @@ def run_vop_engine(job_path):
     
     ctx, prog, vao = gfx.init_render_pipeline()
     tex_mgr = gfx.TextureManager(ctx, os.path.join(base_path, "ProjMag"), job_data)
+
+    # Create an off-screen FBO for the BiPack layer to render into its own void
+    bp_tex = ctx.texture((WIDTH, HEIGHT), 4)
+    bp_fbo = ctx.framebuffer(color_attachments=[bp_tex])
     
     mag_scale = float(job_data.get('coord_scale', 1.0))
     bp_scale = float(job_data.get('bipack_coord_scale', 1.0))
@@ -70,24 +74,24 @@ def run_vop_engine(job_path):
         tex_bp, asp_bp = tex_mgr.load(ph_val, is_bipack=True)
 
         bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
-        ctx.clear(*bg_color)
         
-        # --- PASS 1: MULTIPLICATIVE BIPACK LAYER (Drawn first) ---
-        # Draws naturally over the black void.
-        mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale,
-                                               st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+        # --- PASS 1: RENDER BIPACK INTO OFF-SCREEN FBO ---
+        bp_fbo.use()
+        bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
+
+        mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
+                                              st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
         prog['mvp'].write(mvp_bp)
         prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
         tex_bp.use(0)
         vao.render(moderngl.TRIANGLE_STRIP)
 
-        # --- PASS 2: PRIMARY PROJECTION MAG ---
-        ctx.enable(moderngl.BLEND)
-        ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
+        # --- PASS 2: RENDER MAG TO THE ACTUAL SCREEN ---
+        ctx.screen.use()
+        ctx.clear(*bg_color)
 
         # Safeguard: If no image is loaded, force scale to 100.0 to create an infinite backlight
         active_mag_scale = 100.0 if tex_mag == tex_mgr.white_tex else mag_scale
-
         mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, active_mag_scale,
                                                st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
         
@@ -95,6 +99,17 @@ def run_vop_engine(job_path):
         prog['filter_color']. write(st['pg'].astype('f4'))
         tex_mag.use(0)
         vao.render(moderngl.TRIANGLE_STRIP)
+
+        # --- PASS 3: MULTIPLY THE FBO OVER THE SCREEN ---
+        ctx.enable(moderngl.BLEND)
+        ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
+
+        # Use a flat Identity Matrix to force the FBO quad to cover the entire screen
+        prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+        prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+        bp_tex.use(0)
+        vao.render(moderngl.TRIANGLE_STRIP)
+
         ctx.disable(moderngl.BLEND)
 
     def execute_exposure(frame_num, is_preview=False):
