@@ -205,7 +205,23 @@ def run_vop_engine(job_path):
                         "est_mb": round(total_proj_est_mb, 1),
                         "msg": "RENDERING"
                     }, hbf)
+                    
+            # --- POST-PROCESS: GENERATE WORKPRINT MP4 ---
+            # Once the frame sequence is fully written to disk, we wrap the TIFFs into a h.264 mp4.
+            ts = int(time.time())
+            out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
 
+            # We use the 'glob' pattern type to gather all exposures in the CamMag directory.
+            # libx264 + yuv420p ensures the resulting video is playable in all modern browsers.
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-framerate", str(job_data.get('fps', 24)),
+                "-pattern_type", "glob", "-i", os.path.join(cam_mag_dir, "*.tif"),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                out.mp4
+            ]
+            log_audit(f"Creating Workprint: {out_mp4}")
+            subprocess.run(ffmpeg_cmd)
     tex_mgr.release()
     pygame.quit()
 
