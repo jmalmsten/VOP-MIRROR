@@ -178,6 +178,17 @@ setInterval(async () => {
             isEngineRunning = true;
             msgEl.innerText = `${st.msg} [${st.heartbeat.current}/${st.heartbeat.total}]`;
             bar.style.width = (st.heartbeat.current/st.heartbeat.total*100) + "%";
+            
+            // Format ETA (HH:MM:SS)
+            const h = Math.floor(st.heartbeat.eta / 3600).toString().padStart(2, '0');
+            const m = Math.floor((st.heartbeat.eta % 3600) / 60).toString().padStart(2, '0');
+            const s = (st.heartbeat.eta % 60).toString().padStart(2, '0');
+
+            // Format Size (MB or GB)
+            const mb = st.heartbeat.est_mb;
+            const sizeStr = mb > 1024 ? (mb / 1024).toFixed(2) + " GB" : mb + " MB";
+
+            document.getElementById('st_eta').innerText = `ETA: ${h}:${m}:${s} | EST: ${sizeStr}`;
         } else {
             if (isEngineRunning) {
                 document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
@@ -185,6 +196,7 @@ setInterval(async () => {
             }
             msgEl.innerHTML = st.workprint ? `IDLE | <a href="${st.workprint}" target="_blank" style="color:#0cf">VIEW WORKPRINT</a>` : "Ready...";
             bar.style.width = "0%";
+            document.getElementById('st_eta').innerText = ""; // Clear on idle
         }
     } catch(e) {}
 }, 1000);
