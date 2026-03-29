@@ -52,6 +52,10 @@ def run_vop_engine(job_path):
     ctx, prog, vao = gfx.init_render_pipeline()
     tex_mgr = gfx.TextureManager(ctx, os.path.join(base_path, "ProjMag"), job_data)
 
+    # Initializing mono_mode
+    mono_active = (job_data.get('mono_mode') == True)
+    prog['mono_mode'].value = mono_active
+
     # Create an off-screen FBO for the BiPack layer to render into its own void
     bp_tex = ctx.texture((WIDTH, HEIGHT), 4)
     bp_fbo = ctx.framebuffer(color_attachments=[bp_tex])
@@ -141,11 +145,11 @@ def run_vop_engine(job_path):
         cam_proc.wait() 
         
         if is_preview:
-            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'])
+            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active)
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
             out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
-            cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], False)
+            cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], mono_active)
 
     task = job_data.get('type')
     

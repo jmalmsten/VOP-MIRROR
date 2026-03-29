@@ -27,10 +27,20 @@ def init_render_pipeline():
     precision mediump float;
     uniform sampler2D TexUnit;
     uniform vec3 filter_color;
+    uniform bool mono_mode; // <-- 1. Add the uniform
+    
     in vec2 v_tex;
     out vec4 f_color;
+    
     void main() {
         vec4 tex_col = texture(TexUnit, v_tex);
+        
+        // <-- 2. Intercept and convert to grayscale if active
+        if (mono_mode) {
+            float gray = dot(tex_col.rgb, vec3(0.299, 0.587, 0.114));
+            tex_col.rgb = vec3(gray);
+        }
+        
         f_color = tex_col * vec4(filter_color, 1.0);
     }
     """
@@ -38,6 +48,10 @@ def init_render_pipeline():
     ctx = moderngl.create_context(require=300)
     prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
     
+    # Initialize the mono uniform to a safe default
+    if 'mono_mode' in prog:
+        prog['mono_mode'].value = False
+
     verts = np.array([
         -1.0,  1.0, 0.0, 1.0,
          1.0,  1.0, 1.0, 1.0,
