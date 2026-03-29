@@ -174,9 +174,8 @@ function addMDSKeyframe() {
             <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
             <input id="mds_start_bp_r${idx}" value="${vals.sbp_r}" class="bp-input">
             <input type="color" id="mds_start_c${idx}" value="${vals.sc}" onchange="updateHex(this, 'mds_start_c${idx}_hex')">
-            <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
-            <input type="color" id="mds_start_cg${idx}" value="${vals.scg}" onchange="updateHex(this, 'mds_start_cg${idx}_hex')">
-            <input type="hidden" id="mds_start_cg${idx}_hex" value="${vals.scg}">
+            <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">>
+            <div></div>
             <div></div>
         </div>
         <div class="sheet-row mds-smear-row">
@@ -188,8 +187,7 @@ function addMDSKeyframe() {
             <input id="mds_stop_bp_r${idx}" value="${vals.ebp_r}" class="bp-input">
             <input type="color" id="mds_stop_c${idx}" value="${vals.ec}" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
             <input type="hidden" id="mds_stop_c${idx}_hex" value="${vals.ec}">
-            <input type="color" id="mds_stop_cg${idx}" value="${vals.ecg}" onchange="updateHex(this, 'mds_stop_cg${idx}_hex')">
-            <input type="hidden" id="mds_stop_cg${idx}_hex" value="${vals.ecg}">
+            <div></div>
             <div></div>
         </div>`;
     body.appendChild(row);
