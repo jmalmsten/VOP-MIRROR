@@ -1,6 +1,5 @@
 """
 VOP Module:     interpolator.py
-Version:        v0.2.14
 Description:    Timeline state evaluation.
                 Integrated independent ProjBiPack (BP) spatial tracks.
                 Added safe-fallback getters to prevent NoneType math crashes on empty timelines.
@@ -37,8 +36,9 @@ class Timeline:
     def __init__(self, job_data):
         self.job = job_data
         
+        # Added 'm' to track Interpolation Mode (S/L)
         self.tracks = {
-            'pos': [], 'rot': [], 'bp_pos': [], 'bp_rot': [], 'pg': [], 'cg': [], 
+            'm': [], 'pos': [], 'rot': [], 'bp_pos': [], 'bp_rot': [], 'pg': [], 'cg': [], 
             'exp': [], 'sd': [], 'ph': [], 'src': [], 'stp': [],
             'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
             'start_bp_p': [], 'stop_bp_p': [], 'start_bp_r': [], 'stop_bp_r': [],
@@ -57,6 +57,9 @@ class Timeline:
         for idx in sorted(list(row_ids), key=int):
             f_val = float(job_data.get(f"{prefix}f{idx}", 1.0))
             
+            # Extract Interpolation Mode (S = Smooth, L = Linear)
+            self.tracks['m'].append({'f': f_val, 'val': job_data.get(f"{prefix}m{idx}", "S")})
+            
             self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}p{idx}", "0,0,-1.0"), -1.0)})
             self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}r{idx}", "0,0,0"), 0.0)})
             self.tracks['bp_pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_p{idx}", "0,0,-1.0"), -1.0)})
@@ -70,6 +73,7 @@ class Timeline:
             self.tracks['src'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}src{idx}", -1.0))})
             self.tracks['stp'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}stp{idx}", 1.0))})
 
+            # MDS Start/Stop offsets (Ignored during SSS execution)
             self.tracks['start_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"))})
             self.tracks['stop_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_p{idx}", "0,0,0"))})
             self.tracks['start_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_r{idx}", "0,0,0"))})
@@ -88,6 +92,17 @@ class Timeline:
         for track in self.tracks.values():
             track.sort(key=lambda x: x['f'])
 
+    def _get_interp_mode(self, t):
+        """Helper to find if the current interval is set to Smooth ('S') or Linear ('L')"""
+        m_track = self.tracks.get('m', [])
+        if not m_track: return 'S'
+        
+        # Find the interpolation mode of the keyframe immediately preceding or equal to 't'
+        for i in range(len(m_track) - 1):
+            if m_track[i]['f'] <= t < m_track[i+1]['f']:
+                return m_track[i]['val']
+        return m_track[-1]['val']
+
     def _get_val(self, key, t, is_color=False):
         track = self.tracks.get(key, [])
         if not track: return None
@@ -99,12 +114,34 @@ class Timeline:
                 k1, k2 = track[i], track[i+1]
                 break
                 
+        # Base Linear Alpha (0.0 to 1.0 representing percentage traversed between k1 and k2)
         alpha = (t - k1['f']) / (k2['f'] - k1['f'])
+        
+        # SSS Core Interpolation Logic:
+        # If the origin keyframe is 'S' (Smooth), apply Cosine Easing.
+        # This transforms the linear ramp into an S-curve, ensuring zero velocity 
+        # at the exact moment of the keyframe, producing fluid motion without mechanical stops.
+        if self.mode == 'sss':
+            if self._get_interp_mode(k1['f']) == 'S':
+                alpha = (1.0 - np.cos(alpha * np.pi)) / 2.0
+                
         if is_color:
             return oklab_to_linear(linear_to_oklab(k1['val']) + (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
         return k1['val'] + (k2['val'] - k1['val']) * alpha
 
     def get_state(self, t):
+        """
+        SSS Time Domain Mapping:
+        In SSS mode, 't' is not a whole integer, it is a fractional frame decimal.
+        engine.py calculates this 't' continuously during the physical exposure loop based on:
+        
+        1. SD (Shutter Duration): Multiplier of the standard frame interval. 
+           (e.g., SD = 1.0 means shutter is open for a full 1/24th distance, SD = 0.5 means half distance).
+        2. PH (Playhead Phase): Offsets the center point of the exposure. 
+           (e.g., PH = 0.5 centers the exposure symmetrically on the frame number. PH = 0.0 pushes the exposure to start exactly AT the frame number).
+           
+        This continuous 't' is passed to _get_val(), which smoothly interpolates absolute positions.
+        """
         if not any(self.tracks.values()): return self.get_default_state()
         
         def safe_val(key, default_arr):
@@ -120,10 +157,9 @@ class Timeline:
             'r': safe_val('rot', np.array([0, 0, 0], dtype='f4')),
             'bp_p': safe_val('bp_pos', np.array([0, 0, -1.0], dtype='f4')), 
             'bp_r': safe_val('bp_rot', np.array([0, 0, 0], dtype='f4')),
-            'lp': np.zeros(3, 'f4'), 
-            'lr': np.zeros(3, 'f4'),
-            'lbp_p': np.zeros(3, 'f4'), 
-            'lbp_r': np.zeros(3, 'f4'),
+            # Local offsets (lp/lr) are held at zero during SSS execution.
+            'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
+            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
             'pg': safe_col('pg', np.array([1, 1, 1], dtype='f4')), 
             'cg': safe_col('cg', np.array([1, 1, 1], dtype='f4')),
             'exp': float(self._get_val('exp', t) or 1.0), 
