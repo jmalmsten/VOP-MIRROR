@@ -7,7 +7,7 @@ let mdsMasterCount = 0;
 let sssMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
-let currentMode = 'MDS'; // <-- tracks the current active mode
+let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
 
 // Initialize the dropdown listener when the DOM loads
 document.addEventListener('DOMContentLoaded', () => {
@@ -256,7 +256,7 @@ function addSSSKeyframe() {
     // SSS Base Defaults (Includes SD and PH)
     let vals = {
         m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
-        c: "#ffffff", cg: "#ffffff", s: "1.0", sd: "1.0", ph: "0.5", f: 1
+        c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1
     };
 
     if (lastRow) {
@@ -272,7 +272,7 @@ function addSSSKeyframe() {
             bp_r: getV('.bp-input[id^="sss_bp_r"]'),
             c: getV('input[id^="sss_c"][id$="_hex"]:not([id*="cg"])'),
             cg: getV('input[id^="sss_cg"][id$="_hex"]'),
-            s: getV('input[id^="sss_s"]:not([id*="sd"])'),
+            exp: getV('input[id^="sss_s"]:not([id*="sd"])'),
             sd: getV('input[id^="sss_sd"]'),
             ph: getV('input[id^="sss_ph"]'),
             f: parseInt(getV('input[id^="sss_f"]')) + 1
@@ -334,9 +334,19 @@ setInterval(async () => {
                     else el.value = v;
                 }
             }
+
+            // Read the mode that was just injected from the server parameters
+            const loadedMode = document.getElementById('smear_mode');
+            if (loadedMode) {
+                // Update the global JS state to match the server state
+                currentMode = loadedMode.value; 
+                // Force the DOM to display the correct sheet corresponding to the state
+                toggleSheetVisibility();
+
             document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
             isFirstLoad = false;
         }
+
         document.getElementById('sync_indicator').innerHTML = st.params ? '<span style="color:#0f0">● ONLINE</span>' : '○ OFFLINE';
         const msgEl = document.getElementById('st_msg');
         const bar = document.getElementById('st_bar');

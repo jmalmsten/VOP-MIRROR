@@ -179,7 +179,12 @@ class Timeline:
         def safe_col(key, default_arr):
             v = self._get_val(key, t, True)
             return v if v is not None else default_arr
-            
+
+        # Checks for None explicitly so that 0.0 is passed through correctly
+        def safe_float(key, default_val):
+            v = self._get_val(key, t)
+            return float(v) if v is not None else default_val
+
         return {
             'p': safe_val('pos', np.array([0, 0, -1.0], dtype='f4')), 
             'r': safe_val('rot', np.array([0, 0, 0], dtype='f4')),
@@ -190,9 +195,10 @@ class Timeline:
             'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
             'pg': safe_col('pg', np.array([1, 1, 1], dtype='f4')), 
             'cg': safe_col('cg', np.array([1, 1, 1], dtype='f4')),
-            'exp': float(self._get_val('exp', t) or 1.0), 
-            'sd': float(self._get_val('sd', t) or 1.0),
-            'ph': float(self._get_val('ph', t) or 0.5)
+
+            'exp': safe_float('exp', 1.0),
+            'sd': safe_float('sd', 1.0),
+            'ph': safe_float('ph', 0.5)
         }
 
     def get_mds_state(self, frame_num, t_norm):
