@@ -150,7 +150,7 @@ function addMDSKeyframe() {
     // Default baseline
     let vals = {
         m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
-        c: "#ffffff", cg: "#ffffff", s: "1.0", f: 1,
+        c: "#ffffff", cg: "#ffffff", exp: "1.0", f: 1,
         sp: "0,0,0", sr: "0,0,0", sbp_p: "0,0,0", sbp_r: "0,0,0", sc: "#ffffff", scg: "#ffffff",
         ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
     };
@@ -170,7 +170,7 @@ function addMDSKeyframe() {
             // Fixed Color Selectors: Targets hidden hex fields within specific row types
             c: getV('.mds-master-row input[id^="mds_c"]:not([id*="cg"])[id$="_hex"]'),
             cg: getV('.mds-master-row input[id^="mds_cg"][id$="_hex"]'),
-            s: getV('.mds-master-row input[id*="_s"]'),
+            exp: getV('.mds-master-row input[id*="sss_exp"]'),
             f: parseInt(getV('.mds-master-row input[id*="_f"]')) + 1,
             
             // Smear Start Scrapes
@@ -303,7 +303,7 @@ function addSSSKeyframe() {
         <input type="hidden" id="sss_c${idx}_hex" value="${vals.c}">
         <input type="color" id="sss_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'sss_cg${idx}_hex')" style="width:100%; height:26px; padding:0;">
         <input type="hidden" id="sss_cg${idx}_hex" value="${vals.cg}">
-        <input type="number" step="0.1" id="sss_exp${idx}" value="${vals.s}">
+        <input type="number" step="0.1" id="sss_exp${idx}" value="${vals.exp}">
         <input type="number" step="0.1" id="sss_sd${idx}" value="${vals.sd}">
         <input type="number" step="0.1" id="sss_ph${idx}" value="${vals.ph}">
         <button class="del-btn" onclick="this.parentElement.remove(); reindexSSS();">X</button>
