@@ -81,14 +81,22 @@ def run_vop_engine(job_path):
         
         # --- PASS 1: RENDER BIPACK INTO OFF-SCREEN FBO ---
         bp_fbo.use()
-        bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
 
-        mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
-                                              st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
-        prog['mvp'].write(mvp_bp)
-        prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
-        tex_bp.use(0)
-        vao.render(moderngl.TRIANGLE_STRIP)
+        if tex_bp == tex_mgr.white_tex:
+            # Bypass logic: If no BiPack is loaded, flood the FBO with pure white.
+            # Because we later do a multiplicative blend, pure white is 100% transparent.
+            # We skip the vao.render() entirely so keyframe data is ignored.
+            bp_fbo.clear(1.0, 1.0, 1.0, 1.0)
+        else:
+            # Normal logic: Clear to black (opaque) and render the mask.
+            bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
+
+            mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
+                                                st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+            prog['mvp'].write(mvp_bp)
+            prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+            tex_bp.use(0)
+            vao.render(moderngl.TRIANGLE_STRIP)
 
         # --- PASS 2: RENDER MAG TO THE ACTUAL SCREEN ---
         ctx.screen.use()
