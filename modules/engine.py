@@ -104,16 +104,21 @@ def run_vop_engine(job_path):
         ctx.screen.use()
         ctx.clear(*bg_color)
 
-        # Safeguard: If no image is loaded, force scale to 100.0 to create an infinite backlight
-        active_mag_scale = 100.0 if tex_mag == tex_mgr.white_tex else mag_scale
-        mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, active_mag_scale,
-                                               st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
+        if tex_mag == tex_mgr.white_tex:
+            # Bypass logic: If no ProjMag image is loaded, force an Identity Matrix.
+            # This makes the 1x1 white texture act as an infinite, unmoving backlight,
+            # completely ignoring any leftover position/rotation keyframes.
+            mvp_mag = np.eye(4, dtype='f4').tobytes()
+        else:
+            # Normal logic: Calculate the frustum matrix based on keyframes.
+            mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, mag_scale,
+                                                   st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
         
         prog['mvp'].write(mvp_mag)
         prog['filter_color'].write(st['pg'].astype('f4'))
         tex_mag.use(0)
         vao.render(moderngl.TRIANGLE_STRIP)
-
+        
         # --- PASS 3: MULTIPLY THE FBO OVER THE SCREEN ---
         ctx.enable(moderngl.BLEND)
         ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
