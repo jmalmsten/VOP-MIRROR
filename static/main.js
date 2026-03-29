@@ -272,7 +272,7 @@ function addSSSKeyframe() {
             bp_r: getV('.bp-input[id^="sss_bp_r"]'),
             c: getV('input[id^="sss_c"][id$="_hex"]:not([id*="cg"])'),
             cg: getV('input[id^="sss_cg"][id$="_hex"]'),
-            exp: getV('input[id^="sss_s"]:not([id*="sd"])'),
+            exp: getV('input[id^="sss_exp"]'),
             sd: getV('input[id^="sss_sd"]'),
             ph: getV('input[id^="sss_ph"]'),
             f: parseInt(getV('input[id^="sss_f"]')) + 1
