@@ -144,11 +144,15 @@ def run_vop_engine(job_path):
         
         cam_proc.wait() 
         
+        cam_proc.wait() 
+        
         if is_preview:
+            # Pass mono_active down to the preview generator
             cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active)
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
             out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
+            # Pass mono_active down to the stacking sequence
             cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], mono_active)
 
     task = job_data.get('type')

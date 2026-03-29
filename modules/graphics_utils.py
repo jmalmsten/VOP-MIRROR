@@ -27,7 +27,7 @@ def init_render_pipeline():
     precision mediump float;
     uniform sampler2D TexUnit;
     uniform vec3 filter_color;
-    uniform bool mono_mode; // <-- 1. Add the uniform
+    uniform bool mono_mode; // <-- Added the uniform receiver
     
     in vec2 v_tex;
     out vec4 f_color;
@@ -35,7 +35,7 @@ def init_render_pipeline():
     void main() {
         vec4 tex_col = texture(TexUnit, v_tex);
         
-        // <-- 2. Intercept and convert to grayscale if active
+        // <-- Convert to grayscale if the toggle is active
         if (mono_mode) {
             float gray = dot(tex_col.rgb, vec3(0.299, 0.587, 0.114));
             tex_col.rgb = vec3(gray);
