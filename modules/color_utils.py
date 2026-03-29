@@ -9,12 +9,18 @@ import cv2
 import rawpy
 import numpy as np
 
-def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb):
+def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced): # <-- Added mono_forced here
     if not os.path.exists(buffer_file): return False
     with rawpy.imread(buffer_file) as raw:
         img = raw.postprocess(gamma=(1,1), no_auto_bright=True)
     
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    
+    # Mono stripping logic here for previews
+    if mono_forced:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
     gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
     img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
     cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
