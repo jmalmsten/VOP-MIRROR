@@ -45,19 +45,31 @@ async function runTask(type) {
     }
 }
 
-function panic() { fetch('/panic', {method: 'POST'}); }
-function nukeMag() { fetch('/nuke_mag', {method: 'POST'}); }
+function panic() { 
+    if (confirm("This stops whatever job is running. Are you sure?")) {
+        fetch('/panic', {method: 'POST'}); 
+    }
+}
+function nukeMag() { 
+    if (confirm("This deletes all latent frames that has been exposed. All will be trashed. Are you sure? This cannot be undone.")){
+        fetch('/nuke_mag', {method: 'POST'}); 
+    }
+}
 
 function nukeProjMag() {
-    fetch('/nuke_proj_mag', {method: 'POST'});
-    document.getElementById('image').value = '';
-    triggerSync();
+    if (confirm("This deletes whatever is in the Projector Magazine. Are you sure? This cannot be undone.")) {
+        fetch('/nuke_proj_mag', {method: 'POST'});
+        document.getElementById('image').value = '';
+        triggerSync();
+    }
 }
 
 function nukeProjBiPack() {
-    fetch('/nuke_proj_bipack', {method: 'POST'});
-    document.getElementById('bipack_image').value = '';
-    triggerSync();
+    if (confirm("This deletes whatever is in the Projector BiPack. Are you sure? This cannot be undone.")) {
+        fetch('/nuke_proj_bipack', {method: 'POST'});
+        document.getElementById('bipack_image').value = '';
+        triggerSync();
+    }
 }
 
 async function nukeJob() {
