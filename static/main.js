@@ -342,6 +342,7 @@ setInterval(async () => {
                 currentMode = loadedMode.value; 
                 // Force the DOM to display the correct sheet corresponding to the state
                 toggleSheetVisibility();
+            }
 
             document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
             isFirstLoad = false;
