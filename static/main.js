@@ -170,7 +170,7 @@ function addMDSKeyframe() {
             // Fixed Color Selectors: Targets hidden hex fields within specific row types
             c: getV('.mds-master-row input[id^="mds_c"]:not([id*="cg"])[id$="_hex"]'),
             cg: getV('.mds-master-row input[id^="mds_cg"][id$="_hex"]'),
-            exp: getV('.mds-master-row input[id*="sss_exp"]'),
+            exp: getV('.mds-master-row input[id*="mds_s"]'),
             f: parseInt(getV('.mds-master-row input[id*="_f"]')) + 1,
             
             // Smear Start Scrapes
@@ -209,7 +209,7 @@ function addMDSKeyframe() {
             <input type="hidden" id="mds_c${idx}_hex" value="${vals.c}">
             <input type="color" id="mds_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'mds_cg${idx}_hex')">
             <input type="hidden" id="mds_cg${idx}_hex" value="${vals.cg}">
-            <input type="number" step="0.1" id="mds_s${idx}" value="${vals.s}">
+            <input type="number" step="0.1" id="mds_s${idx}" value="${vals.exp}">
             <button class="del-btn" onclick="this.parentElement.parentElement.remove(); reindexMDS();">X</button>
         </div>
         <div class="sheet-row mds-smear-row">

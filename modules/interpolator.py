@@ -94,8 +94,8 @@ class Timeline:
             # --- THESE LINES ENFORCE STRICT PARSING ---
             exp_key = f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}"
             self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
-            self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}")})
-            self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}")})
+            self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
+            self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
             
             # src and stp use the fallback arguments since they aren't always present in the standard UI
             self.tracks['src'].append({'f': f_val, 'val': require_float(f"{prefix}src{idx}", -1.0)})
