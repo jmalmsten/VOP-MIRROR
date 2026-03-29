@@ -185,6 +185,16 @@ def run_vop_engine(job_path):
             total_size_bytes = 0
             files_found = 0
             
+            # --- INITIAL HEARTBEAT BEFORE LOOP ---
+            with open("/tmp/vop_heartbeat", "w") as hbf:
+                json.dump({
+                    "current": 0,
+                    "total": total_frames,
+                    "eta": 0,
+                    "est_mb": 0.0,
+                    "msg": "PRIMING SENSOR..."
+                }, hbf)
+
             for f in range(f_start, f_end + 1):
                 execute_exposure(f)
                 done = f - f_start + 1

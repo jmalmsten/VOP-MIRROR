@@ -30,7 +30,10 @@ async function triggerSync() {
 function collectParams() {
     const p = { last_sync: local_sync_ts };
     document.querySelectorAll('input, select').forEach(el => {
-        if (el.id) p[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+        // Guard: Do not collect data from file inputs
+        if (el.id && el.type !== 'file') {
+            p[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+        }
     });
     return p;
 }
@@ -174,7 +177,7 @@ function addMDSKeyframe() {
             <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
             <input id="mds_start_bp_r${idx}" value="${vals.sbp_r}" class="bp-input">
             <input type="color" id="mds_start_c${idx}" value="${vals.sc}" onchange="updateHex(this, 'mds_start_c${idx}_hex')">
-            <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">>
+            <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
             <div></div>
             <div></div>
         </div>
@@ -210,7 +213,8 @@ setInterval(async () => {
         if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
             for (const [k, v] of Object.entries(st.params)) {
                 const el = document.getElementById(k);
-                if (el) {
+                // Guard: Do not attempt to write values to file inputs
+                if (el && el.type !== 'file') {
                     if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
                     else el.value = v;
                 }
@@ -218,7 +222,6 @@ setInterval(async () => {
             document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
             isFirstLoad = false;
         }
-
         document.getElementById('sync_indicator').innerHTML = st.params ? '<span style="color:#0f0">● ONLINE</span>' : '○ OFFLINE';
         const msgEl = document.getElementById('st_msg');
         const bar = document.getElementById('st_bar');
