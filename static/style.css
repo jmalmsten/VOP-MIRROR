@@ -2,100 +2,268 @@
 Version:        v0.0.20
 Description:    Explicit grid coordinates to lock layout placement and eliminate dead space.
 */
-body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
-.container { max-width: 1350px; margin: 0 auto; display: grid; grid-template-columns: 1fr 420px; gap: 20px; }
+body { 
+    background:     #0b0b0b; 
+    color:          #ddd; 
+    font-family:    sans-serif; 
+    margin:         0; 
+    padding:        20px; 
+}
 
-.vop-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+.container { 
+    max-width:              1350px; 
+    margin:                 0 auto; 
+    display:                grid; 
+    grid-template-columns:  1fr 420px; 
+    gap:                    20px; 
+}
+
+.vop-header { 
+    grid-column:        1 / -1; 
+    display:            flex; 
+    justify-content:    space-between; 
+    align-items:        center; 
+    border-bottom:      1px solid #333; 
+}
 
 .control-deck { 
-    grid-column: 1 / -1; 
-    background: #1a1a1a; 
-    padding: 12px 15px; 
-    border-radius: 4px; 
-    border: 1px solid #333; 
-    margin-bottom: 20px; 
+    grid-column:    1 / -1; 
+    background:     #1a1a1a; 
+    padding:        12px 15px; 
+    border-radius:  4px; 
+    border:         1px solid #333; 
+    margin-bottom:  20px; 
 }
 
-/* v0.0.22 Update: Force flex parent to full width to enable right-justification */
+/* Force flex parent to full width to enable right-justification */
 .status-meta { 
-    display: flex; 
-    align-items: center; 
-    gap: 12px; 
-    margin-bottom: 0; 
-    width: 100%; /* Forces the flex row to span the entire control-deck */
-    box-sizing: border-box;
+    display:        flex; 
+    align-items:    center; 
+    gap:            12px; 
+    margin-bottom:  0; 
+    width:          100%; /* Forces the flex row to span the entire control-deck */
+    box-sizing:     border-box;
 }
 
-.status-text { font-family: monospace; color: #0cf; font-weight: bold; min-width: 100px; }
+.status-text { 
+    font-family:    monospace; 
+    color:          #0cf; 
+    font-weight:    bold; 
+    min-width:      100px; 
+}
 
 /* Ensure the bar always acts as the flexible spacer */
 .status-bar-progress { 
-    flex-grow: 1; 
-    height: 10px; 
-    background: #000; 
-    border-radius: 5px; 
-    overflow: hidden; 
-    min-width: 50px; /* Prevents the bar from disappearing entirely if text is long */
+    flex-grow:      1; 
+    height:         10px; 
+    background:     #000; 
+    border-radius:  5px; 
+    overflow:       hidden; 
+    min-width:      50px; /* Prevents the bar from disappearing entirely if text is long */
 }
-.progress-bar { width: 0%; height: 100%; background: #0cf; transition: width 0.3s; }
 
-.panic-btn { background: #800; color: #fff; padding: 5px 15px; font-weight: bold; font-size: 0.75em; border: none; cursor: pointer; }
-.nuke-btn { background: #222; color: #f44; padding: 5px 12px; border: 1px solid #444; font-size: 0.75em; cursor: pointer; }
-.nuke-btn[onclick="nukeJob()"] { color: #ffaa00; }
+.progress-bar { 
+    width:      0%; 
+    height:     100%; 
+    background: #0cf; 
+    transition: width 0.3s; 
+}
+
+.panic-btn { 
+    background:     #800; 
+    color:          #fff; 
+    padding:        5px 15px; 
+    font-weight:    bold; 
+    font-size:      0.75em; 
+    border:         none; 
+    cursor:         pointer; 
+}
+
+.nuke-btn { 
+    background:     #222; 
+    color:          #f44; 
+    padding:        5px 12px; 
+    border:         1px solid #444; 
+    font-size:      0.75em; 
+    cursor:         pointer; 
+}
+
+.nuke-btn[onclick="nukeJob()"] { 
+    color:  #ffaa00; 
+}
 
 .preview-area { 
-    background: #1a1a1a; 
-    border: 1px solid #333; 
-    min-width: 300px; 
-    max-width: 70vh; 
-    min-height: 200px; 
-    max-height: 50vh; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    overflow: hidden; 
-    grid-column: 1; 
-    grid-row: 3; 
-    justify-self: center; 
-    align-self: start; 
+    background:         #1a1a1a; 
+    border:             1px solid #333; 
+    min-width:          300px; 
+    max-width:          70vh; 
+    min-height:         200px; 
+    max-height:         50vh; 
+    display:            flex; 
+    align-items:        center; 
+    justify-content:    center; 
+    overflow:           hidden; 
+    grid-column:        1; 
+    grid-row:           3; 
+    justify-self:       center; 
+    align-self:         start; 
 }
-#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#probe_img { 
+    max-width:      100%; 
+    max-height:     100%; 
+    object-fit:     contain; 
+}
 
-.group-box { background: #151515; border: 1px solid #222; border-radius: 4px; padding: 12px; margin-bottom: 10px; }
-.group-title { font-size: 0.7em; color: #666; text-transform: uppercase; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #222; }
+.group-box { 
+    background:     #151515; 
+    border:         1px solid #222; 
+    border-radius:  4px; 
+    padding:        12px; 
+    margin-bottom:  10px; 
+}
 
-.constants-zone { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.const-group label { display: block; font-size: 0.6em; color: #888; margin-bottom: 2px; }
-.const-group input, .const-group select { width: 100%; background: #000; border: 1px solid #333; color: #0cf; padding: 4px; font-size: 0.8em; box-sizing: border-box; }
+.group-title { 
+    font-size:          0.7em; 
+    color:              #666; 
+    text-transform:     uppercase; 
+    font-weight:        bold; 
+    margin-bottom:      8px; 
+    border-bottom:      1px solid #222; 
+}
 
-.input-row { display: flex; gap: 10px; }
-.c-box { flex: 1; }
-.c-box label { display: block; font-size: 0.6em; color: #888; }
-.c-box input { width: 100%; background: #000; border: 1px solid #333; color: #ccc; padding: 4px; font-size: 0.8em; box-sizing: border-box; }
-.upload-btn { background: #222; color: #0cf; border: 1px solid #0cf; padding: 4px 8px; cursor: pointer; font-size: 0.7em; }
+.constants-zone { 
+    display:                grid; 
+    grid-template-columns:  repeat(4, 1fr); 
+    gap:                    8px; 
+}
 
-.sheet-row { display: grid; gap: 4px; align-items: center; margin-bottom: 2px; }
+.const-group label { 
+    display:        block; 
+    font-size:      0.6em; 
+    color:          #888; 
+    margin-bottom:  2px; 
+}
+
+.const-group input, .const-group select { 
+    width: 100%; 
+    background:     #000; 
+    border:         1px solid #333; 
+    color:          #0cf; 
+    padding:        4px; 
+    font-size:      0.8em; 
+    box-sizing:     border-box; 
+}
+
+.input-row { 
+    display:    flex; 
+    gap:        10px; 
+}
+
+.c-box { 
+    flex: 1; 
+}
+
+.c-box label { 
+    display:    block;
+    font-size:  0.6em;
+    color:      #888; 
+}
+
+.c-box input { 
+    width:          100%; 
+    background:     #000; 
+    border:         1px solid #333; 
+    color:          #ccc; 
+    padding:        4px; 
+    font-size:      0.8em; 
+    box-sizing:     border-box; 
+}
+
+.upload-btn { 
+    background:     #222; 
+    color:          #0cf; 
+    border:         1px solid #0cf; 
+    padding:        4px 8px; 
+    cursor:         pointer; 
+    font-size:      0.7em; 
+}
+
+.sheet-row { 
+    display:        grid; 
+    gap:            4px; 
+    align-items:    center; 
+    margin-bottom:  2px; 
+}
+
 .mds-header, .mds-master-row, .mds-smear-row { 
-    grid-template-columns: 25px 45px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
+    grid-template-columns:  25px 45px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
 }
-.sheet-row input { background: #000; border: 1px solid #222; color: #fff; padding: 3px; font-size: 0.7em; text-align: center; width: 100%; box-sizing: border-box; }
-.bp-input { border-color: #057 !important; color: #0cf !important; }
 
-.node-tag { font-size: 0.6em; font-weight: bold; text-align: center; padding: 2px; border-radius: 2px; }
-.master { background: #112233; color: #0cf; }
-.smear { background: #221100; color: #f80; }
+.sheet-row input {
+    background:     #000; 
+    border:         1px solid #222; 
+    color:          #fff; 
+    padding:        3px; 
+    font-size:      0.7em; 
+    text-align:     center; 
+    width:          100%; 
+    box-sizing:     border-box; 
+}
 
-.action-btn { background: #0cf; color: #000; border: none; padding: 8px; border-radius: 3px; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 0.8em; width: 100%; }
-.action-btn.secondary { background: #333; color: #ccc; }
-.action-btn.danger { background: #500; color: #faa; border: 1px solid #f55; }
+.bp-input { 
+    border-color:   #057 !important; 
+    color:          #0cf !important; 
+}
+
+.node-tag { 
+    font-size: 0.6em; 
+    font-weight: bold; 
+    text-align: center; 
+    padding: 2px; 
+    border-radius: 2px; 
+}
+
+.master { 
+    background:     #112233; 
+    color:          #0cf; 
+}
+
+.smear { 
+    background:     #221100; 
+    color:          #f80; 
+}
+
+.action-btn { 
+    background:         #0cf; 
+    color:              #000; 
+    border:             none; 
+    padding:            8px; 
+    border-radius:      3px; 
+    cursor:             pointer; 
+    font-weight:        bold; 
+    text-transform:     uppercase; 
+    font-size:          0.8em; 
+    width:              100%; 
+}
+
+.action-btn.secondary { 
+    background:     #333; 
+    color:          #ccc; 
+}
+
+.action-btn.danger { 
+    background:     #500; 
+    color:          #faa; 
+    border:         1px solid #f55; 
+}
 
 .controls-area {
-    grid-column: 2;
-    grid-row: 3 / span 2;
+    grid-column:    2;
+    grid-row:       3 / span 2;
 }
 
 .sheets-area {
-    grid-column: 1;
-    grid-row: 4;
-    align-self: start;
+    grid-column:    1;
+    grid-row:       4;
+    align-self:     start;
 }
