@@ -196,7 +196,7 @@ body {
 }
 
 .mds-header, .mds-master-row, .mds-smear-row { 
-    grid-template-columns:  25px 45px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
+    grid-template-columns:  25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
 }
 
 .sheet-row input {
