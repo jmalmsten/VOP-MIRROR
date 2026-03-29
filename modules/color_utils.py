@@ -35,7 +35,7 @@ def process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_
     with rawpy.imread(buffer_file) as raw:
         img = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
     
-    img = cv2.cvtColor(raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16), cv2.COLOR_RGB2BGR)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     
     if mono_forced:
         # Exploit monochrome clarity by stripping color before tinting
