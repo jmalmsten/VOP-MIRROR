@@ -28,7 +28,7 @@ def log_audit(msg):
     print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}")
 
 def run_vop_engine(job_path):
-    log_audit(f"Engine Starting with Job: {job_path}")
+    
     with open(job_path, 'r') as f: 
         job_data = json.load(f)
     
@@ -39,6 +39,8 @@ def run_vop_engine(job_path):
     
     timeline = interpolator.Timeline(job_data)
     
+    log_audit(f"Engine Starting | Job: {job_path} | Mode: {timeline.mode.upper()}")
+
     pygame.init()
     pygame.mouse.set_visible(False)
     
@@ -149,8 +151,6 @@ def run_vop_engine(job_path):
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
                 
             pygame.display.flip()
-        
-        cam_proc.wait() 
         
         cam_proc.wait() 
         
