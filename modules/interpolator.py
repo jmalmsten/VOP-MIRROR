@@ -53,9 +53,32 @@ class Timeline:
             if k.startswith(prefix + "f"):
                 idx = k.replace(prefix + "f", "")
                 if idx.isdigit(): row_ids.add(idx)
+
+        def require_float(key, fallback_if_unsubmitted=None):
+            """
+            Strict float parser.
+            This explicitly raises a ValueError with the exact UI element ID.
+            vop.py catches this exception, prints it to the terminal, and halts the engine cleanly.
+            """
+            # If the key wasn't submitted in the JSON at all, permit the fallback.
+            if key not in job_data and fallback_if_unsubmitted is not None:
+                return float(fallback_if_unsubmitted)
                 
+            raw = job_data.get(key)
+            
+            # If the user explicitly left the input box blank ("") or it evaluates to None
+            if raw == "" or raw is None:
+                raise ValueError(f"Input '{key}' is empty! Halting execution. Please provide a value.")
+                
+            try:
+                return float(raw)
+            except ValueError:
+                raise ValueError(f"Input '{key}' contains invalid data: '{raw}'. Must be a number.")
+
         for idx in sorted(list(row_ids), key=int):
-            f_val = float(job_data.get(f"{prefix}f{idx}", 1.0))
+
+            # f_val can still use safe_f or require_float, but since it dictates the loop, we ensure it's strictly parsed
+            f_val = require_float(f"{prefix}f{idx}")
             
             # Extract Interpolation Mode (S = Smooth, L = Linear)
             self.tracks['m'].append({'f': f_val, 'val': job_data.get(f"{prefix}m{idx}", "S")})
@@ -67,11 +90,16 @@ class Timeline:
             
             self.tracks['pg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}c{idx}_hex", "#ffffff"))})
             self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}cg{idx}_hex", "#ffffff"))})
-            self.tracks['exp'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}", 1.0))})
-            self.tracks['sd'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}sd{idx}", 1.0))})
-            self.tracks['ph'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}ph{idx}", 0.5))})
-            self.tracks['src'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}src{idx}", -1.0))})
-            self.tracks['stp'].append({'f': f_val, 'val': float(job_data.get(f"{prefix}stp{idx}", 1.0))})
+            
+            # --- THESE LINES ENFORCE STRICT PARSING ---
+            exp_key = f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}"
+            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
+            self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}")})
+            self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}")})
+            
+            # src and stp use the fallback arguments since they aren't always present in the standard UI
+            self.tracks['src'].append({'f': f_val, 'val': require_float(f"{prefix}src{idx}", -1.0)})
+            self.tracks['stp'].append({'f': f_val, 'val': require_float(f"{prefix}stp{idx}", 1.0)})
 
             # MDS Start/Stop offsets (Ignored during SSS execution)
             self.tracks['start_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"))})
