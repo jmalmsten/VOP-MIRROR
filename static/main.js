@@ -1,12 +1,43 @@
 /* VOP Module:     main.js
-Version:        v0.0.70
 Description:    Frontend logic.
-                Synchronized FIT FOV math with vop_math.py's internal fit_factor auto-scale.
 */
+
 let local_sync_ts = 0; 
 let mdsMasterCount = 0;
+let sssMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
+let currentMode = 'MDS'; // <-- tracks the current active mode
+
+// Initialize the dropdown listener when the DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+    const modeSelect = document.getElementById('smear_mode');
+    if (modeSelect) {
+        currentMode = modeSelect.value;
+        toggleSheetVisibility();
+        
+        modeSelect.addEventListener('change', function(e) {
+            if (confirm("Switching modes is destructive. All keyframing will be thrown out. Are you sure you want to continue?")) {
+                currentMode = this.value;
+                document.getElementById('mds_sheet_body').innerHTML = '';
+                document.getElementById('sss_sheet_body').innerHTML = '';
+                mdsMasterCount = 0;
+                sssMasterCount = 0;
+                toggleSheetVisibility();
+                triggerSync();
+            } else {
+                this.value = currentMode; // Revert dropdown if cancelled
+            }
+        });
+    }
+});
+
+function toggleSheetVisibility() {
+    const mdsWrap = document.getElementById('mds_wrapper');
+    const sssWrap = document.getElementById('sss_wrapper');
+    if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
+    if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
+}
 
 async function uploadFile(inputId, textId, endpoint) {
     const file = document.getElementById(inputId).files[0];
@@ -212,6 +243,78 @@ function addMDSKeyframe() {
 function reindexMDS() {
     document.querySelectorAll('.mds-keyframe-group').forEach((group, i) => {
         group.querySelector('.row-num').innerText = i + 1;
+    });
+}
+
+function addSSSKeyframe() {
+    sssMasterCount++; 
+    const idx = sssMasterCount; 
+    
+    const existingRows = document.querySelectorAll('.sss-master-row');
+    const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
+
+    // SSS Base Defaults (Includes SD and PH)
+    let vals = {
+        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
+        c: "#ffffff", cg: "#ffffff", s: "1.0", sd: "1.0", ph: "0.5", f: 1
+    };
+
+    if (lastRow) {
+        const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
+        const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
+        
+        vals = {
+            m: getV('select[id^="sss_m"]'),
+            crn: getC('input[type="checkbox"]'),
+            p: getV('input[id^="sss_p"]:not([id*="bp"])'),
+            r: getV('input[id^="sss_r"]:not([id*="bp"])'),
+            bp_p: getV('.bp-input[id^="sss_bp_p"]'),
+            bp_r: getV('.bp-input[id^="sss_bp_r"]'),
+            c: getV('input[id^="sss_c"][id$="_hex"]:not([id*="cg"])'),
+            cg: getV('input[id^="sss_cg"][id$="_hex"]'),
+            s: getV('input[id^="sss_s"]:not([id*="sd"])'),
+            sd: getV('input[id^="sss_sd"]'),
+            ph: getV('input[id^="sss_ph"]'),
+            f: parseInt(getV('input[id^="sss_f"]')) + 1
+        };
+    }
+
+    const body = document.getElementById('sss_sheet_body');
+    const row = document.createElement('div');
+    row.className = 'sheet-row sss-master-row';
+    
+    // Inline grid formatting to match header
+    row.style.display = 'grid';
+    row.style.gridTemplateColumns = '30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px';
+    row.style.gap = '5px';
+    row.style.alignItems = 'center';
+    row.style.marginBottom = '5px';
+
+    row.innerHTML = `
+        <div class="row-num" style="text-align:center;">?</div>
+        <input type="number" id="sss_f${idx}" value="${vals.f}">
+        <select id="sss_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
+        <input type="checkbox" id="sss_crn${idx}" ${vals.crn?'checked':''}>
+        <input id="sss_p${idx}" value="${vals.p}">
+        <input id="sss_r${idx}" value="${vals.r}">
+        <input id="sss_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
+        <input id="sss_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
+        <input type="color" id="sss_c${idx}" value="${vals.c}" onchange="updateHex(this, 'sss_c${idx}_hex')" style="width:100%; height:26px; padding:0;">
+        <input type="hidden" id="sss_c${idx}_hex" value="${vals.c}">
+        <input type="color" id="sss_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'sss_cg${idx}_hex')" style="width:100%; height:26px; padding:0;">
+        <input type="hidden" id="sss_cg${idx}_hex" value="${vals.cg}">
+        <input type="number" step="0.1" id="sss_s${idx}" value="${vals.s}">
+        <input type="number" step="0.1" id="sss_sd${idx}" value="${vals.sd}">
+        <input type="number" step="0.1" id="sss_ph${idx}" value="${vals.ph}">
+        <button class="del-btn" onclick="this.parentElement.remove(); reindexSSS();">X</button>
+    `;
+    body.appendChild(row);
+    reindexSSS();
+}
+
+function reindexSSS() {
+    document.querySelectorAll('.sss-master-row').forEach((row, i) => {
+        row.querySelector('.row-num').innerText = i + 1;
     });
 }
 

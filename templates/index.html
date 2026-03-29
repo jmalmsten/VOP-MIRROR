@@ -84,7 +84,13 @@
         </div>
 
         <div class="sheets-area">
-            <div class="sheet-container" id="mds_wrapper">{% include 'sections/mds-xsheet.html' %}</div>
+            <div class="sheet-container" id="mds_wrapper">
+                {% include 'sections/mds-xsheet.html' %}
+            </div>
+            
+            <div class="sheet-container" id="sss_wrapper" style="display: none;">
+                {% include 'sections/sss-xsheet.html' %}
+            </div>
         </div>
     </div>
     <script src="{{ url_for('static', filename='main.js') }}?v=63"></script>
