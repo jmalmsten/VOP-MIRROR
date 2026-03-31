@@ -1,5 +1,4 @@
 # VOP Project - Git Ignore
-# Version: v.0.0.3
 
 # --- Project Data ---
 # Ignore all test and production image directories
@@ -34,3 +33,7 @@ __pycache__/
 
 # Ignore the dump.txt's
 *dump.txt
+
+# --- Exceptions ---
+!readme_graphics/
+!readme_graphics/*
