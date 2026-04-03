@@ -1,10 +1,51 @@
-/* VOP Module:     style.css
-Version:        v0.0.20
-Description:    Explicit grid coordinates to lock layout placement and eliminate dead space.
+/* VOP Module:      style.css
+Description:        Stylings for the whole GUI
 */
+
+/* ############### Global variables ############# */
+
+
+:root {
+    
+    /* >>> Global Brand & Accent Colors <<< */
+
+    --color-accent:         #0cf;   /* Used for text, borders, buttons, and BiPack Highlights */
+    --color-danger:         #500;   /* Panic Buttons */
+    --color-danger-text:    #f44;   /* Nuke Buttons */
+    --color-warning:        #fa0;   /* Nuke confirmation */
+
+    /* >>> Background & Panels */
+
+    --bg-body:  #0b0b0b;     /* Background for the whole thing */
+    --bg-panel: #1a1a1a;    /* Control deck, preview area */
+    --bg-group: #151515;    /* Group Boxes */
+    --bg-input: var(--bg-input);       /* Inputs, Progress bar track */
+
+    /* >>> Text Colors <<< */
+
+    --text-primary:     #ddd;   /* Body text */
+    --text-secondary:   #888;   /* Labels, cheat sheet text, group titles */
+    --text-muted:       #666;
+    --text-dark:        #000;   /* Text inside bright buttons */
+
+    /* >>> Borders <<< */
+    
+    --border-color:     #333;
+    --radius-standard:  4px; /* For most boxes and panels */
+    --radus-small:      3px; /* For buttons and cheat sheet items */
+
+    /* >>> Exposure Sheet Tags << */
+
+    --tag-master-bg: #123;
+    --tag-master-text: #0cf;
+    --tag-smear-bg: #210;
+    --tag-smear-text: #f80;
+    --tag-bipack-border: #057;
+}
+
 body { 
-    background:     #0b0b0b; 
-    color:          #ddd; 
+    background:     var(--bg-body); 
+    color:          var(--text-primary); 
     font-family:    sans-serif; 
     margin:         0; 
     padding:        20px; 
@@ -23,15 +64,15 @@ body {
     display:            flex; 
     justify-content:    space-between; 
     align-items:        center; 
-    border-bottom:      1px solid #333; 
+    border-bottom:      1px solid var(--border-color); 
 }
 
 .control-deck { 
     grid-column:    1 / -1; 
     background:     #1a1a1a; 
     padding:        12px 15px; 
-    border-radius:  4px; 
-    border:         1px solid #333; 
+    border-radius:  var(--radius-standard); 
+    border:         1px solid var(--border-color); 
     margin-bottom:  20px; 
 }
 
@@ -47,7 +88,7 @@ body {
 
 .status-text { 
     font-family:    monospace; 
-    color:          #0cf; 
+    color:          var(--color-accent); 
     font-weight:    bold; 
     min-width:      100px; 
 }
@@ -56,7 +97,7 @@ body {
 .status-bar-progress { 
     flex-grow:      1; 
     height:         10px; 
-    background:     #000; 
+    background:     var(--bg-input); 
     border-radius:  5px; 
     overflow:       hidden; 
     min-width:      50px; /* Prevents the bar from disappearing entirely if text is long */
@@ -65,7 +106,7 @@ body {
 .progress-bar { 
     width:      0%; 
     height:     100%; 
-    background: #0cf; 
+    background: var(--color-accent); 
     transition: width 0.3s; 
 }
 
@@ -81,7 +122,7 @@ body {
 
 .nuke-btn { 
     background:     #222; 
-    color:          #f44; 
+    color:          var(--color-danger-text); 
     padding:        5px 12px; 
     border:         1px solid #444; 
     font-size:      0.75em; 
@@ -89,12 +130,12 @@ body {
 }
 
 .nuke-btn[onclick="nukeJob()"] { 
-    color:  #ffaa00; 
+    color:  var(--color-warning); 
 }
 
 .preview-area { 
     background:         #1a1a1a; 
-    border:             1px solid #333; 
+    border:             1px solid var(--border-color); 
     min-width:          300px; 
     max-width:          70vh; 
     min-height:         200px; 
@@ -116,19 +157,19 @@ body {
 
 .group-box { 
     background:     #151515; 
-    border:         1px solid #222; 
-    border-radius:  4px; 
+    border:         1px solid var(--border-color); 
+    border-radius:  var(--radius-standard); 
     padding:        12px; 
     margin-bottom:  10px; 
 }
 
 .group-title { 
     font-size:          0.7em; 
-    color:              #666; 
+    color:              var(--text-secondary); 
     text-transform:     uppercase; 
     font-weight:        bold; 
     margin-bottom:      8px; 
-    border-bottom:      1px solid #222; 
+    border-bottom:      1px solid var(--border-color); 
 }
 
 .constants-zone { 
@@ -140,15 +181,15 @@ body {
 .const-group label { 
     display:        block; 
     font-size:      0.6em; 
-    color:          #888; 
+    color:          var(--text-secondary); 
     margin-bottom:  2px; 
 }
 
 .const-group input, .const-group select { 
     width: 100%; 
-    background:     #000; 
-    border:         1px solid #333; 
-    color:          #0cf; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          var(--color-accent); 
     padding:        4px; 
     font-size:      0.8em; 
     box-sizing:     border-box; 
@@ -166,13 +207,13 @@ body {
 .c-box label { 
     display:    block;
     font-size:  0.6em;
-    color:      #888; 
+    color:      var(--text-secondary); 
 }
 
 .c-box input { 
     width:          100%; 
-    background:     #000; 
-    border:         1px solid #333; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
     color:          #ccc; 
     padding:        4px; 
     font-size:      0.8em; 
@@ -181,8 +222,8 @@ body {
 
 .upload-btn { 
     background:     #222; 
-    color:          #0cf; 
-    border:         1px solid #0cf; 
+    color:          var(--color-accent); 
+    border:         1px solid var(--color-accent); 
     padding:        4px 8px; 
     cursor:         pointer; 
     font-size:      0.7em; 
@@ -200,8 +241,8 @@ body {
 }
 
 .sheet-row input {
-    background:     #000; 
-    border:         1px solid #222; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
     color:          #fff; 
     padding:        3px; 
     font-size:      0.7em; 
@@ -211,8 +252,8 @@ body {
 }
 
 .bp-input { 
-    border-color:   #057 !important; 
-    color:          #0cf !important; 
+    border-color:   var(--tag-bipack-border) !important; 
+    color:          var(--color-accent) !important; 
 }
 
 .node-tag { 
@@ -224,21 +265,21 @@ body {
 }
 
 .master { 
-    background:     #112233; 
-    color:          #0cf; 
+    background:     var(--tag-master-bg); 
+    color:          var(--tag-master-text); 
 }
 
 .smear { 
-    background:     #221100; 
-    color:          #f80; 
+    background:     var(--tag-smear-bg); 
+    color:          var(--tag-smear-text); 
 }
 
 .action-btn { 
-    background:         #0cf; 
-    color:              #000; 
+    background:         var(--color-accent); 
+    color:              var(--color-input); 
     border:             none; 
     padding:            8px; 
-    border-radius:      3px; 
+    border-radius:      var(--radius-small); 
     cursor:             pointer; 
     font-weight:        bold; 
     text-transform:     uppercase; 
@@ -252,7 +293,7 @@ body {
 }
 
 .action-btn.danger { 
-    background:     #500; 
+    background:     var(--color-danger); 
     color:          #faa; 
     border:         1px solid #f55; 
 }
@@ -266,4 +307,28 @@ body {
     grid-column:    1;
     grid-row:       4;
     align-self:     start;
+}
+
+/* ##################### The Cheat Sheet Styling ##################### */
+
+.cs-grid{
+    /* Making a responsive grid of columns having a minimum set width */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px; /* Space between grid cels */
+    margin-top: 10px;
+}
+
+.cs-item {
+    background:     rgba(255, 255, 255, 0.03); /* Subtle cell highlight */
+    padding:        8px 12px;
+    border:         1px solid var(--border-color); /* matching section border */
+    border-radius:  var(--radius-small);
+    line-height:    1.4;
+}
+
+.cs-item strong {       /* highlighting acronyms */
+    color: var(--color-accent);
+    display: inline-block;
+    min-width: 65px; /* keeps the acronyms aligned nicely if they wrap */
 }
