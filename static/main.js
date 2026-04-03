@@ -283,15 +283,9 @@ function addSSSKeyframe() {
     const row = document.createElement('div');
     row.className = 'sheet-row sss-master-row';
     
-    // Inline grid formatting to match header
-    row.style.display = 'grid';
-    row.style.gridTemplateColumns = '30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px';
-    row.style.gap = '5px';
-    row.style.alignItems = 'center';
-    row.style.marginBottom = '5px';
-
+   
     row.innerHTML = `
-        <div class="row-num" style="text-align:center;">?</div>
+        <div class="row-num">?</div>
         <input type="number" id="sss_f${idx}" value="${vals.f}">
         <select id="sss_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
         <input type="checkbox" id="sss_crn${idx}" ${vals.crn?'checked':''}>
@@ -299,9 +293,9 @@ function addSSSKeyframe() {
         <input id="sss_r${idx}" value="${vals.r}">
         <input id="sss_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
         <input id="sss_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
-        <input type="color" id="sss_c${idx}" value="${vals.c}" onchange="updateHex(this, 'sss_c${idx}_hex')" style="width:100%; height:26px; padding:0;">
+        <input type="color" id="sss_c${idx}" value="${vals.c}" onchange="updateHex(this, 'sss_c${idx}_hex')">
         <input type="hidden" id="sss_c${idx}_hex" value="${vals.c}">
-        <input type="color" id="sss_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'sss_cg${idx}_hex')" style="width:100%; height:26px; padding:0;">
+        <input type="color" id="sss_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'sss_cg${idx}_hex')">
         <input type="hidden" id="sss_cg${idx}_hex" value="${vals.cg}">
         <input type="number" step="0.1" id="sss_exp${idx}" value="${vals.exp}">
         <input type="number" step="0.1" id="sss_sd${idx}" value="${vals.sd}">

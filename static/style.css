@@ -365,9 +365,16 @@ body {
 .bp-header-text {
     color:  var(--color-accent);
 }
+
 .bp-input { 
     border-color:   var(--tag-bipack-border) !important; 
     color:          var(--color-accent) !important; 
+}
+
+.sheet-color-input {
+    width: 100%;
+    height: 26px;
+    padding: 0;
 }
 
 .node-tag { 
