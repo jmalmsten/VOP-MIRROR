@@ -63,7 +63,13 @@ function collectParams() {
     document.querySelectorAll('input, select').forEach(el => {
         // Guard: Do not collect data from file inputs
         if (el.id && el.type !== 'file') {
-            p[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+            let val = el.type === 'checkbox' ? el.checked : el.value;
+            
+            // Cast string booleans back to native JavaScript booleans for the Python backend
+            if (val === 'true') val = true;
+            if (val === 'false') val = false;
+            
+            p[el.id] = val;
         }
     });
     return p;
