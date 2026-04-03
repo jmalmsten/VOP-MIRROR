@@ -16,6 +16,15 @@ So. Once again...
 
 # VOP
 
+## Release Notes:
+
+### v0.6.0 - "The Great unification project"
+This finally brings together the separate SSS and MDS versions that grew into their own branches because of issues with AI coding drift. The only real casualty being the rudimentary JK Step Printing stuff I had put in the SSS fork because I need to actually get progress done with the unification and the JK stuff was always more of a bonus thing. It will come for realsies... but later. 
+
+This also brings me to the numbering scheme of the versions. I am taking that control back from the LLM. And therefore I need to say that whatever it may say in the files somewhere. From this day. This version. Is v0.6.0. And history for realsies... starts here. 
+
+I will also start putting the release notes on my website so if you want the older ones starting from today. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+
 ## Description
 The VOP is a combination of hardware and software to make a tool that mimics several real world old tools used for animation, compositing and optical printing. 
 
