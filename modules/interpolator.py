@@ -1,227 +1,258 @@
 """
 VOP Module:     interpolator.py
-Version:        v0.1.11
-Description:    Timeline state evaluation and interpolation mathematics.
-                This reads the exposure sheet and calculates where things should be on frames in-between keys.
+Description:    Timeline state evaluation.
+                Integrated independent ProjBiPack (BP) spatial tracks.
+                Added safe-fallback getters to prevent NoneType math crashes on empty timelines.
 """
 import numpy as np
 
 def hex_to_rgb(h):
-    """
-    Converts a standard HTML hex color string (e.g. #FF0000) from the UI
-    into a normalized numpy float array [1.0, 0.0, 0.0] for the math operations.
-    """
     h = h.lstrip('#')
-    return np.array([int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)])
+    return np.array([int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)], dtype='f4')
 
-def ensure_vec3(arr, default_val=0.0):
-    """
-    Sanity check for 3D coordinates. If a user accidentally types "0,0" into the POS field
-    instead of "0,0,-1", this function intercepts it and pads the array with a default value
-    so the 3D matrix math doesn't crash from missing axes.
-    """
-    arr = np.array(arr, dtype=float)
-    if arr.ndim != 1: return np.array([default_val]*3)
-    if arr.shape[0] < 3: return np.pad(arr, (0, 3 - arr.shape[0]), 'constant', constant_values=default_val)
-    if arr.shape[0] > 3: return arr[:3]
-    return arr
+def ensure_vec3(arr_str, default_z=0.0):
+    try:
+        parts = arr_str.split(',') if isinstance(arr_str, str) else arr_str
+        vals = [float(x) for x in parts]
+        if len(vals) == 0: return np.array([0.0, 0.0, default_z], dtype='f4')
+        if len(vals) == 1: return np.array([vals[0], 0.0, default_z], dtype='f4')
+        if len(vals) == 2: return np.array([vals[0], vals[1], default_z], dtype='f4')
+        return np.array(vals[:3], dtype='f4')
+    except:
+        return np.array([0.0, 0.0, default_z], dtype='f4')
 
-# --- INTERPOLATION MATHEMATICS ---
-# 't' is always a normalized percentage between 0.0 (start) and 1.0 (end).
+def linear_to_oklab(rgb):
+    m1 = np.array([[0.41222, 0.53633, 0.05145], [0.21190, 0.68071, 0.10740], [0.08830, 0.28172, 0.62998]], dtype='f4')
+    m2 = np.array([[0.21045, 0.79362, -0.00407], [1.97799, -2.42860, 0.45060], [0.02590, 0.78277, -0.80867]], dtype='f4')
+    lms = np.dot(m1, rgb)
+    return np.dot(m2, np.cbrt(np.maximum(lms, 0)))
 
-# Linear Interpolation (Constant Speed)
-def lerp(a, b, t): return a + (b - a) * t
-
-# Smoothstep (Accelerates slowly, cruises, then decelerates to a stop)
-def ease_smooth(t): 
-    ts = max(0, min(1, t))
-    return ts * ts * (3 - 2 * ts)
-
-# Ease In (Starts slow, hits max speed at the end)
-def ease_in(t): 
-    ts = max(0, min(1, t))
-    return ts * ts
-
-# Ease Out (Starts fast, gently coasts to a stop)
-def ease_out(t): 
-    ts = max(0, min(1, t))
-    return 1 - (1 - ts) * (1 - ts)
-
-def catmull_rom(p0, p1, p2, p3, t):
-    """
-    Calculates the spatial coordinates along a Catmull-Rom spline.
-    Unlike standard Bezier curves (where control points just 'pull' the line), 
-    Catmull-Rom guarantees that the curve physically passes exactly through every keyframe.
-    Requires 4 points to calculate curvature: the previous key, start key, end key, and next key.
-    """
-    t2 = t * t
-    t3 = t2 * t
-    return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+def oklab_to_linear(lab):
+    m1_inv = np.array([[1.0, 0.39633, 0.21580], [1.0, -0.10556, -0.06385], [1.0, -0.08948, -1.29148]], dtype='f4')
+    m2_inv = np.array([[4.07674, -3.30771, 0.23097], [-1.26843, 2.60975, -0.34131], [-0.00419, -0.70347, 1.70760]], dtype='f4')
+    return np.clip(np.dot(m2_inv, np.dot(m1_inv, lab) ** 3), 0.0, 1.0)
 
 class Timeline:
-    """
-    Reads the raw JSON dictionary and structures it into traversable animation tracks.
-    """
-    def __init__(self, data):
-        # Create an empty list for every animatable parameter.
+    def __init__(self, job_data):
+        self.job = job_data
+        
+        # Added 'm' to track Interpolation Mode (S/L)
         self.tracks = {
-            'p': [], 'r': [], 'c': [], 'cg': [], 
-            's': [], 'sd': [], 'ph': [], 'stp': [], 'src': []
+            'm': [], 'pos': [], 'rot': [], 'bp_pos': [], 'bp_rot': [], 'pg': [], 'cg': [], 
+            'exp': [], 'sd': [], 'ph': [], 'src': [], 'stp': [],
+            'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
+            'start_bp_p': [], 'stop_bp_p': [], 'start_bp_r': [], 'stop_bp_r': [],
+            'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
         }
         
-        # A dictionary of lambda functions. This maps our parameter keys to the functions 
-        # required to safely convert their raw strings into mathematical objects.
-        parsers = {
-            'p':   lambda x: ensure_vec3([float(n) for n in x.split(',') if n.strip()], 0.0),
-            'r':   lambda x: ensure_vec3([float(n) for n in x.split(',') if n.strip()], 0.0) * 360.0,
-            'c':   lambda x: hex_to_rgb(x),
-            'cg':  lambda x: hex_to_rgb(x),
-            's': float, 'sd': float, 'ph': float, 'stp': float, 'src': float
-        }
-
-        # Scan the JSON keys for anything that looks like 'f1', 'f20', etc., 
-        # to determine which keyframe numbers actually exist in the payload.
-        found_indices = set()
-        for k in data.keys():
-            if k.startswith('f') and k[1:].isdigit():
-                found_indices.add(k[1:])
+        self.mode = job_data.get('smear_mode', 'SSS').lower()
+        prefix = "mds_" if self.mode == 'mds' else "sss_"
         
-        # Iterate through our discovered keyframes.
-        for idx in found_indices:
-            frame_str = str(data.get(f'f{idx}', '')).strip()
-            if not frame_str: continue 
+        row_ids = set()
+        for k in job_data.keys():
+            if k.startswith(prefix + "f"):
+                idx = k.replace(prefix + "f", "")
+                if idx.isdigit(): row_ids.add(idx)
+
+        def require_float(key, fallback_if_unsubmitted=None):
+            """
+            Strict float parser.
+            This explicitly raises a ValueError with the exact UI element ID.
+            vop.py catches this exception, prints it to the terminal, and halts the engine cleanly.
+            """
+            # If the key wasn't submitted in the JSON at all, permit the fallback.
+            if key not in job_data and fallback_if_unsubmitted is not None:
+                return float(fallback_if_unsubmitted)
+                
+            raw = job_data.get(key)
             
-            frame = int(frame_str)
-            # Retrieve the interpolation mode (S, L, I, O)
-            mode = data.get(f'm{idx}', 'S')
-            # Check if the 'Corner' flag is checked for sharp path turns.
-            crn = (str(data.get(f'crn{idx}', '')).lower() == 'true')
+            # If the user explicitly left the input box blank ("") or it evaluates to None
+            if raw == "" or raw is None:
+                raise ValueError(f"Input '{key}' is empty! Halting execution. Please provide a value.")
+                
+            try:
+                return float(raw)
+            except ValueError:
+                raise ValueError(f"Input '{key}' contains invalid data: '{raw}'. Must be a number.")
 
-            # Populate the tracks
-            for key_type, parser in parsers.items():
-                # Color keys have '_hex' appended in the HTML ID, so we account for that here.
-                lookup_key = f"{key_type}{idx}_hex" if key_type in ['c', 'cg'] else f"{key_type}{idx}"
-                raw_val = str(data.get(lookup_key, '')).strip()
-                if raw_val:
-                    try:
-                        # Parse the value and append the dictionary to the specific track list.
-                        val = parser(raw_val)
-                        self.tracks[key_type].append({'f': frame, 'val': val, 'mode': mode, 'crn': crn})
-                    except: pass
+        for idx in sorted(list(row_ids), key=int):
 
-        # Crucial Cleanup: Sort all tracks chronologically by frame number.
-        for k in self.tracks:
-            self.tracks[k].sort(key=lambda x: x['f'])
+            # f_val can still use safe_f or require_float, but since it dictates the loop, we ensure it's strictly parsed
+            f_val = require_float(f"{prefix}f{idx}")
             
-            # If the user left an entire track blank, inject a safe default at Frame 1 
-            # so the engine doesn't crash when it asks for a value.
-            if not self.tracks[k]:
-                defaults = {
-                    'p': np.array([0.,0.,-10.]), 'r': np.array([0.,0.,0.]),
-                    'c': np.array([1.,1.,1.]), 'cg': np.array([1.,1.,1.]),
-                    's': 1.0, 'sd': 1.0, 'ph': 0.5, 'stp': 1.0, 'src': -1.0
-                }
-                self.tracks[k].append({'f': 1, 'val': defaults[k], 'mode': 'S', 'crn': False})
+            # Extract Interpolation Mode (S = Smooth, L = Linear)
+            self.tracks['m'].append({'f': f_val, 'val': job_data.get(f"{prefix}m{idx}", "S")})
+            
+            self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}p{idx}", "0,0,-1.0"), -1.0)})
+            self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}r{idx}", "0,0,0"), 0.0)})
+            self.tracks['bp_pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_p{idx}", "0,0,-1.0"), -1.0)})
+            self.tracks['bp_rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_r{idx}", "0,0,0"), 0.0)})
+            
+            self.tracks['pg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}c{idx}_hex", "#ffffff"))})
+            self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}cg{idx}_hex", "#ffffff"))})
+            
+            # --- THESE LINES ENFORCE STRICT PARSING ---
+            exp_key = f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}"
+            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
+            self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
+            self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
+            
+            # src and stp use the fallback arguments since they aren't always present in the standard UI
+            self.tracks['src'].append({'f': f_val, 'val': require_float(f"{prefix}src{idx}", -1.0)})
+            self.tracks['stp'].append({'f': f_val, 'val': require_float(f"{prefix}stp{idx}", 1.0)})
 
-    def _get_val_at_t(self, track_name, frame_float, is_spatial=False):
+            # MDS Start/Stop offsets (Ignored during SSS execution)
+            self.tracks['start_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"))})
+            self.tracks['stop_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_p{idx}", "0,0,0"))})
+            self.tracks['start_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_r{idx}", "0,0,0"))})
+            self.tracks['stop_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_r{idx}", "0,0,0"))})
+            
+            self.tracks['start_bp_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp_p{idx}", "0,0,0"))})
+            self.tracks['stop_bp_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp_p{idx}", "0,0,0"))})
+            self.tracks['start_bp_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp_r{idx}", "0,0,0"))})
+            self.tracks['stop_bp_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp_r{idx}", "0,0,0"))})
+
+            self.tracks['start_c'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}start_c{idx}_hex", "#ffffff"))})
+            self.tracks['stop_c'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}stop_c{idx}_hex", "#ffffff"))})
+            self.tracks['start_cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}start_cg{idx}_hex", "#ffffff"))})
+            self.tracks['stop_cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}stop_cg{idx}_hex", "#ffffff"))})
+
+        for track in self.tracks.values():
+            track.sort(key=lambda x: x['f'])
+
+    def _get_interp_mode(self, t):
+        """Helper to find if the current interval is set to Smooth ('S') or Linear ('L')"""
+        m_track = self.tracks.get('m', [])
+        if not m_track: return 'S'
+        
+        # Find the interpolation mode of the keyframe immediately preceding or equal to 't'
+        for i in range(len(m_track) - 1):
+            if m_track[i]['f'] <= t < m_track[i+1]['f']:
+                return m_track[i]['val']
+        return m_track[-1]['val']
+
+    def _get_val(self, key, t, is_color=False):
+        track = self.tracks.get(key, [])
+        if not track: return None
+        if t <= track[0]['f']: return track[0]['val']
+        if t >= track[-1]['f']: return track[-1]['val']
+        
+        for i in range(len(track) - 1):
+            if track[i]['f'] <= t <= track[i+1]['f']:
+                k1, k2 = track[i], track[i+1]
+                break
+                
+        # Base Linear Alpha (0.0 to 1.0 representing percentage traversed between k1 and k2)
+        alpha = (t - k1['f']) / (k2['f'] - k1['f'])
+        
+        # SSS Core Interpolation Logic:
+        # If the origin keyframe is 'S' (Smooth), apply Cosine Easing.
+        # This transforms the linear ramp into an S-curve, ensuring zero velocity 
+        # at the exact moment of the keyframe, producing fluid motion without mechanical stops.
+        if self.mode == 'sss':
+            if self._get_interp_mode(k1['f']) == 'S':
+                alpha = (1.0 - np.cos(alpha * np.pi)) / 2.0
+                
+        if is_color:
+            return oklab_to_linear(linear_to_oklab(k1['val']) + (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
+        return k1['val'] + (k2['val'] - k1['val']) * alpha
+
+    def get_state(self, t):
         """
-        The core interpolation engine. Given a track and a precise moment in time,
-        it calculates the exact value required.
+        SSS Time Domain Mapping:
+        In SSS mode, 't' is not a whole integer, it is a fractional frame decimal.
+        engine.py calculates this 't' continuously during the physical exposure loop based on:
+        
+        1. SD (Shutter Duration): Multiplier of the standard frame interval. 
+           (e.g., SD = 1.0 means shutter is open for a full 1/24th distance, SD = 0.5 means half distance).
+        2. PH (Playhead Phase): Offsets the center point of the exposure. 
+           (e.g., PH = 0.5 centers the exposure symmetrically on the frame number. PH = 0.0 pushes the exposure to start exactly AT the frame number).
+           
+        This continuous 't' is passed to _get_val(), which smoothly interpolates absolute positions.
         """
-        track = self.tracks[track_name]
-        if not track: return 0
+        if not any(self.tracks.values()): return self.get_default_state()
         
-        # Clamping: If asking for a frame before the start or after the end, just return the extreme limits.
-        if frame_float <= track[0]['f']: return track[0]['val']
-        if frame_float >= track[-1]['f']: return track[-1]['val']
-        
-        # Iterate through the track to find the two keyframes surrounding the playhead.
-        idx = 0
-        while idx < len(track) - 1 and frame_float > track[idx+1]['f']: idx += 1
-        
-        kA, kB = track[idx], track[idx+1]
-        
-        # Calculate 't' (the percentage of completion between Key A and Key B)
-        seg_len = float(kB['f'] - kA['f'])
-        if seg_len == 0: return kA['val']
-        t = (frame_float - kA['f']) / seg_len
-
-        # Pass 't' through the easing math determined by the UI dropdown mode.
-        mode = kA['mode']
-        t_e = ease_in(t) if mode == 'I' else ease_out(t) if mode == 'O' else t if mode == 'L' else ease_smooth(t)
-
-        if is_spatial:
-            # Spatial tracks require the Catmull-Rom logic.
-            p1, p2 = kA['val'], kB['val']
-            # Re-verify the array shapes just in case.
-            if p1.shape != (3,): p1 = ensure_vec3(p1)
-            if p2.shape != (3,): p2 = ensure_vec3(p2)
+        def safe_val(key, default_arr):
+            v = self._get_val(key, t)
+            return v if v is not None else default_arr
             
-            kPrev = track[idx-1] if idx > 0 else None
-            # If 'Corner' is checked, we deliberately break the Catmull-Rom curve by mirroring 
-            # the points linearly, resulting in a sharp angle at the keyframe.
-            p0 = p1 + (p1 - p2) if kA['crn'] else (kPrev['val'] if kPrev else p1 - (p2 - p1))
-            
-            kNext = track[idx+2] if idx < len(track) - 2 else None
-            p3 = p2 + (p2 - p1) if kB['crn'] else (kNext['val'] if kNext else p2 + (p2 - p1))
-            
-            return catmull_rom(p0, p1, p2, p3, t_e)
-        else:
-            # Non-spatial tracks (like Exposure or Step) just use straight linear mixing.
-            return lerp(kA['val'], kB['val'], t_e)
+        def safe_col(key, default_arr):
+            v = self._get_val(key, t, True)
+            return v if v is not None else default_arr
 
-    def get_state(self, frame_float):
-        """
-        Gathers all track evaluations into a single payload dictionary for a specific frame.
-        """
+        # Checks for None explicitly so that 0.0 is passed through correctly
+        def safe_float(key, default_val):
+            v = self._get_val(key, t)
+            return float(v) if v is not None else default_val
+
         return {
-            'p': self._get_val_at_t('p', frame_float, is_spatial=True),
-            'r': self._get_val_at_t('r', frame_float),
-            'c': self._get_val_at_t('c', frame_float),
-            'cg': self._get_val_at_t('cg', frame_float),
-            's': self._get_val_at_t('s', frame_float),
-            'sd': self._get_val_at_t('sd', frame_float),
-            'ph': self._get_val_at_t('ph', frame_float),
-            'stp': self._get_val_at_t('stp', frame_float),
-            'src': self._get_val_at_t('src', frame_float)
+            'p': safe_val('pos', np.array([0, 0, -1.0], dtype='f4')), 
+            'r': safe_val('rot', np.array([0, 0, 0], dtype='f4')),
+            'bp_p': safe_val('bp_pos', np.array([0, 0, -1.0], dtype='f4')), 
+            'bp_r': safe_val('bp_rot', np.array([0, 0, 0], dtype='f4')),
+            # Local offsets (lp/lr) are held at zero during SSS execution.
+            'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
+            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
+            'pg': safe_col('pg', np.array([1, 1, 1], dtype='f4')), 
+            'cg': safe_col('cg', np.array([1, 1, 1], dtype='f4')),
+
+            'exp': safe_float('exp', 1.0),
+            'sd': safe_float('sd', 1.0),
+            'ph': safe_float('ph', 0.5)
+        }
+
+    def get_mds_state(self, frame_num, t_norm):
+        if not any(self.tracks.values()): return self.get_default_state()
+        
+        st_base = self.get_state(frame_num)
+        
+        def safe_val(key, default_arr):
+            v = self._get_val(key, frame_num)
+            return v if v is not None else default_arr
+            
+        def safe_col(key, default_arr):
+            v = self._get_val(key, frame_num, True)
+            return v if v is not None else default_arr
+            
+        lp = safe_val('start_p', np.zeros(3,'f4')) + (safe_val('stop_p', np.zeros(3,'f4')) - safe_val('start_p', np.zeros(3,'f4'))) * t_norm
+        lr = safe_val('start_r', np.zeros(3,'f4')) + (safe_val('stop_r', np.zeros(3,'f4')) - safe_val('start_r', np.zeros(3,'f4'))) * t_norm
+        
+        lbp_p = safe_val('start_bp_p', np.zeros(3,'f4')) + (safe_val('stop_bp_p', np.zeros(3,'f4')) - safe_val('start_bp_p', np.zeros(3,'f4'))) * t_norm
+        lbp_r = safe_val('start_bp_r', np.zeros(3,'f4')) + (safe_val('stop_bp_r', np.zeros(3,'f4')) - safe_val('start_bp_r', np.zeros(3,'f4'))) * t_norm
+        
+        pg_start = safe_col('start_c', np.array([1,1,1],'f4'))
+        pg_stop = safe_col('stop_c', np.array([1,1,1],'f4'))
+        pg_val = oklab_to_linear(linear_to_oklab(pg_start) + (linear_to_oklab(pg_stop) - linear_to_oklab(pg_start)) * t_norm)
+        
+        cg_start = safe_col('start_cg', np.array([1,1,1],'f4'))
+        cg_stop = safe_col('stop_cg', np.array([1,1,1],'f4'))
+        cg_val = oklab_to_linear(linear_to_oklab(cg_start) + (linear_to_oklab(cg_stop) - linear_to_oklab(cg_start)) * t_norm)
+        
+        return {
+            'p': st_base['p'], 'r': st_base['r'], 'lp': lp, 'lr': lr,
+            'bp_p': st_base['bp_p'], 'bp_r': st_base['bp_r'], 'lbp_p': lbp_p, 'lbp_r': lbp_r,
+            'pg': pg_val, 'cg': cg_val, 'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
+        }
+
+    def get_default_state(self):
+        return {
+            'p': np.array([0, 0, -1.0], dtype='f4'), 'r': np.array([0, 0, 0], dtype='f4'),
+            'bp_p': np.array([0, 0, -1.0], dtype='f4'), 'bp_r': np.array([0, 0, 0], dtype='f4'),
+            'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
+            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
+            'pg': np.array([1, 1, 1], dtype='f4'), 'cg': np.array([1, 1, 1], dtype='f4'),
+            'exp': 1.0, 'sd': 1.0, 'ph': 0.5
         }
 
     def calculate_playhead_at(self, target_frame):
-        """
-        The 'Dumb Stepper' algorithm.
-        This calculates which frame from the ProjMag folder should be loaded, based on 
-        the explicit SRC anchors and the cumulative STP (Step) values.
-        """
-        src_track = self.tracks['src']
-        anchor_val = 0.0
-        anchor_frame = 1
-        
-        # 1. FIND THE ANCHOR
-        # We loop backwards through the SRC track. We want the most recent keyframe 
-        # that occurred BEFORE OR ON our current target_frame, that is NOT set to -1 (Auto).
-        best_k = None
+        src_track = self.tracks.get('src', [])
+        if not src_track: return 0.0
+        anchor_val, anchor_frame = 0.0, 1
         for k in reversed(src_track):
             if k['f'] <= target_frame and k['val'] >= 0:
-                best_k = k
+                anchor_val, anchor_frame = k['val'], k['f']
                 break
-        
-        if best_k:
-            anchor_val = best_k['val']
-            anchor_frame = best_k['f']
-        else:
-            # Fallback: Start at 0 on frame 1.
-            anchor_val = 0.0 
-            anchor_frame = 1
-            
-        current_playhead = anchor_val
-        
-        # 2. INTEGRATE THE STEPS
-        # We start at the anchor value, and for every frame between the anchor and our current frame,
-        # we ask the interpolator for the Step Value, and add it. 
-        # This allows you to smoothly transition from Step 1 to Step 0 (freeze frame) over time.
         if target_frame > anchor_frame:
             for f in range(int(anchor_frame), int(target_frame)):
-                step = self._get_val_at_t('stp', float(f))
-                current_playhead += step
-                
-        return current_playhead
+                anchor_val += self._get_val('stp', f)
+        return anchor_val

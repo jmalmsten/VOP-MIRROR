@@ -1,83 +1,545 @@
-/* VOP Module: style.css - v0.0.10 */
-body { background: #0b0b0b; color: #ddd; font-family: sans-serif; margin: 0; padding: 20px; }
-.container { max-width: 1600px; margin: 0 auto; display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
+/* VOP Module:      style.css
+Description:        Stylings for the whole GUI
+*/
 
-.vop-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
+/* ############### Global variables ############# */
 
-.preview-area { background: #1a1a1a; border: 1px solid #333; display: flex; align-items: center; justify-content: center; min-height: 400px; max-height: 55vh; overflow: hidden; position: relative; }
-#probe_img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
-.preview-overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; font-size: 0.8em; pointer-events: none; }
 
-.controls-area { display: flex; flex-direction: column; gap: 15px; max-height: 55vh; overflow-y: auto; padding-right: 5px; }
+:root {
+    
+    /* >>> Global Brand & Accent Colors <<< */
 
-.group-box { background: #151515; padding: 15px; border-radius: 4px; border: 1px solid #222; }
-.group-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; }
+    --color-accent:         #0ad;   /* Used for text, borders, buttons, and BiPack Highlights */
+    --color-danger:         #500;   /* Panic Buttons */
+    --color-danger-text:    #f44;   /* Nuke Buttons */
+    --color-warning:        #fa0;   /* Nuke confirmation */
 
-.input-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px; }
-.input-row .c-box button { height: 26px; line-height: 26px; padding: 0; }
-.c-box { display: flex; flex-direction: column; }
-.c-box label { font-size: 0.6em; color: #888; margin-bottom: 4px; }
-.c-box input, .c-box select { background: #222; border: 1px solid #444; color: #0cf; padding: 4px; border-radius: 3px; font-size: 0.85em; }
+    /* >>> Background & Panels */
 
-.c-box input[type="color"] { -webkit-appearance: none; padding: 0; height: 24px; width: 100%; cursor: pointer; border: 1px solid #444; border-radius: 3px; }
-.c-box input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
-.c-box input[type="color"]::-webkit-color-swatch { border: none; border-radius: 2px; }
+    --bg-body:  #0b0b0b;     /* Background for the whole thing */
+    --bg-panel: #1a1a1a;    /* Control deck, preview area */
+    --bg-group: #151515;    /* Group Boxes */
+    --bg-input: var(--bg-input);       /* Inputs, Progress bar track */
 
-.upload-cluster { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: end; }
-.upload-btn { background: #222; border: 1px solid #444; color: #ccc; cursor: pointer; padding: 0; border-radius: 3px; font-size: 0.75em; height: 26px; line-height: 26px; }
-.upload-btn:hover { background: #0cf; color: #000; }
+    /* >>> Text Colors <<< */
 
-.sheets-area { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 20px; margin-top: 10px; }
+    --text-primary:     #ddd;   /* Body text */
+    --text-secondary:   #888;   /* Labels, cheat sheet text, group titles */
+    --text-muted:       #666;
+    --text-dark:        #000;   /* Text inside bright buttons */
 
-.sheet-container { background: #111; padding: 10px; border-radius: 4px; border: 1px solid #222; overflow-x: auto; display: flex; flex-direction: column; align-items: center; }
+    /* >>> Borders <<< */
+    
+    --border-color:     #333;
+    --radius-standard:  4px; /* For most boxes and panels */
+    --radus-small:      3px; /* For buttons and cheat sheet items */
 
-/* Increased max-width from 1100 to 1250 to cleanly fit the two restored columns */
-.vop-sheet { width: 100%; max-width: 1250px; min-width: 1050px; font-size: 0.85em; margin: 0 auto; }
+    /* >>> Exposure Sheet Tags << */
 
-/* Expanded grid to 14 columns to include SRC and STP */
-.sheet-row { display: grid; grid-template-columns: 30px 80px 60px 30px 50px 50px 1fr 1fr 40px 40px 60px 60px 60px 30px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; }
+    --tag-master-bg: #123;
+    --tag-master-text: #0cf;
+    --tag-smear-bg: #210;
+    --tag-smear-text: #f80;
+    --tag-bipack-border: #057;
+}
 
-.sheet-header { font-size: 0.6em; color: #444; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #333; }
-.sheet-row input[type="text"], .sheet-row input[type="number"], .sheet-row select { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 2px; width: 100%; border-radius: 2px; font-family: monospace; font-size: 0.9em; box-sizing: border-box; }
-.sheet-row input[type="checkbox"] { width: auto; margin: 0 auto; display: block; }
+/* Custom Instant Tooltips - Targets the attribute directly! */
+[data-title] {
+    position: relative;
+    cursor: help;
+}
 
-.sheet-row input[type="color"] { -webkit-appearance: none; border: 1px solid #333; background: #1a1a1a; padding: 0; width: 100%; height: 24px; border-radius: 2px; cursor: pointer; box-sizing: border-box; }
-.sheet-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
-.sheet-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 1px; }
+/* The invisible box */
+[data-title]::after {
+    content:    attr(data-title);
+    position:   absolute;
+    bottom:     120%; 
+    left:       50%;
+    transform:  translateX(-50%) translateY(5px); 
+    
+    background:     var(--bg-group, #151515);
+    color:          var(--color-accent, #0cf);
+    padding:        6px 10px;
+    border:         1px solid var(--border-color, #333);
+    border-radius:  var(--radius-small, 3px);
 
-.row-index { color: #333; font-weight: bold; text-align: center; }
-.row-center { text-align: center; }
+    font-size:      0.85em;
+    font-weight:    bold;
+    font-family:    sans-serif;
+    white-space:    nowrap;
+    
+    /* Make it invisible by default */
+    opacity:            0;
+    visibility:         hidden;
+    z-index:            9999; 
+    pointer-events:     none;
+    box-shadow:         0px 4px 12px rgba(0,0,0,0.8);
+    
+    /* Smooth fade and slide animation */
+    transition:     opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
 
-.snap-btn { background: #222; color: #0cf; padding: 1px 4px; font-size: 0.7em; border: 1px solid #444; border-radius: 3px; cursor: pointer; }
-.snap-btn:hover { background: #0cf; color: #000; }
-.del-btn { background: #300; color: #f44; border: 1px solid #500; border-radius: 3px; cursor: pointer; font-weight: bold; padding: 0 4px; font-size: 0.8em; }
-.del-btn:hover { background: #f00; color: #fff; }
-.k-fr { display: flex; gap: 2px; align-items: center; }
+/* Trigger the animation on hover */
+[data-title]:hover::after {
+    opacity:    1;
+    visibility: visible;
+    transform:  translateX(-50%) translateY(0); 
+}
 
-.add-row { margin-top: 10px; text-align: center; width: 100%; max-width: 1250px; margin-left: auto; margin-right: auto; }
-.add-btn { background: #111; border: 1px solid #333; color: #666; width: 100%; padding: 6px; cursor: pointer; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
-.add-btn:hover { background: #222; color: #fff; border-color: #555; }
 
-.status-bar { grid-column: 1 / -1; background: #1a1a1a; border: 1px solid #333; padding: 5px 10px; font-size: 0.8em; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.progress-container { flex-grow: 1; margin: 0 15px; background: #000; height: 6px; border-radius: 3px; overflow: hidden; }
-.progress-fill { height: 100%; background: #0cf; width: 0%; transition: width 0.3s; }
+/* Universal Button Polish */
+.action-btn, .nuke-btn, .panic-btn, .add-btn, .del-btn, .upload-btn, .mini-btn {
+    transition:     filter 0.2s ease, transform 0.1s ease;
+}
 
-.probe-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-.action-btn { background: #0cf; color: #000; border: none; padding: 8px; border-radius: 3px; cursor: pointer; font-weight: bold; text-transform: uppercase; font-size: 0.8em; width: 100%; }
-.action-btn:hover { background: #fff; }
-.action-btn.secondary { background: #333; color: #ccc; }
-.action-btn.secondary:hover { background: #444; color: #fff; }
-.action-btn.danger { background: #500; color: #faa; }
-.action-btn.danger:hover { background: #f00; color: #fff; }
+/* Make them 30% brighter when the mouse touches them */
+.action-btn:hover, .nuke-btn:hover, .panic-btn:hover, .add-btn:hover, .del-btn:hover, .upload-btn:hover, .mini-btn:hover {
+    filter:         brightness(1.3);
+}
 
-.cheat-sheet-section { padding: 15px; background: #0d0d0d; border: 1px solid #222; border-radius: 4px; color: #888; }
-.cs-title { font-size: 0.7em; color: #555; text-transform: uppercase; margin-bottom: 10px; border-bottom: 1px solid #222; padding-bottom: 5px; font-weight: bold; }
-.cs-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; font-size: 0.75em; }
-.cs-item strong { color: #aaa; margin-right: 5px; }
+/* Give them a tiny "click" depression effect when pressed */
+.action-btn:active, .nuke-btn:active, .panic-btn:active, .add-btn:active, .del-btn:active, .upload-btn:active, .mini-btn:active {
+    transform:      scale(0.96);
+}
 
-@media (max-width: 1000px) {
-    .container { grid-template-columns: 1fr; }
-    .controls-area { height: auto; max-height: none; overflow: visible; }
-    .preview-area { min-height: 400px; max-height: none; }
-    .cs-grid { grid-template-columns: 1fr; } 
+body { 
+    background:     var(--bg-body); 
+    color:          var(--text-primary); 
+    font-family:    sans-serif; 
+    margin:         0; 
+    padding:        20px; 
+}
+
+.container { 
+    max-width:              1350px; 
+    margin:                 0 auto; 
+    display:                grid; 
+    grid-template-columns:  1fr 420px; 
+    gap:                    20px; 
+}
+
+.vop-header { 
+    grid-column:        1 / -1; 
+    display:            flex; 
+    justify-content:    space-between; 
+    align-items:        center; 
+    border-bottom:      1px solid var(--border-color); 
+}
+
+
+
+/* ###################### HEADER AND STATUS ############################ */
+/* Force flex parent to full width to enable right-justification */
+.status-meta { 
+    display:        flex; 
+    align-items:    center; 
+    gap:            12px; 
+    margin-bottom:  0; 
+    width:          100%; /* Forces the flex row to span the entire control-deck */
+    box-sizing:     border-box;
+}
+
+#st_eta {
+    font-size: 0.7em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.workprint-zone {
+    text-align: left;
+    padding-left: 2px;
+}
+
+.status-text { 
+    font-family:    monospace; 
+    color:          var(--color-accent); 
+    font-weight:    bold; 
+    min-width:      100px; 
+}
+
+/* Ensure the bar always acts as the flexible spacer */
+.status-bar-progress { 
+    flex-grow:      1; 
+    height:         10px; 
+    background:     var(--bg-input); 
+    border-radius:  5px; 
+    overflow:       hidden; 
+    min-width:      50px; /* Prevents the bar from disappearing entirely if text is long */
+}
+
+.progress-bar { 
+    width:      0%; 
+    height:     100%; 
+    background: var(--color-accent); 
+    transition: width 0.3s; 
+}
+
+.panic-btn { 
+    background:     #800; 
+    color:          #fff; 
+    padding:        5px 15px; 
+    font-weight:    bold; 
+    font-size:      0.75em; 
+    border:         none; 
+    cursor:         pointer; 
+}
+
+.nuke-btn { 
+    background:     #222; 
+    color:          var(--color-danger-text); 
+    padding:        5px 12px; 
+    border:         1px solid #444; 
+    font-size:      0.75em; 
+    cursor:         pointer; 
+}
+
+.nuke-btn[onclick="nukeJob()"] { 
+    color:  var(--color-warning); 
+}
+
+/* ################ PROBE / PREVIEW / EXECUTE ################### */
+
+.control-deck { 
+    grid-column:    1 / -1; 
+    background:     #1a1a1a; 
+    padding:        12px 15px; 
+    border-radius:  var(--radius-standard); 
+    border:         1px solid var(--border-color); 
+    margin-bottom:  20px; 
+}
+
+.probe-input {
+    width: 100%;
+    background: var(--bg-input);
+    color: var(--color-accent);
+    border: var(--border-light);
+    padding: 5px;
+    box-sizing: border-box;
+}
+
+.group-box { 
+    background:     #151515; 
+    border:         1px solid var(--border-color); 
+    border-radius:  var(--radius-standard); 
+    padding:        12px; 
+    margin-bottom:  10px; 
+}
+
+.group-box.bipack {
+    border-left: 3px solid var(--color-accent);
+}
+
+.group-title { 
+    font-size:          0.7em; 
+    color:              var(--text-secondary); 
+    text-transform:     uppercase; 
+    font-weight:        bold; 
+    margin-bottom:      8px; 
+    border-bottom:      1px solid var(--border-color); 
+}
+
+.constants-zone { 
+    display:                grid; 
+    grid-template-columns:  repeat(4, 1fr); 
+    gap:                    8px; 
+}
+
+.const-group label { 
+    display:        block; 
+    font-size:      0.6em; 
+    color:          var(--text-secondary); 
+    margin-bottom:  2px; 
+}
+
+.const-group input, .const-group select { 
+    width: 100%; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          var(--color-accent); 
+    padding:        4px; 
+    font-size:      0.8em; 
+    box-sizing:     border-box; 
+}
+
+.awb-group {
+    display:    flex;
+    gap:        2px;
+}
+
+.input-row { 
+    display:    flex; 
+    gap:        10px; 
+}
+
+.c-box { 
+    flex: 1; 
+}
+
+.c-box label { 
+    display:    block;
+    font-size:  0.6em;
+    color:      var(--text-secondary); 
+}
+
+.c-box input { 
+    width:          100%; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          #ccc; 
+    padding:        4px; 
+    font-size:      0.8em; 
+    box-sizing:     border-box; 
+}
+
+.preview-area { 
+    background:         #1a1a1a; 
+    border:             1px solid var(--border-color); 
+    min-width:          300px; 
+    max-width:          70vh; 
+    min-height:         200px; 
+    max-height:         50vh; 
+    display:            flex; 
+    align-items:        center; 
+    justify-content:    center; 
+    overflow:           hidden; 
+    grid-column:        1; 
+    grid-row:           3; 
+    justify-self:       center; 
+    align-self:         start; 
+}
+
+#probe_img { 
+    max-width:      100%; 
+    max-height:     100%; 
+    object-fit:     contain; 
+}
+
+.action-btn { 
+    background:         var(--color-accent); 
+    color:              var(--color-input); 
+    border:             none; 
+    padding:            8px; 
+    border-radius:      var(--radius-small); 
+    cursor:             pointer; 
+    font-weight:        bold; 
+    text-transform:     uppercase; 
+    font-size:          0.8em; 
+    width:              100%; 
+}
+
+.action-btn.cam_preview { 
+    background:     #333; 
+    color:          #ccc; 
+}
+
+.action-btn.danger { 
+    background:     var(--color-danger); 
+    color:          #faa; 
+    border:         1px solid #f55; 
+}
+
+.action-btn.execute {
+    /*grid-column: 1 / 3; */
+    background: #080; /* Success green, could be a --color-success var */
+    color: #fff;
+}
+
+
+
+.upload-cluster {
+    display: flex;
+    gap: 5px;
+    align-items: flex-end;
+}
+
+.upload-btn { 
+    background:     #222; 
+    color:          var(--color-accent); 
+    border:         1px solid var(--color-accent); 
+    padding:        4px 8px; 
+    cursor:         pointer; 
+    font-size:      0.7em; 
+}
+
+.mini-btn {
+    background:         var(--color-accent); 
+    color:              var(--color-input); 
+    border:             none; 
+    padding:            8px; 
+    border-radius:      var(--radius-small); 
+    cursor:             pointer; 
+    font-weight:        bold; 
+    text-transform:     uppercase; 
+    font-size:          0.8em; 
+    width:              auto; 
+}
+
+.mini-btn.danger { 
+    background:     var(--color-danger); 
+    color:          #faa; 
+    border:         1px solid #f55; 
+}
+
+/* ################ SHEET HEADER & MODE SELECTOR ############### */
+
+.sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sheet-title {
+    margin: 0;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 0.9em;
+    letter-spacing: 1px;
+}
+
+.mode-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mode-control label {
+    color: var(--color-accent);
+    font-size: 0.7em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.mode-control select {
+    background: var(--bg-input);
+    border: 1px solid var(--color-accent); /* Make it pop so it's obvious */
+    color: var(--color-accent);
+    padding: 4px 10px;
+    border-radius: var(--radius-small);
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* ################ EXPOSURE SHEET ############### */
+
+
+.sheet-row { 
+    display:        grid; 
+    gap:            4px; 
+    align-items:    center; 
+    margin-bottom:  2px; 
+}
+
+.mds-header, .mds-master-row, .mds-smear-row { 
+    grid-template-columns:  25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
+}
+
+.sss-header, .sss-master-row {
+    display: grid;
+    grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    gap: 5px;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.sss-header {
+    font-size: 0.8em;
+    text-align: center;
+    color: var(--color-sss-accent);
+}
+
+.sheet-row input {
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          #fff; 
+    padding:        3px; 
+    font-size:      0.7em; 
+    text-align:     center; 
+    width:          100%; 
+    box-sizing:     border-box; 
+}
+
+.bp-header-text {
+    color:  var(--color-accent);
+}
+
+.bp-input { 
+    border-color:   var(--tag-bipack-border) !important; 
+    color:          var(--color-accent) !important; 
+}
+
+.sheet-color-input {
+    width: 100%;
+    height: 26px;
+    padding: 0;
+}
+
+.node-tag { 
+    font-size: 0.6em; 
+    font-weight: bold; 
+    text-align: center; 
+    padding: 2px; 
+    border-radius: 2px; 
+}
+
+.master { 
+    background:     var(--tag-master-bg); 
+    color:          var(--tag-master-text); 
+}
+
+.smear { 
+    background:     var(--tag-smear-bg); 
+    color:          var(--tag-smear-text); 
+}
+
+.controls-area {
+    grid-column:    2;
+    grid-row:       3 / span 2;
+}
+
+.sheets-area {
+    grid-column:    1;
+    grid-row:       4;
+    align-self:     start;
+}
+
+.mds-add-btn {
+    background: var(--tag-master-bg);
+    color:      var(--color-accent);
+    border:     1px solid var(--color-sss-accent); 
+    cursor:     pointer; 
+}
+/* style="background: #331122; color: #f0c; border: 1px solid #f0c;" */
+
+.sss-add-btn {
+    background: #331122; /* Maybe add to vars: --bg-sss-tag */
+    color:      var(--color-sss-accent);
+    border:     1px solid var(--color-sss-accent);
+    cursor:     pointer; 
+}
+
+/* ##################### The Cheat Sheet Styling ##################### */
+
+.cs-grid{
+    /* Making a responsive grid of columns having a minimum set width */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px; /* Space between grid cels */
+    margin-top: 10px;
+}
+
+.cs-item {
+    background:     rgba(255, 255, 255, 0.03); /* Subtle cell highlight */
+    padding:        8px 12px;
+    border:         1px solid var(--border-color); /* matching section border */
+    border-radius:  var(--radius-small);
+    line-height:    1.4;
+}
+
+.cs-item strong {       /* highlighting acronyms */
+    color: var(--color-accent);
+    display: inline-block;
+    min-width: 65px; /* keeps the acronyms aligned nicely if they wrap */
 }
