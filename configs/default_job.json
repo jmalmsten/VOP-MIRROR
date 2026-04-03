@@ -8,7 +8,7 @@
     "fit_z": "-1.0",
     "coord_scale": "1.0",
     "image": "",
-    "smear_mode": "MDS",
+    "smear_mode": "SSS",
     "mds_f1": "1",
     "mds_m1": "S",
     "mds_p1": "0,0,-1.0",
