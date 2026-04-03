@@ -67,15 +67,9 @@ body {
     border-bottom:      1px solid var(--border-color); 
 }
 
-.control-deck { 
-    grid-column:    1 / -1; 
-    background:     #1a1a1a; 
-    padding:        12px 15px; 
-    border-radius:  var(--radius-standard); 
-    border:         1px solid var(--border-color); 
-    margin-bottom:  20px; 
-}
 
+
+/* ###################### HEADER AND STATUS ############################ */
 /* Force flex parent to full width to enable right-justification */
 .status-meta { 
     display:        flex; 
@@ -134,6 +128,24 @@ body {
 }
 
 /* ################ PROBE / PREVIEW / EXECUTE ################### */
+
+.control-deck { 
+    grid-column:    1 / -1; 
+    background:     #1a1a1a; 
+    padding:        12px 15px; 
+    border-radius:  var(--radius-standard); 
+    border:         1px solid var(--border-color); 
+    margin-bottom:  20px; 
+}
+
+.probe-input {
+    width: 100%;
+    background: var(--bg-input);
+    color: var(--color-accent);
+    border: var(--border-light);
+    padding: 5px;
+    box-sizing: border-box;
+}
 
 .group-box { 
     background:     #151515; 
@@ -314,6 +326,20 @@ body {
     grid-template-columns:  25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
 }
 
+.sss-header, .sss-master-row {
+    display: grid;
+    grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    gap: 5px;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.sss-header {
+    font-size: 0.8em;
+    text-align: center;
+    color: var(--color-sss-accent);
+}
+
 .sheet-row input {
     background:     var(--color-input); 
     border:         1px solid var(--border-color); 
@@ -325,6 +351,9 @@ body {
     box-sizing:     border-box; 
 }
 
+.bp-header-text {
+    color:  var(--color-accent);
+}
 .bp-input { 
     border-color:   var(--tag-bipack-border) !important; 
     color:          var(--color-accent) !important; 
@@ -357,6 +386,21 @@ body {
     grid-column:    1;
     grid-row:       4;
     align-self:     start;
+}
+
+.mds-add-btn {
+    background: var(--tag-master-bg);
+    color:      var(--color-accent);
+    border:     1px solid var(--color-sss-accent); 
+    cursor:     pointer; 
+}
+/* style="background: #331122; color: #f0c; border: 1px solid #f0c;" */
+
+.sss-add-btn {
+    background: #331122; /* Maybe add to vars: --bg-sss-tag */
+    color:      var(--color-sss-accent);
+    border:     1px solid var(--color-sss-accent);
+    cursor:     pointer; 
 }
 
 /* ##################### The Cheat Sheet Styling ##################### */

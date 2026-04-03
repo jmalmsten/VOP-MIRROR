@@ -1,13 +1,13 @@
 <div class="vop-sheet sss-sheet">
-    <div class="sheet-row sss-header" style="display: grid; grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px; gap: 5px; align-items: center; margin-bottom: 5px; font-size: 0.8em; text-align: center; color: #f0c;">
+    <div class="sheet-row sss-header">
         <div>#</div>
         <div title="Frame Number">FR</div>
         <div title="Interpolation Mode">INT</div>
         <div title="Corner/Sharp Turn">C</div>
-        <div title="Proj Position (X,Y,Z)">POS (X,Y,Z)</div>
-        <div title="Proj Rotation (P,R,Y)">ROT (P,R,Y)</div>
-        <div title="BiPack Position (X,Y,Z)" style="color: #0cf;">BP POS (X,Y,Z)</div>
-        <div title="BiPack Rotation (P,R,Y)" style="color: #0cf;">BP ROT (P,R,Y)</div>
+        <div title="Proj Position (X,Y,Z)">POS<br>(X,Y,Z)</div>
+        <div title="Proj Rotation (P,R,Y)">ROT<br>(P,R,Y)</div>
+        <div title="BiPack Position (X,Y,Z)" class="bp-header-text">BP POS<br>(X,Y,Z)</div>
+        <div title="BiPack Rotation (P,R,Y)" class="bp-header-text">BP ROT<br>(P,R,Y)</div>
         <div title="Projector Gel">PG</div>
         <div title="Camera Gel">CG</div>
         <div title="Exposure Time (Sec)">EXP</div>
@@ -18,5 +18,5 @@
     <div id="sss_sheet_body"></div>
 </div>
 <div class="add-row" style="margin-top: 10px;">
-    <button class="add-btn" style="background: #331122; color: #f0c; border: 1px solid #f0c;" onclick="addSSSKeyframe()">+ ADD SSS KEYFRAME</button>
+    <button class="sss-add-btn" onclick="addSSSKeyframe()">+ ADD SSS KEYFRAME</button>
 </div>

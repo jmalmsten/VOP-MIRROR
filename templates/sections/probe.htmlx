@@ -1,14 +1,14 @@
-<div class="probe-deck">
+probe<div class="probe-deck">
     <div class="probe-controls">
-        <div class="control-group">
+        <div class="probe-input">
             <label>MASTER FR</label>
-            <input type="number" id="probe_frame" min="1" step="1" value="1" style="width: 100%; background: #000; color: #0cf; border: 1px solid #333; padding: 5px; box-sizing: border-box;" onchange="runTask('preview')">
+            <input type="number" id="probe_frame" min="1" step="1" value="1" onchange="runTask('preview')">
         </div>
-        <div class="control-group">
+        <div class="probe-input">
             <label>EXP POINT</label>
-            <input type="number" id="probe_sub" min="0" max="1" step="0.01" value="0.5" style="width: 100%; background: #000; color: #0cf; border: 1px solid #333; padding: 5px; box-sizing: border-box;" onchange="runTask('preview')">
+            <input type="number" id="probe_sub" min="0" max="1" step="0.01" value="0.5"  onchange="runTask('preview')">
         </div>
-        <div style="display:flex; gap:10px; margin-top:15px;">
+        <div class="probe-btn-row">
             <button onclick="runTask('preview')" class="action-btn">PROBE CAPTURE</button>
             <button onclick="runTask('cam_preview')" class="action-btn secondary">CAM VIEW PREVIEW</button>
         </div>
@@ -18,4 +18,5 @@
         <img id="probe_img" src="/static/probe_live.jpg" style="max-width:320px; width:100%; border:1px solid #333; display:none; border-radius: 2px;">
         <span id="preview_type" style="font-size: 0.6em; color: #888; margin-top: 5px;">IDLE</span>
     </div>
+    DOES THIS SHOW UP IN THE PROBE SECTION?
 </div>
