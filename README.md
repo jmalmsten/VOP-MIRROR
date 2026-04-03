@@ -111,11 +111,17 @@ Once the hardware is connected and lined up. You should be able to use your term
 
  When you see that. You should be able to get to the web interface as it suggests, at `http://<PI_IP>:5000`
 
+ And if all goes to plan, you should be greeted with theinterface below:
+
+ ![Screenshot of the VOP GUI](readme_graphics/vopOverview.png)
+
 # Instructions for use
+That may look a bit overwhelming but.
+
 Please see the wiki for detailed instructions of how to do each thing.
 
 # Contributing
-If you feel like you can contribute to the code. Give me a message somehow. If you have specific code things that can be fixed or improved. Do the issues thing. I am trying to keep the issues updated myself, so I might find it there. 
+If you feel like you can contribute to the code. Give me a message somehow. If you have specific code things that can be fixed or improved. **Do the issues thing.** I am trying to keep the issues updated myself, so I might find it there. 
 
 But. I have a dayjob that is long away from coding and I am likely to label most incoming mail as spam. But I might find the contributions interesting enough to include. You are probably way... way better at coding things than my meager skills that's still heavily reliant on Google Gemini Vibe-coding. 
 
