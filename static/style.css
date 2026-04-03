@@ -80,6 +80,17 @@ body {
     box-sizing:     border-box;
 }
 
+#st_eta {
+    font-size: 0.7em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.workprint-zone {
+    text-align: left;
+    padding-left: 2px;
+}
+
 .status-text { 
     font-family:    monospace; 
     color:          var(--color-accent); 
