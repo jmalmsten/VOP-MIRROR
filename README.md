@@ -18,12 +18,22 @@ So. Once again...
 
 ## Release Notes:
 
-### v0.6.0 - "The Great unification project"
-This finally brings together the separate SSS and MDS versions that grew into their own branches because of issues with AI coding drift. The only real casualty being the rudimentary JK Step Printing stuff I had put in the SSS fork because I need to actually get progress done with the unification and the JK stuff was always more of a bonus thing. It will come for realsies... but later. 
 
-This also brings me to the numbering scheme of the versions. I am taking that control back from the LLM. And therefore I need to say that whatever it may say in the files somewhere. From this day. This version. Is v0.6.0. And history for realsies... starts here. 
+### V0.6.1 - (20260404) - "Changes to for the installation tutorial
+#### Added
 
-I will also start putting the release notes on my website so if you want the older ones starting from today. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+- Created 'Documentation' directory for project tracking.
+- Added tutorials to the wiki both for first installation of VOP and fullRGB fix.
+
+#### Changed
+
+- Moved the force_full_rgb.sh script to CaliTools/FullRGBFix/ to clean up the root
+- Added ffmpeg_metadata.txt to .gitignore to clean out unnecessary file.
+
+#### Fixed
+
+## Archived Release Notes:
+If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
 
 ## Description
 The VOP is a combination of hardware and software to make a tool that mimics several real world old tools used for animation, compositing and optical printing. 
