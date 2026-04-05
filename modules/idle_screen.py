@@ -22,16 +22,26 @@ def get_local_ip():
         return "127.0.0.1"
 
 def main():
-    pygame.init()
+    # Explicitly initialize the display module to catch the REAL error
+    try:
+        pygame.display.init()
+    except pygame.error as e:
+        print(f"\n[CRITICAL ERROR] SDL2 Video Subsystem Failed: {e}")
+        print("Check KMSDRM permissions or device availability.\n")
+        sys.exit(1)
+
     pygame.font.init()
-    pygame.mouse.set_visible(False)
-    
+        
     # Auto-detect resolution
     infoObject = pygame.display.Info()
     screen_w = infoObject.current_w
     screen_h = infoObject.current_h
 
+    # Create the hardware display surface
     screen = pygame.display.set_mode((screen_w, screen_h), pygame.FULLSCREEN)
+
+    # Hiding the mouse after the display context exists
+    pygame.mouse.set_visible(False)
 
     BLACK = (0, 0, 0)
     WHITE = (255, 255, 255)
