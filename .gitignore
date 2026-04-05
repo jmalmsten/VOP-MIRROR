@@ -37,6 +37,6 @@ __pycache__/
 
 # --- Exceptions ---
 !readme_graphics/
-!readme_graphics/*
+!readme_graphics/branding.png
 !graphics/
 !graphics/*

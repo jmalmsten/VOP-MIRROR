@@ -4,7 +4,7 @@
 
 ### Added
 - Added run_vop.sh to simplify starting the vop
-- 
+- Added the DVD-screensaver for when the VOP is idle
 
 ## V0.6.1 - (20260404)
 
