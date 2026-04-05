@@ -1,9 +1,8 @@
 """
 VOP Module:     vop.py
 Version:        v0.2.15
-Description:    Main Entry Point. Flask Web Server.
-                Fixed /get_img_aspect silently tripping on hidden files and 
-                breaking the Fit FOV math for non-16:9 masks.
+Location:       vop.py
+Description:    Main Entry Point. Flask Web Server.               
 """
 import os
 import sys
@@ -13,6 +12,9 @@ import logging
 import cv2
 import glob
 import math
+import socket
+
+idle_process = None
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 from flask import Flask, jsonify, request, render_template, send_from_directory
@@ -31,6 +33,25 @@ for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "Wo
     os.makedirs(d, exist_ok=True)
 
 engine_process = None
+
+def launch_idle_screen(port=5000):
+    # Spawns the Pygame idle screen as a non-blocking background process
+    # using the global idle_process tracker initialized at the top of the file.
+    global idle_process
+    
+    # Ensure no duplicate processes are spawned to prevent framebuffer lockups
+    kill_idle_screen()
+
+    idle_path = os.path.join(BASE_DIR, "modules", "idle_screen.py")
+    # sys.executable ensures the subprocess uses the active venv Python binary
+    idle_process = subprocess.Popen([sys.executable, idle_path, str(port)])
+
+def kill_idle_screen():
+    # Terminates the Pygame process to free up the hardware framebuffer for the engine.
+    global idle_process
+    if idle_process is not None and idle_process.poll() is None:
+        idle_process.kill()
+        idle_process = None
 
 def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
     z_dist = abs(float(ref_z))
@@ -55,6 +76,10 @@ def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen
 def dispatch_engine(task_type, payload):
     global engine_process
     print(f"\n[VOP SERVER] ACTION: {task_type.upper()}")
+
+    ## Terminate the idle screen immediately before launching the render engine
+    ## This prevents KMSDRM resource locking conflicts on the Pi hardware.
+    kill_idle_screen()
     
     payload['type'] = task_type
     with open(CURRENT_JOB_FILE, 'w') as f:
@@ -75,7 +100,7 @@ def index():
 
 @app.route('/status', methods=['GET'])
 def status():
-    global engine_process
+    global engine_process, idle_process
     wp_dir = os.path.join(BASE_DIR, "WorkPrints")
     latest_wp = ""
     try:
@@ -112,6 +137,11 @@ def status():
         except:
             return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
     
+    # 4. ENGINE IS DEAD/IDLE
+    # If the engine is not running, but the idle screen is also dead, revive it.
+    if idle_process is None or idle_process.poll() is not None:
+        launch_idle_screen(5000)
+
     return jsonify({"status": "idle", "params": params, "latest_wp": latest_wp, "workprint": f"/workprints/{latest_wp}" if latest_wp else None})
 
 @app.route('/upload_target', methods=['POST'])
@@ -196,6 +226,10 @@ def execute_seq():
 def panic():
     print("[VOP SERVER] ACTION: PANIC STOP")
     global engine_process
+
+    # Ensure the idle screen is also terminated on a hard stop command
+    kill_idle_screen()
+
     if engine_process: engine_process.kill()
     subprocess.run(["pkill", "-9", "rpicam-still"])
     return jsonify({"status": "panic_executed"})
@@ -218,8 +252,30 @@ def nuke_job():
 def serve_workprint(filename):
     return send_from_directory(os.path.join(BASE_DIR, "WorkPrints"), filename)
 
+def get_ip():
+    # Utility function to determine the local routing IP address.
+    # Uses a dummy UDP connection to 8.8.8.8 to force the OS to resolve the local interface IP.
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+        
 if __name__ == '__main__':
-    print("=========================================")
-    print(" VOP Server is online.")
-    print("=========================================")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = 5000
+    ip_addr = get_ip()
+
+    # Clear terminal space and print the formatted telemetry block
+    print("\n" + "="*50)
+    print(f" VOP Server is online.")
+    print(f" Status: Waiting for jobs")
+    print(f" WebGUI: http://{ip_addr}:{port}")
+    print("="*50 + "\n" )
+
+    # Launch the idle screen to the monitor upon initial system startup
+    launch_idle_screen(port)
+
+    app.run(host='0.0.0.0', port=port, debug=False)
