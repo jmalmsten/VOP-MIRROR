@@ -104,7 +104,7 @@ def main():
 
         # Calculate the internal rendering coordinates for the text
         # Centers the text horizontally below the logo
-        text_draw_x = x + (boxw - textw) // 2
+        text_draw_x = x + (box_w - textw) // 2
         text_draw_y = y + logo_h + padding
 
         # Draw elements to the buffer at their computed offsets
