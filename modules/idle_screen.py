@@ -67,26 +67,49 @@ def main():
     port = sys.argv[1] if len(sys.argv) > 1 else "5000"
     telemetry_text = sys_font.render(f"VOP ENGINE | {ip_addr}:{port}", True, WHITE)
 
-    text_x = (screen_w // 2) - (telemetry_text.get_width() //2 )
-    text_y = screen_h - 100
+    # --- UNIFIED BOUNDING BOX CALCULATION --- #
+    # Retrieve dimensions of the rendered text surface
 
+    text_w = telemetry_text.get_width()
+    text_h = telemetry_text.get_height()
+    padding = 20 # Pixels of vertical space between the logo and the text
+
+    # Calculate the local physical dimensions required to hold both elements
+    # The width is dictated by whichever element is wider
+    box_w = max(logo_w, text_h)
+    # The height is the sum of both elements plus the padding
+    box_h = logo_h + padding + text_h
+    
     clock = pygame.time.Clock()
     running = True
     
     while running:
         screen.fill(BLACK)
 
+        # Update the top-left coordinate of the unified bounding box
         x += dx
         y += dy
 
         # DVD Bounce Collision
-        if x <= 0 or (x + logo_w) >= screen_w:
+        # Evaluated against the combined width and height to prevent either element from clipping
+        if x <= 0 or (x + box_w) >= screen_w:
             dx *= -1
-        if y <= 0 or (y + logo_h) >= screen_h:
+        if y <= 0 or (y + box_h) >= screen_h:
             dy *= -1
 
-        screen.blit(logo, (x,y))
-        screen.blit(telemetry_text, (text_x, text_y))
+        # Calculate the internal rendering coordinates for the logo
+        # Centers the logo horizontally inside the bounding box
+        logo_draw_x = x + (box_w - logo_w) // 2
+        logo_draw_y = y
+
+        # Calculate the internal rendering coordinates for the text
+        # Centers the text horizontally below the logo
+        text_draw_x = x + (boxw - textw) // 2
+        text_draw_y = y + logo_h + padding
+
+        # Draw elements to the buffer at their computed offsets
+        screen.blit(logo, (logo_draw_x,logo_draw_y))
+        screen.blit(telemetry_text, (text_draw_x, text_draw_y))
 
         pygame.display.flip()
         clock.tick(60)
