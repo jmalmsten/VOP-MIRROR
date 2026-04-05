@@ -76,7 +76,7 @@ def main():
 
     # Calculate the local physical dimensions required to hold both elements
     # The width is dictated by whichever element is wider
-    box_w = max(logo_w, text_h)
+    box_w = max(logo_w, text_w)
     # The height is the sum of both elements plus the padding
     box_h = logo_h + padding + text_h
     
