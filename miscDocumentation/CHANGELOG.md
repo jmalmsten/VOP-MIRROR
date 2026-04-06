@@ -1,6 +1,13 @@
 # VOP Release Tracking
 
-## [Unreleased] V0.6.1 - (20260404)
+## v0.6.2 - (20260406)
+
+### Added
+- Added run_vop.sh to simplify starting the vop
+- Added the DVD-screensaver for when the VOP is idle
+- Added drop-zones to file uploads to circumvent any browser-related hangs when a folder disappears."
+
+## V0.6.1 - (20260404)
 
 ### Added
 - Created 'Documentation' directory for project tracking.

@@ -379,3 +379,43 @@ setInterval(async () => {
         }
     } catch(e) { console.error("Poll Error:", e); }
 }, 1000);
+
+// --- HTML5 Drag and Drop Fallback ---
+document.addEventListener('DOMContentLoaded', () => {
+    const setupDropZone = (elementId, inputId, textId, endpoint) => {
+        const dropZone = document.getElementById(elementId);
+        if (!dropZone) return;
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.border = "2px dashed #0cf";
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.style.border = "";
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.style.border = "";
+            
+            if (e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    const resp = await fetch(endpoint, {method: 'POST', body: formData});
+                    const data = await resp.json();
+                    document.getElementById(textId).value = data.filename;
+                    await triggerSync(); 
+                } catch(err) { console.error("Drag-Drop Upload failed", err); }
+            }
+        });
+    };
+
+    // Bind drop zones to the text input fields showing the active image
+    setupDropZone('image', 'file_input', 'image', '/upload_target');
+    setupDropZone('bipack_image', 'bp_file_input', 'bipack_image', '/upload_proj_bipack');
+});
