@@ -53,6 +53,43 @@ def kill_idle_screen():
         idle_process.kill()
         idle_process = None
 
+def process_video_ingestion(filepath, target_dir):
+    """
+    Checks if an uploaded file is a video container.
+    If so, extracts all frames to zero-padded TIFFs matching the engine's
+    playhead expectations (0000.tif, 0001.tif) and deletes the original video.
+    
+    Extra thought. If future me needs, that could maybe be increased to 5 digits.
+    that would increase the incoming video's max length from 6 min 56 sec 16 frames to 
+    69 min 26 sec 16 frames (if my math is correct). But let's keep it at 4 digits for 
+    a max length "reel" of just under 7 minutes. It seems oddly realistic to real life systems
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
+
+    if ext in video_ext:
+        print(f"[VOP SERVER] Video detected! Extracting {filepath} to TIFF sequence...")
+
+        # The output pattern guarantees files like 0000.tif, 0001.tif, etc.
+        output_pattern = os.path.join(target_dir, "%04d.tif")
+
+        cmd = [
+            "ffmpeg", "-y", "-i", filepath,
+            "-start_number", "0",
+            output_pattern
+        ]
+
+        try:
+            # Supress output to keep the terminal clean, but let errors bubble up
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("[VOP SERVER] Frame extraction complete.")
+
+            # Clean up the original video container
+            os.remove(filepath)
+        
+        except subprocess.CalledProcessError as e:
+            print("[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
+            
 def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
     z_dist = abs(float(ref_z))
     if z_dist == 0: z_dist = 0.1 
@@ -146,10 +183,25 @@ def status():
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
-    print("[VOP SERVER] UPLOADING: ProjMag Target")
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
     file = request.files['file']
-    for f in os.listdir(PROJ_MAG_DIR): os.remove(os.path.join(PROJ_MAG_DIR, f))
-    file.save(os.path.join(PROJ_MAG_DIR, file.filename))
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    print(f"[VOP SERVER] ACTION: UPLOAD PROJ MAG -> {file.filename}")
+
+    # Clear out the old files
+    for f in os.listdir(PROJ_MAG_DIR):
+        os.remove(os.path.join(PROJ_MAG_DIR, f))
+    
+    # Save the new file
+    filepath = os.path.join(PROJ_MAG_DIR, file.filename)
+    file.save(filepath)
+    
+    # Kick off the ingestion module ---
+    process_video_ingestion(filepath, PROJ_MAG_DIR)
+
     return jsonify({"status": "ok", "filename": file.filename})
 
 @app.route('/upload_proj_bipack', methods=['POST'])
