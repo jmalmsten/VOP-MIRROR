@@ -67,7 +67,7 @@ def process_video_ingestion(filepath, target_dir):
     ext = os.path.splitext(filepath)[1].lower()
     video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
 
-    if ext in video_ext:
+    if ext in video_exts:
         print(f"[VOP SERVER] Video detected! Extracting {filepath} to TIFF sequence...")
 
         # The output pattern guarantees files like 0000.tif, 0001.tif, etc.
