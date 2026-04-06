@@ -1,6 +1,6 @@
 # VOP Release Tracking
 
-## v0.6.2 - (YYYMMDD)
+## v0.6.2 - (20260406)
 
 ### Added
 - Added run_vop.sh to simplify starting the vop
