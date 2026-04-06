@@ -13,10 +13,22 @@ So. Once again...
 **RUN THIS CODE ON YOUR OWN HARDWARE ON YOUR OWN RISK!!!**
 
 ![VOP Logo with a colorful streak](readme_graphics/vop-smear-logo-001.jpg)
-
+---
 # VOP
 
 ## Release Notes:
+## v0.6.2 - (20260406)
+
+### Added
+- Added run_vop.sh to simplify starting the vop
+- Added the DVD-screensaver for when the VOP is idle
+- Added drop-zones to file uploads to circumvent any browser-related hangs when a folder disappears."
+  
+#### Fixed
+---
+## Archived Release Notes:
+If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+
 
 ### V0.6.1 - (20260404) - "Changes to for the installation tutorial
 #### Added
@@ -29,18 +41,12 @@ So. Once again...
 - Moved the force_full_rgb.sh script to CaliTools/FullRGBFix/ to clean up the root
 - Added ffmpeg_metadata.txt to .gitignore to clean out unnecessary file.
 
-#### Fixed
-
-## Archived Release Notes:
-If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
-=======
 ### v0.6.0 - "The Great unification project"
 This finally brings together the separate SSS and MDS versions that grew into their own branches because of issues with AI coding drift. The only real casualty being the rudimentary JK Step Printing stuff I had put in the SSS fork because I need to actually get progress done with the unification and the JK stuff was always more of a bonus thing. It will come for realsies... but later. 
 
 This also brings me to the numbering scheme of the versions. I am taking that control back from the LLM. And therefore I need to say that whatever it may say in the files somewhere. From this day. This version. Is v0.6.0. And history for realsies... starts here. 
 
 I will also start putting the release notes on my website so if you want the older ones starting from today. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
->>>>>>> origin/main
 
 ## Description
 The VOP is a combination of hardware and software to make a tool that mimics several real world old tools used for animation, compositing and optical printing. 
@@ -62,7 +68,7 @@ The real fun however starts when we start moving the image on the screen during 
 We (soon) can even feed it a video source using the optical printer functionality and with the bipacks we can mask out areas that we don't want to be exposed and then feed it some other artwork that's smeared and put it on the unexposed areas. 
 
 Once one start to grasp all the things these seemingly simple tools can do, a lot of very strange outputs can be possible. 
-
+---
 ### TECHNICAL THINGS IT DOES
 The VOP is built to be operated like an optical printer. And it uses certain philosophies to get there. 
 
@@ -106,9 +112,10 @@ The **"disadvantage"** is that once the new exposure is added to the latent imag
 Mainly... me. I'm just putting this on a public repo in case someone out there stumbles upon it and wants to explore this particular workflow. Also. I am also open for suggestions on how to make this work better without sacrificing the intended workflow. 
 
 In short. If you want to try out making video the way motion pictures used to make things before computers arrived. Then have a go with using the VOP. 
-
+---
 ## Installation
-At the moment. The installation procedure is a bit undocumented. But here's a rough outline of things I use to make it work. 
+Check the Wiki for current instructions that should work. At least, it has worked for me. 
+Link: [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
 
 ### Hardware needed:
 - **Raspberry Pi 5 16GB** - probably, the VOP can be run on a lesser board. But this is what I have in my prototype.
@@ -117,42 +124,17 @@ At the moment. The installation procedure is a bit undocumented. But here's a ro
 - **SD card with Raspberry Pi OS Lite (64 bit)** - Again. Probably can be run with other OS. But I chose this because it's built for the Pi and it is built to be run headless. No desktop environment or anything taking up precious resources. 
 - **HDMI Monitor** - This is what will be showing the image to the camera. My Prototype is using a simple desktop 22 inch monitor. I am looking into building the next prototype with a more fitting 13-14 inch UHD OLED. Because black levels are a big factor for this whole tool. And at the moment. You can't get better black levels than OLED.
 - **Tripod or gantry or something to line things up** - you'll want something steady to hold the camera, the pi and the HDMI monitor. You'll also want something that can be adjusted in all axes to line things up. 
-### Getting it to the Pi
-- Use whatever you feel is needed to clone the repo onto the Pi in a folder that can be easily accessed. 
-- **Tip:** I do highly recommend setting up a mount point somehow so that you can reach into the mags and pull out the workprints and mag folders. Because at the moment, the web interface has no export tools.
-### Dependencies
-- Here's me being a bit chaotic comes in. This is all "vibe coded" and I have been installing and downloading things here and there. I do not at this moment have a full list of all the dependencies you'll need to run it. This is part of "run at your own risk" comes in. 
-### Lining up tool
-If you look in the CaliTools folder, I have put a simple script that helps a lot in lining up the camera to the monitor. Read the instructions in that folder to get it running. It assumes your desktop/laptop is on Linux. And if all goes well. You should get a live feed from the camera and 
-## Running it
-Once the hardware is connected and lined up. You should be able to use your terminal to navigate to the root VOP folder and run `python3 vop.py`. Once that is running you should see something like this in the terminal: 
-
-```
-=========================================
- VOP Server is online.
-=========================================
- * Serving Flask app 'vop'
- * Debug mode: off
- ```
-
- When you see that. You should be able to get to the web interface as it suggests, at `http://<PI_IP>:5000`
-
- And if all goes to plan, you should be greeted with theinterface below:
-
- ![Screenshot of the VOP GUI](readme_graphics/vopOverview.png)
 
 # Instructions for use
 That may look a bit overwhelming but.
 
 Please see the wiki for detailed instructions of how to do each thing.
 
+Link: [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
+
 # Contributing
 If you feel like you can contribute to the code. Give me a message somehow. If you have specific code things that can be fixed or improved. **Do the issues thing.** I am trying to keep the issues updated myself, so I might find it there. 
 
 But. I have a dayjob that is long away from coding and I am likely to label most incoming mail as spam. But I might find the contributions interesting enough to include. You are probably way... way better at coding things than my meager skills that's still heavily reliant on Google Gemini Vibe-coding. 
 
-<<<<<<< HEAD
-This project is and will for the foreseeable future be open source.
-=======
-This project is and will for the foreseeable future be open source.
->>>>>>> origin/main
+This project is and will for the foreseeable future be open source. See the License: [Link to License](https://codeberg.org/jmalmsten-com/VOP/src/branch/main/LICENSE)
