@@ -22,10 +22,12 @@ import camera_hardware as hw
 import color_utils as cutil
 import graphics_utils as gfx
 
+import traceback
+
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 
 def log_audit(msg): 
-    print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}")
+    print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}", flush=True)
 
 def run_vop_engine(job_path):
     
@@ -294,4 +296,5 @@ if __name__ == "__main__":
         run_vop_engine(parser.parse_args().job)
     except Exception as e:
         log_audit(f"CRITICAL ENGINE FAILURE: {e}")
+        traceback.print_exc()
         sys.exit(1)
