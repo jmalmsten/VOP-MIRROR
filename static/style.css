@@ -567,3 +567,10 @@ body {
     align-items:    center;     /* Vertically centers the label, input button, and text */
     gap:            5px;        /* Sets consistent spacing bbetween the elements */
 }
+
+.crush-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    grid-column: span 2; /* Forces this cell to span across two columns to fit the contents */
+}

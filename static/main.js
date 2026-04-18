@@ -444,23 +444,25 @@ async function triggerMeasurement() {
             const r = await fetch('/status');
             const st = await r.json();
 
-            // Check if engine_running has flipped back to false (ignoring the first 2 seconds of boot time)
+            // Check if engine_running has flipped back to false
             if (!st.engine_running && attempts > 2) {
                 clearInterval(pollInterval);
-
-                // 3. Force the preview image to refresh by appending a timestamp cache-buster
-                document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
-
-                // 4. Fetch the generated JSON file
-                const nRes = await fetch('/static/noise_data.json?t=' + Date.now())
-                if (nRes.ok) {
-                    const data = await nRes.json();
-                    // Format to 7 decimal places for readability
-                    resTxt.innerText = data.measured_noise.toFixed(6);
-                } else {
-                    resTxt.innerText = "ERR";    
-                }
-            }            
+                
+                // Add a 500ms delay to allow the OS file buffer to write to disk
+                setTimeout(async () => {
+                    // Force the preview image to refresh
+                    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+                    
+                    // Fetch the generated JSON file
+                    const nRes = await fetch('/static/noise_data.json?t=' + Date.now());
+                    if (nRes.ok) {
+                        const data = await nRes.json();
+                        resTxt.innerText = data.measured_noise.toFixed(6); 
+                    } else {
+                        resTxt.innerText = "ERR";
+                    }
+                }, 500);
+            }           
         } catch (e) {
             console.error("Polling error:", e);
         }
