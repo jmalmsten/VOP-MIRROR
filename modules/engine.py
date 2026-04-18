@@ -220,6 +220,34 @@ def run_vop_engine(job_path):
         # Analyze the result
         noise_val = cutil.measure_noise_floor(buf_f, static_dir)
         log_audit(f">>> RECOMMENDED BLACK CLIP: {noise_val:.6f} <<<")
+    
+    elif task == 'map_hot_pixels':
+        probe_f = float(job_data.get('probe_frame', 1))
+        st = timeline.get_state(probe_f)
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
+
+        log_audit(f"Mapping Hot Pixels | Frame {probe_f} ({total_ms}ms)")
+
+        ctx.screen.use()
+        ctx.clear(0.0, 0.0, 0.0, 1.0)
+        pygame.display.flip()
+
+        buf_f = "/tmp/vop_hp_buf.dng"
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                      job_data.get('cam_res', '2028x1520'))
+        
+        hw.wait_for_sensor_prime()
+        time.sleep(total_ms /1000.0)
+        cam_proc.wait()
+        
+        hp_count = cutil.map_hot_pixels(buf_f, static_dir)
+        if hp_count >= 0:
+            log_audit(f">>> MAPPED {hp_count} HOT PIXELS <<<")
+        else:
+            log_audit(f">>> LENS CAP CHECK FAILED. ABORTED. <<<")
+
 
     elif task == 'execute':
         # Fix: Ensure we are calculating based on actual frame count, not frame index

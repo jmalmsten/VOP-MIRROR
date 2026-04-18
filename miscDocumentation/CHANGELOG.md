@@ -5,7 +5,7 @@
 - Added Noise Crush input
 - Modified version numbering in the GUI title so it only tracks v#.# instead of v#.#.# . I'll still update the third digit in the header of the GUI though. 
 - Added update to the preview to show what pixels are measured with the noise measurement function.
-- 
+- Added Hot Pixel Fixer that measures hot pixels and replaces those pixels in post. 
 
 ## v0.6.2 - (20260406)
 

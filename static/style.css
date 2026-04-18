@@ -556,7 +556,7 @@ hr.section-divider {
 }
 
 /* Style the output text to look like a digital readout */
-#noise_result_txt {
+#noise_result_txt, #hp_result_txt {
     font-family:    monospace;              /* Monospaced font aligns the decimal points cleanly */
     font-weight:    bold;                   /* Makes the readout pop against the dark UI*/
     color:          var(--color-accent);    /* Matching standard VOP accent color */

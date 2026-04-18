@@ -468,3 +468,61 @@ async function triggerMeasurement() {
         }
     }, 1000);
 }
+
+async function triggerHotPixelMap() {
+    // 1. The reality check prompt!
+    if (!confirm("IMPORTANT: Please put the lens cap on the camera!\n\nThis will take a dark frame matching your current Probe Frame's exposuresetting to map defective pixels.\n\nClick OK when the lens cap is fully seated.")){
+        return;
+    }
+
+    const resTxt = document.getElementById('hp_result_txt');
+    resTxt.innerText = "MAPPING...";
+
+    // 2. Dispatch to the engine
+    await fetch ('/map_hot_pixels', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+    });
+
+    // 3. Poll for completion
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/status');
+            const st = await r.json();
+            
+            if (st.status !== 'rendering' && attempts > 2) {
+                clearInterval(pollInterval);
+                
+                // Allow OS disk buffer flush
+                setTimeout(async () => {
+                    const nRes = await fetch('/static/hot_pixels.json?t=' + Date.now());
+                    if (nRes.ok) {
+                        const data = await nRes.json();
+                        if (data.error) {
+                            resTxt.innerText = "ERR: CAP OFF";
+                            resTxt.style.color = "#f44";
+                        } else {
+                            resTxt.innerText = data.pixels.length + " FIXED";
+                            resTxt.style.color = "#0cf";
+                        }
+                    } else {
+                        resTxt.innerText = "FAILED";
+                    }
+                }, 500);
+            }
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }, 1000);
+}
+
+async function nukeHotPixels() {
+    if (confirm("Delete the hot pixel map? Defective pixels will no longer be suppressed in future exposures.")) {
+        await fetch('/nuke_hot_pixels', {method: 'POST'});
+        document.getElementById('hp_result_txt').innerText = "CLEARED";
+        document.getElementById('hp_result_txt').style.color = "#f44"; // Turn red to show it's disabled
+    }
+}

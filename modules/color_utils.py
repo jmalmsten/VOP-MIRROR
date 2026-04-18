@@ -29,7 +29,10 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
         with rawpy.imread(buffer_file) as raw:
             rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
         
-        # 1. Apply the Pedestal subtraction FIRST
+        # --- Patch defective pixels immediately ---
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+        
+        # 1. Apply the Pedestal subtraction
         rgb = apply_pedestal(rgb, black_clip)
 
         # 2. Convert from RGB to BGR for OpenCV
@@ -64,8 +67,11 @@ def process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_
     try:
         with rawpy.imread(buffer_file) as raw:
             rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # --- Patch defective pixels immediately ---
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
     
-        # 1. Apply the pedestal subtraction FIRST
+        # 1. Apply the pedestal subtraction
         rgb = apply_pedestal(rgb, black_clip)
 
         # 2. Convert from RGB to BGR for OpenCV
@@ -158,3 +164,84 @@ def measure_noise_floor(buffer_file, static_dir):
         if os.path.exists(buffer_file): os.remove(buffer_file)
         dummy = buffer_file.replace(".dng", ".jpg")
         if os.path.exists(dummy): os.remove(dummy)
+
+def apply_hot_pixel_patch(img_16bit, static_dir):
+    """
+    Reads the hot pixel map and replaces defective pixels with the median of their neighbors.
+    Uses cv2.medianBlur and numpy indexing for near-instant C++ execution speed.
+    """
+
+    hp_file = os.path.join(static_dir, "hot_pixels.json")
+    if not os.path.exists(hp_file):
+        return img_16bit
+    
+    try:
+        with open(hp_file, 'r') as f:
+            data = json.load(f)
+        
+        if "pixels" not in data or not data["pixels"]:
+            return img_16bit
+        
+        # Extract coordinates
+        pts = np.array(data["pixels"])
+        y_coords = pts[:, 0]
+        x_coords = pts[:, 1]
+
+        # Apply a 3x3 median blur to a copy of the image.
+        blurred = cv2.medianBlur(img_16bit, 3)
+
+        # Overwrite ONLY the defective pixels on the original image with the blurred pixels
+        img_16bit[y_coords, x_coords] = blurred[y_coords, x_coords]
+
+        return img_16bit
+    except Except as e:
+        print(f"[VOP WARNING] Hot Pixel Patch Error: {e}")
+        return img_16bit
+
+def map_hot_pixels(buffer_file, static_dir):
+    """
+    Scans a dark frame for anomalies and saves coordinates to JSON.
+    If it detects too many hot pixels ( > 0.5% of sensor), it assumes the lens cap is off.
+    """
+    if not os.path.exists(buffer_file): return -1
+
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # Convert to grayscale to measure pure intensity
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+
+        # Calculate the mathematical noise floor and standard deviation
+        mean_val, std_val = cv2.meanStdDev(gray)
+        mean_val, std_val = mean_val[0][0], std_val[0][0]
+
+        # A hot pixel is anything 10 standard deviations above the noise floor
+        # We also set a hard minimum (1000) so a perfectly clean, pitch black frame doesn't trigger false positives
+        threshold = max(mean_val + (10 * std_val), 1000)
+
+        # Fine coordinates where intensity exceeds threshold
+        y_coords, x_coords = np.where(gray > threshold)
+        hp_count = len(y_coords)
+        out_json = os.path.join(static_dir, "hot_pixels.json")
+
+        if hp_count > 15000:
+            with open(out_json, "w") as f:
+                json.dump({"error": "LENS CAP OFF?", "pixels": []}, f)
+            return  -1
+
+        # Convert to a standard Python list of [y, x] pairs for JSON serialization
+        pixels_list = [[int(y), int(x)] for y, x in zip(y_coords, x_coords)]
+
+        with open(out_json, "w") as f:
+            json.dump({"error": None, "pixels": pixels_list}, f)
+        
+        return hp_count
+    except Exception as e:
+        print(f"[VOP WARNING] Mapping Error: {e}")
+        return -1
+    finally:
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+
