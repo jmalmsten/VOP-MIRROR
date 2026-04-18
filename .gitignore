@@ -16,6 +16,7 @@ vop_focus_tests/
 *.mkv
 current_job.json
 ffmpeg_metadata.txt
+static/noise_data.json
 
 # --- Python Junk ---
 __pycache__/
