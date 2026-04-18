@@ -546,6 +546,15 @@ body {
 
 /* --- Noise Floor Measurement UI --- */
 
+/* --- Elegant Grid Divider --- */
+hr.section-divider {
+    grid-column:    1 / -1;                         /* Forces the element to span from the first column to the very last */
+    border:         0;                              /* Strips out the ugly default 3D browser borders */
+    border-top:     1px solid var(--border-color);  /* Draws a single, subtle, dark-gray line */
+    margin:         8px 0;                          /* Adds a little vertical breathing room above and below */
+    width:          100%;                           /* Ensures it fills the space completely */
+}
+
 /* Style the output text to look like a digital readout */
 #noise_result_txt {
     font-family:    monospace;              /* Monospaced font aligns the decimal points cleanly */
