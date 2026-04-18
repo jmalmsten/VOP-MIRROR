@@ -136,6 +136,10 @@ def run_vop_engine(job_path):
         smr_ms = float(st['exp']) * 1000.0
         total_ms = smr_ms + 1000.0
         
+        # Safely extract the black clip float (defautling to 0.0 if empty)
+        raw_clip = job_data.get('black_clip', 0.0)
+        black_clip = float(raw_clip) if raw_clip != "" else 0.0
+
         log_audit(f"Exposing Frame {frame_num} | Smear: {smr_ms}ms | Shutter Total: {total_ms}ms")
         
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
@@ -160,13 +164,13 @@ def run_vop_engine(job_path):
         cam_proc.wait() 
         
         if is_preview:
-            # Pass mono_active down to the preview generator
-            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active)
+            # Pass mono_active and black_clip down to the preview generator
+            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip)
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
             out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
-            # Pass mono_active down to the stacking sequence
-            cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], mono_active)
+            # Pass mono_active and black_clipdown to the stacking sequence
+            cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], mono_active, black_clip)
 
     task = job_data.get('type')
     
