@@ -196,7 +196,7 @@ def run_vop_engine(job_path):
         # Grab exposure time based on the current Probe frame
         probe_f = float(job_data.get('probe_frame', 1))
         st = timeline.get_state(probe_f)
-        smr_ms = float(st['exp'] * 1000.0)
+        smr_ms = float(st['exp']) * 1000.0
         total_ms = smr_ms + 1000.0
 
         log_audit(f"Measuring Noise Floor | Simulating Frame {probe_f} ({total_ms}ms)")
