@@ -78,7 +78,12 @@
                     <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
                     <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
                     <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
-                    <div class="const-group"><label>Noise Crush</label><input type="number" step="0.0001" id="black_clip" value="0.0"> <button class="mini-btn measure_noise" onclick="runTask('measure_noise')">MEASURE</button></div>
+                    <div class="const-group">
+                        <label>Noise Crush</label>
+                        <input type="number" step="0.0001" id="black_clip" value="0.0">
+                        <button class="mini-btn measure_noise" onclick="runTask('triggerMeasurement')">MEASURE</button>
+                        <span id="noise_result_txt"></span>
+                    </div>
                 </div>
             </div>
         </div>

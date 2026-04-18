@@ -419,3 +419,50 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDropZone('image', 'file_input', 'image', '/upload_target');
     setupDropZone('bipack_image', 'bp_file_input', 'bipack_image', '/upload_proj_bipack');
 });
+
+/* * Dispatches the dark frame measurement task to the engine and polls the
+ * server status. Once the engine stops, it retrieves the generated preview
+ * image and the measured noise value.
+ */
+async function triggerMeasurement() {
+    const resTxt = document.getElementById('noise_result_txt');
+    resTxt.innerText = "WAIT...";
+
+    // 1. Dispatch the job to the engine using the existing parameter collector
+    await fetch('/measure_noise', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+
+    });
+
+    // 2. Poll the server status endpoint every 1000ms
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/status');
+            const st = await r.json();
+
+            // Check if engine_running has flipped back to false (ignoring the first 2 seconds of boot time)
+            if (!st.engine_running && attempts > 2) {
+                clearInterval(pollInterval);
+
+                // 3. Force the preview image to refresh by appending a timestamp cache-buster
+                document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+
+                // 4. Fetch the generated JSON file
+                const nRes = await fetch('/static/noise_data.json?t=' + Date.now())
+                if (nRes.ok) {
+                    const data = await nRes.json();
+                    // Format to 7 decimal places for readability
+                    resTxt.innerText = data.measured_noise.toFixed(6);
+                } else {
+                    resTxt.innerText = "ERR";    
+                }
+            }            
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }, 1000);
+}

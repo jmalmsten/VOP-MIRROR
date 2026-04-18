@@ -216,7 +216,7 @@ def run_vop_engine(job_path):
         cam_proc.wait()
 
         # Analyze the result
-        noise_val = cutil.measure_noise_floor(buf_f)
+        noise_val = cutil.measure_noise_floor(buf_f, static_dir)
         log_audit(f">>> RECOMMENDED BLACK CLIP: {noise_val:.6f} <<<")
 
     elif task == 'execute':

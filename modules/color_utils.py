@@ -6,6 +6,7 @@ import os
 import cv2
 import rawpy
 import numpy as np
+import json
 
 def apply_pedestal(img_16bit, clip_val):
     """
@@ -104,7 +105,12 @@ def write_screen_capture(pixels, width, height, static_dir):
     img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
     cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
 
-def measure_noise_floor(buffer_file):
+def measure_noise_floor(buffer_file, static_dir):
+    """
+    Analyzes a dark frame, draws a bounding box for UI feedback,
+    and exports the result to a static JSON for the frontend.
+    """
+    
     if not os.path.exists(buffer_file):
         return 0.0
     
@@ -116,16 +122,39 @@ def measure_noise_floor(buffer_file):
         # Center crop 200x200
         h, w, _ = rgb.shape
         cy, cx = h // 2, w // 2
+
+        # Slice the numpy array to isolate the center patch
         crop = rgb[cy-100:cy+100, cx-100:cx+100]
 
         # Calculate mean intensity and normalize to 0.0 - 1.0 float
         mean_16bit = np.mean(crop)
         noise_float = float(mean_16bit /65535.0)
+
+        # --- PREVIEW GENERATION ---
+        # Convert to BGR for OpenCV Processing
+        img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        # Downscale 16-bit to 8-bit for JPEG saving
+        img_8bit = (img_bgr /256.0).astype(np.uint8)
+
+        # Burn a bright green rectangle to show the user exactly what area was measured
+        # Parameters: image, top-left coord, bottom-right coord, color (BGR), thickness
+        cv2.rectangle(img_8bit, (cx-100, cy-100), (cx+100, cy+100), (0, 255, 0), 2)
+
+        # Export the visual preview for the UI
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img_8bit)
+
+        # Export the numerical result to a dedicated static JSON file
+        out_json = os.path.join(static_dir, "noise_data.json")
+        with open(out_json, "w") as f:
+            json.dump({"measured_noise": noise_float}, f)
+
         return noise_float
+
     except Exception as e:
         print(f"[VOP WARNING] Noise Measurement Error: {e}")
         return 0.0
     finally:
+        # Cleanup routine to prevent tmp folder bloat
         if os.path.exists(buffer_file): os.remove(buffer_file)
         dummy = buffer_file.replace(".dng", ".jpg")
         if os.path.exists(dummy): os.remove(dummy)
