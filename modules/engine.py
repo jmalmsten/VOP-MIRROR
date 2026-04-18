@@ -296,5 +296,9 @@ if __name__ == "__main__":
         run_vop_engine(parser.parse_args().job)
     except Exception as e:
         log_audit(f"CRITICAL ENGINE FAILURE: {e}")
+        import traceback
         traceback.print_exc()
+    finally:
+        # This guarantees the hardware DRM lock is released no matter what happens
+        pygame.quit()
         sys.exit(1)
