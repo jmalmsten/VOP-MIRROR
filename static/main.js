@@ -445,7 +445,7 @@ async function triggerMeasurement() {
             const st = await r.json();
 
             // Check if engine_running has flipped back to false
-            if (!st.engine_running && attempts > 2) {
+            if (!st.status !== 'rendering' && attempts > 2) {
                 clearInterval(pollInterval);
                 
                 // Add a 500ms delay to allow the OS file buffer to write to disk

@@ -2,7 +2,6 @@
 VOP Module:     interpolator.py
 Description:    Timeline state evaluation.
                 Integrated independent ProjBiPack (BP) spatial tracks.
-                Added safe-fallback getters to prevent NoneType math crashes on empty timelines.
 """
 import numpy as np
 

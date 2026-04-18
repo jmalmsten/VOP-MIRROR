@@ -1,6 +1,5 @@
 """
 VOP Module:     vop.py
-Version:        v0.2.15
 Location:       vop.py
 Description:    Main Entry Point. Flask Web Server.               
 """
@@ -50,7 +49,11 @@ def kill_idle_screen():
     # Terminates the Pygame process to free up the hardware framebuffer for the engine.
     global idle_process
     if idle_process is not None and idle_process.poll() is None:
-        idle_process.kill()
+        idle_process.terminate()
+        try:
+            idle_process.wait(timeout=2.0) # Wait up to 2 seconds for clean exit
+        except subprocess.TimeoutExpired:
+            idle_process.kill() # Drop the hammer if it hangs
         idle_process = None
 
 def process_video_ingestion(filepath, target_dir):
@@ -123,7 +126,11 @@ def dispatch_engine(task_type, payload):
         json.dump(payload, f, indent=4)
         
     if engine_process is not None and engine_process.poll() is None:
-        engine_process.kill()
+        engine_process.terminate()
+        try:
+            engine_process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            engine_process.kill()
         
     engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
     engine_process = subprocess.Popen([sys.executable, engine_script, "--job", CURRENT_JOB_FILE])
@@ -289,7 +296,13 @@ def panic():
     # Ensure the idle screen is also terminated on a hard stop command
     kill_idle_screen()
 
-    if engine_process: engine_process.kill()
+    if engine_process and engine_process.poll() is None:
+        engine_process.terminate()
+        try:
+            engine_process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            engine_process.kill()
+            
     subprocess.run(["pkill", "-9", "rpicam-still"])
     return jsonify({"status": "panic_executed"})
 
