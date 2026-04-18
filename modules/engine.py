@@ -171,8 +171,8 @@ def run_vop_engine(job_path):
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
             out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
-            # Pass mono_active and black_clipdown to the stacking sequence
-            cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], mono_active, black_clip)
+            # Pass mono_active, black_clip, and static_dir down to the stacking sequence
+            cutil.process_and_stack_latent_image(buf_f, static_dir, out_f, tiff_flag, st['cg'], mono_active, black_clip)
 
     task = job_data.get('type')
     

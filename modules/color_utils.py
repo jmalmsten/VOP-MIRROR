@@ -61,7 +61,7 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
         
     return True
 
-def process_and_stack_latent_image(buffer_file, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
+def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
     if not os.path.exists(buffer_file): return False
 
     try:
@@ -194,7 +194,7 @@ def apply_hot_pixel_patch(img_16bit, static_dir):
         img_16bit[y_coords, x_coords] = blurred[y_coords, x_coords]
 
         return img_16bit
-    except Except as e:
+    except Exception as e:
         print(f"[VOP WARNING] Hot Pixel Patch Error: {e}")
         return img_16bit
 
