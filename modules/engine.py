@@ -191,7 +191,34 @@ def run_vop_engine(job_path):
         
     elif task == 'cam_preview':
         execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
+    
+    elif task == 'measure_noise':
+        # Grab exposure time based on the current Probe frame
+        probe_f = float(job_data.get('probe_frame', 1))
+        st = timeline.get_state(probe_f)
+        smr_ms = float(st['exp'] * 1000.0)
+        total_ms = smr_ms + 1000.0
+
+        log_audit(f"Measuring Noise Floor | Simulating Frame {probe_f} ({total_ms}ms)")
+
+        # Force pure black to the screen
+        ctx.screen.use()
+        ctx.clear(0.0, 0.0, 0.0, 1.0)
+        pygame.display.flip()
+
+        buf_f = "/tmp/vop_noise_buf.dng"
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                      job_data.get('cam_res', '2028x1520'))
         
+        hw.wait_for_sensor_prime()
+        time.sleep(total_ms / 1000.0) # Wait out the physical exposure time
+        cam_proc.wait()
+
+        # Analyze the result
+        noise_val = cutil.measure_noise_floor(buf_f)
+        log_audit(f">>> RECOMMENDED BLACK CLIP: {noise_val:.6f} <<<")
+
     elif task == 'execute':
         # Fix: Ensure we are calculating based on actual frame count, not frame index
         frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))

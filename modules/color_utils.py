@@ -103,3 +103,29 @@ def write_screen_capture(pixels, width, height, static_dir):
     # Convert RGBA directly down to standard BGR for JPEG saving.
     img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
     cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+
+def measure_noise_floor(buffer_file):
+    if not os.path.exists(buffer_file):
+        return 0.0
+    
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            # Strictly linear 16-bit extraction
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # Center crop 200x200
+        h, w, _ = rgb.shape
+        cy, cx = h // 2, w // 2
+        crop = rgb[cy-100:cy+100, cx-100:cx+100]
+
+        # Calculate mean intensity and normalize to 0.0 - 1.0 float
+        mean_16bit = np.mean(crop)
+        noise_float = float(mean_16bit /65535.0)
+        return noise_float
+    except Exception as e:
+        print(f"[VOP WARNING] Noise Measurement Error: {e}")
+        return 0.0
+    finally:
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
