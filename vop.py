@@ -274,6 +274,13 @@ def execute_seq():
     dispatch_engine('execute', request.json)
     return jsonify({"status": "started"})
 
+@app.route('/measure_noise', methods=['POST'])
+def measure_noise():
+    # Dispatches the 'measure_noise' task to engine.py in a background process
+    dispatch_engine('measure_noise', request.json)
+    # Returns a 200 OK to the Javascript fetch so the UI knows the command was accepted
+    return jsonify({"status": "started"})
+
 @app.route('/panic', methods=['POST'])
 def panic():
     print("[VOP SERVER] ACTION: PANIC STOP")
