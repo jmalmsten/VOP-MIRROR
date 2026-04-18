@@ -1,5 +1,8 @@
 # VOP Release Tracking
 
+## v0.6.3 - (YYYMMDD)
+- Added noise floor measurement and Noise Crush input.
+
 ## v0.6.2 - (20260406)
 
 ### Added
