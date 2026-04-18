@@ -293,7 +293,7 @@ def map_hot_pixels():
     dispatch_engine('map_hot_pixels', request.json)
     return jsonify({"status": "started"})
 
-@app.route('/nuke_hot_pixels', methods="['POST']")
+@app.route('/nuke_hot_pixels', methods=['POST'])
 def nuke_hot_pixels():
     hp_file = os.path.join(BASE_DIR, "static", "hot_pixels.json")
     if os.path.exists(hp_file):
