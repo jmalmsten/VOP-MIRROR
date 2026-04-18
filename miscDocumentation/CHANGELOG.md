@@ -1,7 +1,10 @@
 # VOP Release Tracking
 
 ## v0.6.3 - (YYYMMDD)
-- Added noise floor measurement and Noise Crush input.
+- Added Noise floor measurement
+- Added Noise Crush input
+- Modified version numbering in the GUI title so it only tracks v#.# instead of v#.#.# . I'll still update the third digit in the header of the GUI though. 
+- 
 
 ## v0.6.2 - (20260406)
 
