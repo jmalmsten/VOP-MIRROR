@@ -13,6 +13,8 @@
         <button class="io-btn" onclick="document.getElementById('import_file').click()" title="Load session from JSON">IMPORT JOB</button>
         <input type="file" id="import_file" style="display:none" accept=".json" onchange="importJob(this)">
 
+        <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
+
         <button class="panic-btn" onclick="panic()" title="Stops the VOP in whatever it is doing!">PANIC / ABORT</button>
         <button class="nuke-btn" onclick="nukeMag()" title="Deletes whatever is in the CamMag">NUKE MAG</button>
         <button class="nuke-btn" onclick="nukeJob()" title="Deletes the current_job.json">NUKE JOB</button>
