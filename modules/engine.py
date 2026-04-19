@@ -353,7 +353,7 @@ def run_vop_engine(job_path):
                 if img is not None and img.dtype == np.uint16:
                     # Mathematical Inversion: 65535 is the absolute peak of 16-bit linear space.
                     # Subtracting the pixel value from peak inverts the linear curve.
-                    invert= 65535 - img
+                    inverted = 65535 - img
 
                     # Overwrite the original file with the inverted array
                     cv2.imwrite(filepath, inverted, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
@@ -376,7 +376,7 @@ def run_vop_engine(job_path):
             
             log_audit(f"LAB/INVERT Complete: Processed {total_frames} frames.")
         else:
-            log_audit("LAB/INVERT aaborted: No frames found in CamMag.")
+            log_audit("LAB/INVERT aborted: No frames found in CamMag.")
 
     tex_mgr.release()
     pygame.quit()
