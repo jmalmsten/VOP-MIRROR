@@ -424,9 +424,12 @@ def import_job():
 @app.route('/save_job', methods=['POST'])
 def save_job():
     """Silently updates current_job.json with the UI state without triggering the engine."""
-    payload = request.jsonpayload['vop_version'] = VOP_VERSION
+    payload = request.json
+    payload['vop_version'] = VOP_VERSION
+    
     with open(CURRENT_JOB_FILE, 'w') as f:
         json.dump(payload, f, indent=4)
+        
     return jsonify({"status": "ok"})
         
 if __name__ == '__main__':
