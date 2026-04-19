@@ -37,7 +37,10 @@ __pycache__/
 vop_dump*.txt
 
 # --- Exceptions ---
+# Un-ignore the directories themselves
 !readme_graphics/
-!readme_graphics/branding.png
 !graphics/
+
+# Un-ignore all files within those directories, overriding the global *.jpg/png ignores
+!readme_graphics/*
 !graphics/*
