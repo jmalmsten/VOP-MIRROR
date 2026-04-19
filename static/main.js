@@ -526,3 +526,11 @@ async function nukeHotPixels() {
         document.getElementById('hp_result_txt').style.color = "#f44"; // Turn red to show it's disabled
     }
 }
+
+/* Job Management: Export
+Triggers a browser download of the current_job.json file.
+*/
+function exportJob() {
+    // Standard GET request via window location triggers the Flask send_file download
+    window.location.href = '/export_job';
+}

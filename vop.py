@@ -12,6 +12,7 @@ import cv2
 import glob
 import math
 import socket
+from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
 
 idle_process = None
 
@@ -390,3 +391,18 @@ if __name__ == '__main__':
     launch_idle_screen(port)
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
+# --- Export/Import aka Save/Load jobs! ---
+@app.route('/export_job', methods=['GET'])
+def export_job():
+    """
+    Locates the current session's JSON file and sends it to the browser.
+    The 'as_attachment' parameter triggers a download dialog instead of displaying in-browser.
+    """
+    print("[VOP SERVER] ACTION: EXPORT CURRENT JOB")
+
+    # Verify the file exists before attempting to serve it
+    if os.path.exists(CURRENT_JOB_FILE):
+        return send_file(CURRENT_JOB_FILE, as_attachment=True)
+    
+    return jsonify({"error": "No active job found to export"}, 404)
