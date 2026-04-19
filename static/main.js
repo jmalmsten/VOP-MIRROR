@@ -558,8 +558,15 @@ async function nukeHotPixels() {
 /* Job Management: Export
 Triggers a browser download of the current_job.json file.
 */
-function exportJob() {
-    // Standard GET request via window location triggers the Flask send_file download
+async function exportJob() {
+    // 1. Push the current DOM state to the server first
+    await fetch('/save_job', {
+        method: 'post',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectParams())
+    });
+
+    // 2. Trigger the browser download of the newly updated file
     window.location.href = '/export_job';
 }
 
@@ -579,7 +586,7 @@ async function importJob(input) {
 
         if (data.status === 'ok') {
             if (data.warning) {
-                alert('COMPABILITY WARNING\n\n${data.warning}\n\nSome variables may have changed names or been removed. Verify your keyframes before executing.');
+                alert(`COMPATIBILITY WARNING\n\n${data.warning}\n\nSome variables may have changed names or been removed. Verify your keyframes before executing.`);
             }
 
             // Clear the input so the same file can be selected again if needed
@@ -588,7 +595,7 @@ async function importJob(input) {
             // Force a full page reload to hydrate the DOM with the new JSON data
             window.location.reload();
         } else {
-            alert('Import failed: ${data.error}');
+            alert(`Import failed: ${data.error}`);
             input.value = "";
         }
     } catch (err) {
