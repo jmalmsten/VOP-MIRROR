@@ -356,7 +356,7 @@ def run_vop_engine(job_path):
                     invert= 65535 - img
 
                     # Overwrite the original file with the inverted array
-                    cv.imwrite(filepath, inverted, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+                    cv2.imwrite(filepath, inverted, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
                 
                 # Calculate time estimation for the UI heartbeat
                 elapsed = time.time() - start_t
