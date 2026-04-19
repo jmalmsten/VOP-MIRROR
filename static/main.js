@@ -526,3 +526,46 @@ async function nukeHotPixels() {
         document.getElementById('hp_result_txt').style.color = "#f44"; // Turn red to show it's disabled
     }
 }
+
+/* Job Management: Export
+Triggers a browser download of the current_job.json file.
+*/
+function exportJob() {
+    // Standard GET request via window location triggers the Flask send_file download
+    window.location.href = '/export_job';
+}
+
+/* Job Management: Import
+Uploads a JSON file, replaces current_job.json, and handles version warnings.
+*/
+async function importJob(input) {
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const resp = await fetch('/import_job', { method: 'POST', body: formData});
+        const data = await resp.json();
+
+        if (data.status === 'ok') {
+            if (data.warning) {
+                alert('COMPABILITY WARNING\n\n${data.warning}\n\nSome variables may have changed names or been removed. Verify your keyframes before executing.');
+            }
+
+            // Clear the input so the same file can be selected again if needed
+            input.value = "";
+
+            // Force a full page reload to hydrate the DOM with the new JSON data
+            window.location.reload();
+        } else {
+            alert('Import failed: ${data.error}');
+            input.value = "";
+        }
+    } catch (err) {
+        console.error("Job import error:", err);
+        alert("A network error occurred during import.");
+        input.value = "";
+    }
+}

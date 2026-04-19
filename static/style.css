@@ -583,3 +583,26 @@ hr.section-divider {
     gap: 5px;
     grid-column: span 2; /* Forces this cell to span across two columns to fit the contents */
 }
+
+.io-btn {
+    background:     #111;
+    color:          var(--color-accent);
+    border:         1px solid var(--color-accent);
+    padding:        5px 10px;
+    cursor:         pointer;
+    font-family:    monospace;
+    font-size:      0.9em;
+}
+
+.io-btn:hover {
+    background: var(--color-accent);
+    color: #000;
+}
+
+/* Status Bar Action Buttons Container */
+.status-actions {
+    margin-top:         10px;
+    display:            flex;
+    justify-content:    flex-end;
+    gap:                10px;
+}
