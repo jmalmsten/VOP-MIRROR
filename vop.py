@@ -28,6 +28,7 @@ PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
 PROJ_BIPACK_DIR = os.path.join(BASE_DIR, "ProjBiPack")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
+VOP_VERSION ="0.6.3"
 is_transitioning = False
 
 for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints")]:
@@ -134,6 +135,7 @@ def dispatch_engine(task_type, payload):
     kill_idle_screen()
 
     payload['type'] = task_type
+    payload['vop_version'] = VOP_VERSION # Inject current system version
     with open(CURRENT_JOB_FILE, 'w') as f:
         json.dump(payload, f, indent=4)
         
@@ -386,6 +388,38 @@ def export_job():
     
     # Fix: Ensure the 404 is passed outside the JSON dictionary
     return jsonify({"error": "No active job found to export"}), 404
+
+@app.route('/import_job', methods=['POST'])
+def import_job():
+    print("[VOP SERVER] ACTION: IMPORT JOB")
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    try:
+        # Parse the uploaded file into a dictionary
+        job_data = json.load(file)
+
+        # Check for version mismatches
+        file_version = job_data.get('vop_version', 'legacy/unknown')
+        warning = None
+        if file_version != VOP_VERSION:
+            warning = f"System is v{VOP_VERSION}, but the file is v{file_version}."
+        
+        # Overwrite the current job file
+        with open(CURRENT_JOB_FILE, 'w') as f:
+            json.dump(job_data, f, indent=4)
+        
+        return jsonify({"status": "ok", "warning": warning})
+
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON format."}), 400
+    except Exception as e:
+        print(f"[VOP SERVER] Import Error: {e}")
+        return jsonify({"error": str(e)}), 500
         
 if __name__ == '__main__':
     port = 5000
