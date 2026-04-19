@@ -332,6 +332,52 @@ def run_vop_engine(job_path):
             ]
             log_audit(f"Creating Workprint: {out_mp4}")
             subprocess.run(ffmpeg_cmd)
+    elif task == 'lab_invert':
+        # --- LAB/INVERT Task: Processes all latent frames into negative colors
+        log_audit("Starting LAB/INVERT on CamMag")
+
+        # Grab all TIFFs in the CamMag directory and sort them sequentially
+        tiffs = sorted([f for f in os.listdir(cam_mag_dir) if f.endswith(".tif")])
+        total_frames = len(tiffs)
+
+        if total_frames > 0:
+            # Respect the user's compression preference from the current job state
+            tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
+            start_t = time.time()
+
+            for i, f in enumerate(tiffs):
+                filepath = os.path.join(cam_mag_dir, f)
+
+                # Load the frame natively as a 16-bit unsigned integer array
+                img = cv2.imread(filepath, cv.IMREAD_UNCHANGED)
+                if img is not None and img.dtype == np.uint16:
+                    # Mathematical Inversion: 65535 is the absolute peak of 16-bit linear space.
+                    # Subtracting the pixel value from peak inverts the linear curve.
+                    invert= 65535 - img
+
+                    # Overwrite the original file with the inverted array
+                    cv.imwrite(filepath, inverted, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+                
+                # Calculate time estimation for the UI heartbeat
+                elapsed = time.time() - start_t
+                done = i + 1
+                avg_time = elapsed / done
+                eta_sec = int(avg_time* (total_frames - done))
+
+                # Update the heartbeat file so the web UI progress bar advances
+                with open("/tmp/vop_heartbeat", "w") as hbf:
+                    json.dump({
+                        "current": done,
+                        "total": total_frames,
+                        "eta": eta_sec, 
+                        "est_mb": 0.0, # Not actively generating new file sizes here
+                        "msg": "Processing LAB/INVERT"
+                    }, hbf)
+            
+            log_audit(f"LAB/INVERT Complete: Processed {total_frames} frames.")
+        else:
+            log_audit("LAB/INVERT aaborted: No frames found in CamMag.")
+
     tex_mgr.release()
     pygame.quit()
 

@@ -330,6 +330,13 @@ def nuke_hot_pixels():
         os.remove(hp_file)
     return jsonify({"status": "clear"})
 
+@app.route('/lab_invert', methods=['POST'])
+def lab_invert():
+    # Dispatches the inversion task to the background engine.
+    # This ensures the Flask thread isn't blocked during I/O heavy operations
+    dispatch_engine('lab_invert', request.json)
+    return jsonify({"status": "started"})
+
 @app.route('/panic', methods=['POST'])
 def panic():
     print("[VOP SERVER] ACTION: PANIC STOP")
