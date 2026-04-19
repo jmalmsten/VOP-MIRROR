@@ -375,6 +375,17 @@ def get_ip():
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+# --- Export/Import aka Save/Load jobs! ---
+@app.route('/export_job', methods=['GET'])
+def export_job():
+    print("[VOP SERVER] ACTION: EXPORT CURRENT JOB")
+    if os.path.exists(CURRENT_JOB_FILE):
+        return send_file(CURRENT_JOB_FILE, as_attachment=True)
+    
+    # Fix: Ensure the 404 is passed outside the JSON dictionary
+    return jsonify({"error": "No active job found to export"}), 404
         
 if __name__ == '__main__':
     port = 5000
@@ -392,17 +403,3 @@ if __name__ == '__main__':
 
     app.run(host='0.0.0.0', port=port, debug=False)
 
-# --- Export/Import aka Save/Load jobs! ---
-@app.route('/export_job', methods=['GET'])
-def export_job():
-    """
-    Locates the current session's JSON file and sends it to the browser.
-    The 'as_attachment' parameter triggers a download dialog instead of displaying in-browser.
-    """
-    print("[VOP SERVER] ACTION: EXPORT CURRENT JOB")
-
-    # Verify the file exists before attempting to serve it
-    if os.path.exists(CURRENT_JOB_FILE):
-        return send_file(CURRENT_JOB_FILE, as_attachment=True)
-    
-    return jsonify({"error": "No active job found to export"}, 404)
