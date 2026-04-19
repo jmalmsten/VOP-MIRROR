@@ -420,6 +420,17 @@ def import_job():
     except Exception as e:
         print(f"[VOP SERVER] Import Error: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/save_job', methods=['POST'])
+def save_job():
+    """Silently updates current_job.json with the UI state without triggering the engine."""
+    payload = request.json
+    payload['vop_version'] = VOP_VERSION
+    
+    with open(CURRENT_JOB_FILE, 'w') as f:
+        json.dump(payload, f, indent=4)
+        
+    return jsonify({"status": "ok"})
         
 if __name__ == '__main__':
     port = 5000

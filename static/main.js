@@ -326,6 +326,34 @@ setInterval(async () => {
         const st = await r.json();
         
         if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
+
+            // --- Auto-reconstruct keyframe rows from saved data ---
+            let maxMDS = 0;
+            let maxSSS = 0;
+
+            // 1. Scan the imported parameters to find the highest keyframe index
+            for (const key of Object.keys(st.params)) {
+                if (key.startsWith('mds_f')) {
+                    const idx = parseInt(key.replace('mds_f', ''));
+                    if (idx > maxMDS) maxMDS = idx;
+                }
+                if (key.startsWith('sss_f')) {
+                    const idx = parseInt(key.replace('sss_f', ''));
+                    if (idx > maxSSS) maxSSS = idx;
+                }
+            }
+
+            // 2. Clear out any existing rows to prevent duplicates
+            document.getElementById('mds_sheet_body').innerHTML = '';
+            document.getElementById('sss_sheet_body').innerHTML = '';
+            mdsMasterCount = 0;
+            sssMasterCount = 0;
+
+            // 3. Dynamically build the exact number of empty HTML rows needed
+            for (let i = 0; i < maxMDS; i++) addMDSKeyframe();
+            for (let i = 0; i < maxSSS; i++) addSSSKeyframe();
+
+            // 4. Now that the input fields exist, hydrate them with the saved values
             for (const [k, v] of Object.entries(st.params)) {
                 const el = document.getElementById(k);
                 // Guard: Do not attempt to write values to file inputs
@@ -530,8 +558,15 @@ async function nukeHotPixels() {
 /* Job Management: Export
 Triggers a browser download of the current_job.json file.
 */
-function exportJob() {
-    // Standard GET request via window location triggers the Flask send_file download
+async function exportJob() {
+    // 1. Push the current DOM state to the server first
+    await fetch('/save_job', {
+        method: 'post',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectParams())
+    });
+
+    // 2. Trigger the browser download of the newly updated file
     window.location.href = '/export_job';
 }
 
@@ -551,7 +586,7 @@ async function importJob(input) {
 
         if (data.status === 'ok') {
             if (data.warning) {
-                alert('COMPABILITY WARNING\n\n${data.warning}\n\nSome variables may have changed names or been removed. Verify your keyframes before executing.');
+                alert(`COMPATIBILITY WARNING\n\n${data.warning}\n\nSome variables may have changed names or been removed. Verify your keyframes before executing.`);
             }
 
             // Clear the input so the same file can be selected again if needed
@@ -560,7 +595,7 @@ async function importJob(input) {
             // Force a full page reload to hydrate the DOM with the new JSON data
             window.location.reload();
         } else {
-            alert('Import failed: ${data.error}');
+            alert(`Import failed: ${data.error}`);
             input.value = "";
         }
     } catch (err) {
