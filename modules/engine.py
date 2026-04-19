@@ -22,10 +22,12 @@ import camera_hardware as hw
 import color_utils as cutil
 import graphics_utils as gfx
 
+import traceback
+
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 
 def log_audit(msg): 
-    print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}")
+    print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}", flush=True)
 
 def run_vop_engine(job_path):
     
@@ -48,8 +50,17 @@ def run_vop_engine(job_path):
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 0)
     
+    # Hardware Init: Aggressive KMSDRM lock acquisition
     WIDTH, HEIGHT = 1920, 1080
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+    
+    try:
+        # Attempt 1: Standard grab of the DRM master lock
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+    except pygame.error:
+        # If the idle screen hasn't fully released the lock, wait and try a "Hail Mary"
+        log_audit("Hardware busy, retrying KMSDRM lock in 1s...")
+        time.sleep(1.0)
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
     
     ctx, prog, vao = gfx.init_render_pipeline()
     tex_mgr = gfx.TextureManager(ctx, os.path.join(base_path, "ProjMag"), job_data)
@@ -136,6 +147,10 @@ def run_vop_engine(job_path):
         smr_ms = float(st['exp']) * 1000.0
         total_ms = smr_ms + 1000.0
         
+        # Safely extract the black clip float (defautling to 0.0 if empty)
+        raw_clip = job_data.get('black_clip', 0.0)
+        black_clip = float(raw_clip) if raw_clip != "" else 0.0
+
         log_audit(f"Exposing Frame {frame_num} | Smear: {smr_ms}ms | Shutter Total: {total_ms}ms")
         
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
@@ -160,13 +175,13 @@ def run_vop_engine(job_path):
         cam_proc.wait() 
         
         if is_preview:
-            # Pass mono_active down to the preview generator
-            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active)
+            # Pass mono_active and black_clip down to the preview generator
+            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip)
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
             out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
-            # Pass mono_active down to the stacking sequence
-            cutil.process_and_stack_latent_image(buf_f, out_f, tiff_flag, st['cg'], mono_active)
+            # Pass mono_active, black_clip, and static_dir down to the stacking sequence
+            cutil.process_and_stack_latent_image(buf_f, static_dir, out_f, tiff_flag, st['cg'], mono_active, black_clip)
 
     task = job_data.get('type')
     
@@ -187,7 +202,62 @@ def run_vop_engine(job_path):
         
     elif task == 'cam_preview':
         execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
+    
+    elif task == 'measure_noise':
+        # Grab exposure time based on the current Probe frame
+        probe_f = float(job_data.get('probe_frame', 1))
+        st = timeline.get_state(probe_f)
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
+
+        log_audit(f"Measuring Noise Floor | Simulating Frame {probe_f} ({total_ms}ms)")
+
+        # Force pure black to the screen
+        ctx.screen.use()
+        ctx.clear(0.0, 0.0, 0.0, 1.0)
+        pygame.display.flip()
+
+        buf_f = "/tmp/vop_noise_buf.dng"
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                      job_data.get('cam_res', '2028x1520'))
         
+        hw.wait_for_sensor_prime()
+        time.sleep(total_ms / 1000.0) # Wait out the physical exposure time
+        cam_proc.wait()
+
+        # Analyze the result
+        noise_val = cutil.measure_noise_floor(buf_f, static_dir)
+        log_audit(f">>> RECOMMENDED BLACK CLIP: {noise_val:.6f} <<<")
+    
+    elif task == 'map_hot_pixels':
+        probe_f = float(job_data.get('probe_frame', 1))
+        st = timeline.get_state(probe_f)
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
+
+        log_audit(f"Mapping Hot Pixels | Frame {probe_f} ({total_ms}ms)")
+
+        ctx.screen.use()
+        ctx.clear(0.0, 0.0, 0.0, 1.0)
+        pygame.display.flip()
+
+        buf_f = "/tmp/vop_hp_buf.dng"
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                      job_data.get('cam_res', '2028x1520'))
+        
+        hw.wait_for_sensor_prime()
+        time.sleep(total_ms /1000.0)
+        cam_proc.wait()
+        
+        hp_count = cutil.map_hot_pixels(buf_f, static_dir)
+        if hp_count >= 0:
+            log_audit(f">>> MAPPED {hp_count} HOT PIXELS <<<")
+        else:
+            log_audit(f">>> LENS CAP CHECK FAILED. ABORTED. <<<")
+
+
     elif task == 'execute':
         # Fix: Ensure we are calculating based on actual frame count, not frame index
         frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))
@@ -263,4 +333,9 @@ if __name__ == "__main__":
         run_vop_engine(parser.parse_args().job)
     except Exception as e:
         log_audit(f"CRITICAL ENGINE FAILURE: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # This guarantees the hardware DRM lock is released no matter what happens
+        pygame.quit()
         sys.exit(1)

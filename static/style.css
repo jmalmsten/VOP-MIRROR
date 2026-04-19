@@ -543,3 +543,43 @@ body {
     display: inline-block;
     min-width: 65px; /* keeps the acronyms aligned nicely if they wrap */
 }
+
+/* --- Noise Floor Measurement UI --- */
+
+/* --- Elegant Grid Divider --- */
+hr.section-divider {
+    grid-column:    1 / -1;                         /* Forces the element to span from the first column to the very last */
+    border:         0;                              /* Strips out the ugly default 3D browser borders */
+    border-top:     1px solid var(--border-color);  /* Draws a single, subtle, dark-gray line */
+    margin:         8px 0;                          /* Adds a little vertical breathing room above and below */
+    width:          100%;                           /* Ensures it fills the space completely */
+}
+
+/* Style the output text to look like a digital readout */
+#noise_result_txt, #hp_result_txt {
+    font-family:    monospace;              /* Monospaced font aligns the decimal points cleanly */
+    font-weight:    bold;                   /* Makes the readout pop against the dark UI*/
+    color:          var(--color-accent);    /* Matching standard VOP accent color */
+    margin-left:    8px;                    /* Provides breathing room from the MEASURE button */
+    min-width:      80px;                   /* Reserves fixed space so the UI doesn't jumpwhen switching from "WAIT..." to numbers */
+    display:        inline-block;           /* Allows the span to respect the min-width and margin properties */
+}
+
+/* Shrink the number input field to comfortably fit the button and readout on the same line */
+#black_clip {
+    width:  75px;
+}
+
+/* Ensure the parent container groups them tightly in a row */
+.const-group:has(#black_clip) {
+    display:        flex;       /* Activates flexbox layout */
+    align-items:    center;     /* Vertically centers the label, input button, and text */
+    gap:            5px;        /* Sets consistent spacing bbetween the elements */
+}
+
+.crush-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    grid-column: span 2; /* Forces this cell to span across two columns to fit the contents */
+}
