@@ -2,11 +2,11 @@
 
 This whole project is vibe-coded by arguing with google Gemini and it only barely runs on my prototype setup. At this moment I cannot take any responsibility for whatever setup you have or provide real guidance if you cannot replicate my results. This is my first big project with Python and Flask. I am learning this as I am going along. 
 
-Again. IF YOU BRICK ANYTHING USING CODE HERE I CANNOT HELP YOU!
+Again. **IF YOU BRICK ANYTHING USING CODE HERE I CANNOT HELP YOU!**
 
-Also. This README is long as heck but I do know I have left out some very fundamental things. Mostly because I haven't gotten around to it yet. And also, this is my first public repo. I claim ignorance if I do not know what I am not putting on here. 
+And also, this is my first public repo. I claim ignorance if I do not know what I am not putting on here. 
 
-Also. If you think the code is a mess. I claim ignorance. Most (if not all) of this is VibeCoded with Google Gemini. I have tried policing its output. But I... well... I just wouldn't know bad code if I saw it. 
+If you think the code is a mess. I claim ignorance. Most (if not all) of this is VibeCoded with Google Gemini. I have tried policing its output. But I... well... I just wouldn't know bad code if I saw it. 
 
 So. Once again...
 
@@ -17,6 +17,15 @@ So. Once again...
 # VOP
 
 ## Release Notes:
+
+## v0.6.3 - (YYYMMDD)
+
+- Added Noise floor measurement
+- Added Noise Crush input
+- Modified version numbering in the GUI title so it only tracks v#.# instead of v#.#.# . I'll still update the third digit in the header of the GUI though. 
+- Added update to the preview to show what pixels are measured with the noise measurement function.
+- Added Hot Pixel Fixer that measures hot pixels and replaces those pixels in post. 
+
 ## v0.6.2 - (20260406)
 
 ### Added
@@ -52,18 +61,16 @@ If you are interested in older ones starting from v0.6.0. You can visit [jmalmst
 - Moved the force_full_rgb.sh script to CaliTools/FullRGBFix/ to clean up the root
 - Added ffmpeg_metadata.txt to .gitignore to clean out unnecessary file.
 
-#### Fixed
-
 ## Archived Release Notes:
-If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
-=======
+- If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+
 ### v0.6.0 - "The Great unification project"
 This finally brings together the separate SSS and MDS versions that grew into their own branches because of issues with AI coding drift. The only real casualty being the rudimentary JK Step Printing stuff I had put in the SSS fork because I need to actually get progress done with the unification and the JK stuff was always more of a bonus thing. It will come for realsies... but later. 
 
 This also brings me to the numbering scheme of the versions. I am taking that control back from the LLM. And therefore I need to say that whatever it may say in the files somewhere. From this day. This version. Is v0.6.0. And history for realsies... starts here. 
 
 I will also start putting the release notes on my website so if you want the older ones starting from today. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
->>>>>>> origin/main
+
 
 ## Description
 The VOP is a combination of hardware and software to make a tool that mimics several real world old tools used for animation, compositing and optical printing. 
@@ -84,7 +91,8 @@ The real fun however starts when we start moving the image on the screen during 
 
 We (soon) can even feed it a video source using the optical printer functionality and with the bipacks we can mask out areas that we don't want to be exposed and then feed it some other artwork that's smeared and put it on the unexposed areas. 
 
-Once one start to grasp all the things these seemingly simple tools can do, a lot of very strange outputs can be possible. 
+**Once one start to grasp all the things these seemingly simple tools can do, a lot of very strange outputs can be possible.**
+
 ---
 ### TECHNICAL THINGS IT DOES
 The VOP is built to be operated like an optical printer. And it uses certain philosophies to get there. 
@@ -128,7 +136,8 @@ The **"disadvantage"** is that once the new exposure is added to the latent imag
 ### Who is this intended to be used by?
 Mainly... me. I'm just putting this on a public repo in case someone out there stumbles upon it and wants to explore this particular workflow. Also. I am also open for suggestions on how to make this work better without sacrificing the intended workflow. 
 
-In short. If you want to try out making video the way motion pictures used to make things before computers arrived. Then have a go with using the VOP. 
+**In short. If you want to try out making video the way motion pictures used to make things before computers arrived. Then have a go with using the VOP.**
+
 ---
 ## Installation
 Check the Wiki for current instructions that should work. At least, it has worked for me. 
