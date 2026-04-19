@@ -27,11 +27,11 @@
                     <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
                 </div>
                 <div class="probe-controls" style="margin-top:10px;">
-                    <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
-                    <button class="action-btn cam_preview" onclick="runTask('cam_preview')">Cam View</button>
+                    <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
+                    <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
                     <hr class="section-divider">
                     <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
-                    <button class="action-btn execute" onclick="runTask('execute')">Execute Sequence</button>
+                    <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
                 </div>
             </div>
 
