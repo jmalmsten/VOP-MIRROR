@@ -171,7 +171,7 @@ def run_vop_engine(job_path):
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
                 
             pygame.display.flip()
-        g
+        
         cam_proc.wait() 
         
         if is_preview:
