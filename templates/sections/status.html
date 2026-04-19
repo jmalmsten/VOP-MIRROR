@@ -5,30 +5,20 @@
         <div class="status-bar-progress">
             <div id="st_bar" class="progress-bar"></div>
         </div>
+        <span id="st_eta"></span>
+    </div>
+    
+    <div class="status-actions" style="margin-top: 10px; display: flex; gap: 10px;">
+        <button class="io-btn" onclick="exportJob()" title="Export current session to JSON">EXPORT JOB</button>
+        <button class="io-btn" onclick="document.getElementById('import_file').click()" title="Load session from JSON">IMPORT JOB</button>
+        <input type="file" id="import_file" style="display:none" accept=".json" onchange="importJob(this)">
 
-        <div class="control-deck">
-            <div class="status-meta">
-                <span id="st_msg" class="status-text">IDLE</span>
-                
-                <div class="status-bar-progress">
-                    <div id="st_bar" class="progress-bar"></div>
-                </div>
-                <span id="st_eta"></span>
-            </div>
-            
-            <div class="status-actions" style="margin-top: 10px; display: flex; gap: 10px;">
-                <button class="io-btn" onclick="exportJob()" title="Export current session to JSON">EXPORT JOB</button>
-                <button class="io-btn" onclick="document.getElementById('import_file').click()" title="Load session from JSON">IMPORT JOB</button>
-                <input type="file" id="import_file" style="display:none" accept=".json" onchange="importJob(this)">
-
-                <button class="panic-btn" onclick="panic()" title="Stops the VOP in whatever it is doing!">PANIC / ABORT</button>
-                <button class="nuke-btn" onclick="nukeMag()" title="Deletes whatever is in the CamMag">NUKE MAG</button>
-                <button class="nuke-btn" onclick="nukeJob()" title="Deletes the current_job.json">NUKE JOB</button>
-            </div>
-        
-            <div class="workprint-zone">
-                <a id="wp_download" href="#" style="display:none;" class="download-link"></a>
-            </div>
-        </div>
+        <button class="panic-btn" onclick="panic()" title="Stops the VOP in whatever it is doing!">PANIC / ABORT</button>
+        <button class="nuke-btn" onclick="nukeMag()" title="Deletes whatever is in the CamMag">NUKE MAG</button>
+        <button class="nuke-btn" onclick="nukeJob()" title="Deletes the current_job.json">NUKE JOB</button>
+    </div>
+ 
+    <div class="workprint-zone">
+        <a id="wp_download" href="#" style="display:none;" class="download-link"></a>
     </div>
 </div>
