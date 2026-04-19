@@ -1,0 +1,3542 @@
+================================================================================
+PROJECT CONTEXT DUMP: VOP (Virtual Optical Printer)
+GENERATED: Sun Apr 19 12:37:04 PM CEST 2026
+BRANCH: nightly
+================================================================================
+
+
+PROJECT STRUCTURE INDEX:
+  - CaliTools/FullRGBFix/force_full_rgb.sh
+  - CaliTools/instructions.md
+  - CaliTools/vop_setup_align.py
+  - configs/default_job.json
+  - dump.sh
+  - miscDocumentation/CHANGELOG.md
+  - miscDocumentation/installation.md
+  - modules/camera_hardware.py
+  - modules/color_utils.py
+  - modules/engine.py
+  - modules/graphics_utils.py
+  - modules/idle_screen.py
+  - modules/interpolator.py
+  - modules/vop_math.py
+  - README.md
+  - run_vop.sh
+  - static/main.js
+  - static/style.css
+  - templates/index.html
+  - templates/sections/cheat-sheet.html
+  - templates/sections/mds-xsheet.html
+  - templates/sections/sss-xsheet.html
+  - templates/sections/status.html
+  - vop.py
+
+
+--------------------------------------------------------------------------------
+START_FILE: CaliTools/FullRGBFix/force_full_rgb.sh
+--------------------------------------------------------------------------------
+#!/bin/bash
+# VOP Utility: Force HDMI-A-1 to Full RGB (0-255)
+# This overrides the Limited Range (16-235) default on Pi 5
+# Please see the Wiki for instructions on how to implement
+# this fix.
+/usr/bin/kmstest -c HDMI-A-1 -P "Broadcast RGB=1" < /dev/null
+
+
+END_FILE: CaliTools/FullRGBFix/force_full_rgb.sh
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: CaliTools/instructions.md
+--------------------------------------------------------------------------------
+1. Run this in terminal on desktop: 
+ffplay -i tcp://0.0.0.0:5555?listen -fflags nobuffer+discardcorrupt -flags low_delay -probesize 32 -analyzeduration 0 -sync ext -vf "setpts=0, drawbox=x=iw*0.1-15:y=ih*0.1-15:w=30:h=30:c=green, drawbox=x=iw*0.9-15:y=ih*0.1-15:w=30:h=30:c=green, drawbox=x=iw*0.1-15:y=ih*0.9-15:w=30:h=30:c=green, drawbox=x=iw*0.9-15:y=ih*0.9-15:w=30:h=30:c=green"
+
+2. Navigate the terminal to the CaliTools folder (where you found these instructions). Then run this on the Pi to get the video feed from the pi to the desktop
+python3 vop_setup_align.py
+
+3. Align the crosshairs on the HDMI screen to match with the boxes in the camera's output feed. That ensures the camera is square on the monitor. 
+
+4. Adjust focus so you get the moire-effect from the focus target in the middle. 
+
+If all works well, it should be aligned and in focus. 
+
+END_FILE: CaliTools/instructions.md
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: CaliTools/vop_setup_align.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     vop_setup_align_v0.0.15.py
+Version:        v0.0.15
+Description:    Low-latency alignment. Uses all-intra frames for zero lag.
+"""
+import os, sys, time, subprocess, numpy as np
+import moderngl, pygame
+
+# --- STATIC CONFIG ---
+PI_IP = "192.168.2.3"
+DESKTOP_IP = "192.168.2.8"
+PORT = "5555"
+
+def prepare_system():
+    subprocess.run("sudo killall -q -9 rpicam-vid rpicam-still 2>/dev/null", shell=True)
+    subprocess.run("sudo chvt 7", shell=True)
+    os.environ.pop("XDG_RUNTIME_DIR", None)
+    os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
+    os.environ["SDL_VIDEO_KMSDRM_DEVICE"] = "/dev/dri/card0"
+    if "DISPLAY" in os.environ: del os.environ["DISPLAY"]
+
+def start_stream():
+    print(f"3. Connecting to Desktop at {DESKTOP_IP}:{PORT}...")
+    # --intra 1: Every frame is a keyframe (Zero latency seeking)
+    # --inline: Keeps headers in every packet
+    cmd = [
+        "sudo", "rpicam-vid", "-t", "0", "--inline", 
+        "--width", "1280", "--height", "720",
+        "--framerate", "30", "--codec", "h264", 
+        "--profile", "baseline", "--intra", "1", "--inline",
+        "-o", f"tcp://{DESKTOP_IP}:{PORT}"
+    ]
+    return subprocess.Popen(cmd)
+
+# --- SHADERS (Targets & Focus) ---
+VERTEX_SHADER = """
+#version 300 es
+in vec2 in_v; in vec2 in_t; out vec2 v_tex;
+void main() { gl_Position = vec4(in_v, 0.0, 1.0); v_tex = in_t; }
+"""
+FRAGMENT_SHADER = """
+#version 300 es
+precision highp float;
+in vec2 v_tex; out vec4 f_col;
+void main() {
+    vec2 uv = v_tex; float c = 0.0;
+    vec2 c_uv = (uv - 0.5) * 2.0; float d = length(c_uv);
+    if (d < 0.35) {
+        float a = atan(c_uv.y, c_uv.x);
+        c = step(0.0, sin(a * 64.0)) * smoothstep(0.01, 0.04, d);
+    }
+    float t = 0.0015; float l = 0.04; vec2 i = vec2(0.1); 
+    bool h = (abs(uv.x-i.x)<t && abs(uv.y-i.y)<l) || (abs(uv.x-(1.0-i.x))<t && abs(uv.y-i.y)<l) ||
+             (abs(uv.x-i.x)<t && abs(uv.y-(1.0-i.y))<l) || (abs(uv.x-(1.0-i.x))<t && abs(uv.y-(1.0-i.y))<l);
+    bool v = (abs(uv.y-i.y)<t && abs(uv.x-i.x)<l) || (abs(uv.y-(1.0-i.y))<t && abs(uv.x-i.x)<l) ||
+             (abs(uv.y-i.y)<t && abs(uv.x-(1.0-i.x))<l) || (abs(uv.y-(1.0-i.y))<t && abs(uv.x-(1.0-i.x))<l);
+    if (h || v) c = 1.0;
+    f_col = vec4(vec3(c), 1.0);
+}
+"""
+
+def run():
+    prepare_system()
+    stream_proc = start_stream()
+    pygame.init()
+    try:
+        pygame.display.set_mode((1920, 1080), pygame.OPENGL | pygame.FULLSCREEN)
+        pygame.mouse.set_visible(False)
+        ctx = moderngl.create_context(require=300)
+    except Exception as e:
+        print(f"SDL Error: {e}"); stream_proc.terminate(); pygame.quit(); sys.exit(1)
+
+    vbo = ctx.buffer(np.array([-1,-1,0,0, 1,-1,1,0, -1,1,0,1, 1,1,1,1], 'f4'))
+    prog = ctx.program(vertex_shader=VERTEX_SHADER, fragment_shader=FRAGMENT_SHADER)
+    vao = ctx.vertex_array(prog, [(vbo, '2f 2f', 'in_v', 'in_t')], mode=moderngl.TRIANGLE_STRIP)
+
+    print("\n✅ ALIGNMENT TOOL LIVE.")
+    running = True
+    while running:
+        for ev in pygame.event.get():
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_q: running = False
+        ctx.clear(0,0,0); vao.render(); pygame.display.flip()
+        time.sleep(0.01)
+    
+    stream_proc.terminate(); pygame.quit(); subprocess.run("sudo chvt 1", shell=True)
+
+if __name__ == "__main__": run()
+
+END_FILE: CaliTools/vop_setup_align.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: configs/default_job.json
+--------------------------------------------------------------------------------
+{
+    "fov": "45",
+    "cam_res": "2028x1520",
+    "fps": "24",
+    "gain": "1.0",
+    "awb_r": "3.18",
+    "awb_b": "1.45",
+    "fit_z": "-1.0",
+    "coord_scale": "1.0",
+    "image": "",
+    "smear_mode": "SSS",
+    "mds_f1": "1",
+    "mds_m1": "S",
+    "mds_p1": "0,0,-1.0",
+    "mds_r1": "0,0,0",
+    "mds_s1": "1.0",
+    "mds_start_p1": "0,0,0",
+    "mds_start_r1": "0,0,0",
+    "mds_start_c1_hex": "#ffffff",
+    "mds_start_cg1_hex": "#ffffff",
+    "mds_stop_p1": "0,0,0",
+    "mds_stop_r1": "0,0,0",
+    "mds_stop_c1_hex": "#ffffff",
+    "mds_stop_cg1_hex": "#ffffff",
+    "sss_p1": "0,0,-1.0"
+}
+
+END_FILE: configs/default_job.json
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: dump.sh
+--------------------------------------------------------------------------------
+#!/bin/bash
+# v1.4.0 - Project context aggregator for LLM synchronization.
+# Removes Markdown fencing to ensure NotebookLM parses the full file content.
+
+# 1. Generate timestamped filename
+TIMESTAMP=$(date +"%Y%m%d_%H%M")
+OUTPUT_FILE="vop_dump_${TIMESTAMP}.txt"
+
+# 2. Create the dump file
+> "$OUTPUT_FILE"
+
+# 3. Define the file types to include
+INCLUDES=(-name "*.py" -o -name "*.js" -o -name "*.css" -o -name "*.html" -o -name "*.sh" -o -name "*.md" -o -name "*.json")
+
+# 4. Define directories to exclude
+EXCLUDES=(-path "*/.*" -o -path "*__pycache__*" -o -path "*node_modules*" -o -path "*venv*" -o -path "*env*" -o -path "./CamMag*" -o -path "./ProjMag*" -o -path "./WorkPrints*" -o -path "./ProjBiPack*")
+
+# 5. Header Section
+echo "================================================================================" >> "$OUTPUT_FILE"
+echo "PROJECT CONTEXT DUMP: VOP (Virtual Optical Printer)" >> "$OUTPUT_FILE"
+echo "GENERATED: $(date)" >> "$OUTPUT_FILE"
+echo "BRANCH: $(git branch --show-current 2>/dev/null || echo 'N/A')" >> "$OUTPUT_FILE"
+echo "================================================================================" >> "$OUTPUT_FILE"
+echo -e "\n" >> "$OUTPUT_FILE"
+
+# 6. Architectural Index (Plain Text)
+echo "PROJECT STRUCTURE INDEX:" >> "$OUTPUT_FILE"
+find . -type f \( "${INCLUDES[@]}" \) -not \( "${EXCLUDES[@]}" \) | sort | sed 's|^\./|  - |' >> "$OUTPUT_FILE"
+echo -e "\n" >> "$OUTPUT_FILE"
+
+# 7. Process Files with clear text-based delimiters
+find . -type f \( "${INCLUDES[@]}" \) -not \( "${EXCLUDES[@]}" \) | sort | while read -r file;
+do
+    clean_path="${file#./}"
+    
+    echo "--------------------------------------------------------------------------------" >> "$OUTPUT_FILE"
+    echo "START_FILE: $clean_path" >> "$OUTPUT_FILE"
+    echo "--------------------------------------------------------------------------------" >> "$OUTPUT_FILE"
+    
+    # Dump raw content without any markdown backticks
+    cat "$file" >> "$OUTPUT_FILE"
+    
+    echo -e "\n" >> "$OUTPUT_FILE"
+    echo "END_FILE: $clean_path" >> "$OUTPUT_FILE"
+    echo "--------------------------------------------------------------------------------" >> "$OUTPUT_FILE"
+    echo -e "\n\n" >> "$OUTPUT_FILE"
+done
+
+echo "================================================================================" >> "$OUTPUT_FILE"
+echo "EOF - END OF PROJECT DUMP" >> "$OUTPUT_FILE"
+echo "================================================================================" >> "$OUTPUT_FILE"
+
+echo "Success: $OUTPUT_FILE generated (Plain Text Mode)."
+
+
+END_FILE: dump.sh
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: miscDocumentation/CHANGELOG.md
+--------------------------------------------------------------------------------
+# VOP Release Tracking
+
+## v0.6.3 - (YYYMMDD)
+- Added Noise floor measurement
+- Added Noise Crush input
+- Modified version numbering in the GUI title so it only tracks v#.# instead of v#.#.# . I'll still update the third digit in the header of the GUI though. 
+- Added update to the preview to show what pixels are measured with the noise measurement function.
+- Added Hot Pixel Fixer that measures hot pixels and replaces those pixels in post. 
+
+## v0.6.2 - (20260406)
+
+### Added
+- Added run_vop.sh to simplify starting the vop
+- Added the DVD-screensaver for when the VOP is idle
+- Added drop-zones to file uploads to circumvent any browser-related hangs when a folder disappears."
+
+## V0.6.1 - (20260404)
+
+### Added
+- Created 'Documentation' directory for project tracking.
+- Added tutorials to the wiki both for first installation of VOP and fullRGB fix.
+
+### Changed
+- Moved the force_full_rgb.sh script to CaliTools/FullRGBFix/ to clean up the root
+- Added ffmpeg_metadata.txt to .gitignore to clean out unnecessary file.
+
+### Fixed
+
+
+END_FILE: miscDocumentation/CHANGELOG.md
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: miscDocumentation/installation.md
+--------------------------------------------------------------------------------
+A detailed continuously updated instruction of the steps I have successfully used to install the VOP on my Pi can be found in the wiki. 
+
+[installation](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
+
+
+END_FILE: miscDocumentation/installation.md
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/camera_hardware.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     camera_hardware.py
+Version:        v0.0.8
+Description:    Subprocess execution and timing for the IMX477 sensor.
+                Restored: --raw flag and dummy JPEG logic.
+"""
+import subprocess
+import time
+import os
+
+def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x1520"):
+    """
+    Executes rpicam-still in an independent parallel process.
+    The total_ms includes a 1000ms padding (500ms black header + 500ms black tail).
+    """
+    
+    # THE CRITICAL FIX: The RAW DNG Quirks
+    # rpicam-still requires a "primary" output file to attach the RAW data to.
+    dummy_jpg = output_path.replace(".dng", ".jpg")
+    
+    # Calculate the physical shutter duration in microseconds, subtracting the 1000ms padding.
+    shutter_us = int((total_ms - 1000) * 1000)
+    
+    cmd = [
+        "rpicam-still",
+        "--immediate",
+        "--shutter", str(shutter_us),
+        "--gain", str(gain),
+        "--awbgains", f"{awb_r},{awb_b}",
+        "--denoise", "off",
+        "-n",
+        "--width", resolution.split('x')[0],
+        "--height", resolution.split('x')[1],
+        "--raw", 
+        "-o", dummy_jpg
+    ]
+    
+    return subprocess.Popen(cmd)
+
+def wait_for_sensor_prime():
+    """
+    Blocks execution for 700ms to accommodate the sensor initialization offset.
+    This prevents the projector from flashing the smear before the camera is listening.
+    """
+    time.sleep(0.7)
+
+END_FILE: modules/camera_hardware.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/color_utils.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     color_utils.py
+Description:    16-bit linear workspace modifications and latent image accumulation.
+"""
+import os
+import cv2
+import rawpy
+import numpy as np
+import json
+
+def apply_pedestal(img_16bit, clip_val):
+    """
+    Subtracts the noise floor pedestal in a float 32 workspace to prevent underflow,
+    then clips at zero and returns to uint16.
+    """
+
+    if clip_val <= 0.0:
+        return img_16bit
+    
+    int_threshold = int(clip_val * 65535)
+    img_f = img_16bit.astype(np.float32)
+    img_f = np.clip(img_f - int_threshold, 0, 65535)
+    return img_f.astype(np.uint16)
+
+def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, black_clip=0.0):
+    if not os.path.exists(buffer_file): return False
+
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # --- Patch defective pixels immediately ---
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+        
+        # 1. Apply the Pedestal subtraction
+        rgb = apply_pedestal(rgb, black_clip)
+
+        # 2. Convert from RGB to BGR for OpenCV
+        img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+        # Downscale to 8-bit for the preview JPEG AFTER the high-precision math
+        img = (img / 256.0).astype(np.uint8)
+        
+        # Mono stripping logic here for previews
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+    
+    except Exception as e:
+        print(f"[VOP WARNING] Processing Error: {e}")
+
+    finally:
+        # Added finally block so cleanup happens even if something crashes
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+        
+    return True
+
+def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
+    if not os.path.exists(buffer_file): return False
+
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # --- Patch defective pixels immediately ---
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+    
+        # 1. Apply the pedestal subtraction
+        rgb = apply_pedestal(rgb, black_clip)
+
+        # 2. Convert from RGB to BGR for OpenCV
+        img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        
+        if mono_forced:
+            # Exploit monochrome clarity by stripping color before tinting
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        
+        # Now apply the CG tint (cam_gel_rgb)
+        gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # Check to see if file already exists
+        if os.path.exists(output_file):
+            existing = cv2.imread(output_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                img = cv2.add(img, existing.astype(np.uint16))
+
+        cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+
+    except Exception as e:
+        print(f"[VOP WARNING] Processing Error: {e}")
+
+    finally:
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+    return True
+
+def write_screen_capture(pixels, width, height, static_dir):
+    # CRITICAL FIX: Process the raw RGBA (4-channel) byte buffer from ModernGL.
+    img = np.frombuffer(pixels, dtype=np.uint8).reshape((height, width, 4))
+    img = np.flipud(img)
+    # Convert RGBA directly down to standard BGR for JPEG saving.
+    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+    cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+
+def measure_noise_floor(buffer_file, static_dir):
+    """
+    Analyzes a dark frame, draws a bounding box for UI feedback,
+    and exports the result to a static JSON for the frontend.
+    """
+    
+    if not os.path.exists(buffer_file):
+        return 0.0
+    
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            # Strictly linear 16-bit extraction
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # Center crop 200x200
+        h, w, _ = rgb.shape
+        cy, cx = h // 2, w // 2
+
+        # Slice the numpy array to isolate the center patch
+        crop = rgb[cy-100:cy+100, cx-100:cx+100]
+
+        # Calculate mean intensity and normalize to 0.0 - 1.0 float
+        mean_16bit = np.mean(crop)
+        noise_float = float(mean_16bit /65535.0)
+
+        # --- PREVIEW GENERATION ---
+        # Convert to BGR for OpenCV Processing
+        img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        # Downscale 16-bit to 8-bit for JPEG saving
+        img_8bit = (img_bgr /256.0).astype(np.uint8)
+
+        # Burn a bright green rectangle to show the user exactly what area was measured
+        # Parameters: image, top-left coord, bottom-right coord, color (BGR), thickness
+        cv2.rectangle(img_8bit, (cx-100, cy-100), (cx+100, cy+100), (0, 255, 0), 2)
+
+        # Export the visual preview for the UI
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img_8bit)
+
+        # Export the numerical result to a dedicated static JSON file
+        out_json = os.path.join(static_dir, "noise_data.json")
+        with open(out_json, "w") as f:
+            json.dump({"measured_noise": noise_float}, f)
+
+        return noise_float
+
+    except Exception as e:
+        print(f"[VOP WARNING] Noise Measurement Error: {e}")
+        return 0.0
+    finally:
+        # Cleanup routine to prevent tmp folder bloat
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+
+def apply_hot_pixel_patch(img_16bit, static_dir):
+    """
+    Reads the hot pixel map and replaces defective pixels with the median of their neighbors.
+    Uses cv2.medianBlur and numpy indexing for near-instant C++ execution speed.
+    """
+
+    hp_file = os.path.join(static_dir, "hot_pixels.json")
+    if not os.path.exists(hp_file):
+        return img_16bit
+    
+    try:
+        with open(hp_file, 'r') as f:
+            data = json.load(f)
+        
+        if "pixels" not in data or not data["pixels"]:
+            return img_16bit
+        
+        # Extract coordinates
+        pts = np.array(data["pixels"])
+        y_coords = pts[:, 0]
+        x_coords = pts[:, 1]
+
+        # Apply a 3x3 median blur to a copy of the image.
+        blurred = cv2.medianBlur(img_16bit, 3)
+
+        # Overwrite ONLY the defective pixels on the original image with the blurred pixels
+        img_16bit[y_coords, x_coords] = blurred[y_coords, x_coords]
+
+        return img_16bit
+    except Exception as e:
+        print(f"[VOP WARNING] Hot Pixel Patch Error: {e}")
+        return img_16bit
+
+def map_hot_pixels(buffer_file, static_dir):
+    """
+    Scans a dark frame for anomalies and saves coordinates to JSON.
+    If it detects too many hot pixels ( > 0.5% of sensor), it assumes the lens cap is off.
+    """
+    if not os.path.exists(buffer_file): return -1
+
+    try:
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+        
+        # Convert to grayscale to measure pure intensity
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+
+        # Calculate the mathematical noise floor and standard deviation
+        mean_val, std_val = cv2.meanStdDev(gray)
+        mean_val, std_val = mean_val[0][0], std_val[0][0]
+
+        # A hot pixel is anything 10 standard deviations above the noise floor
+        # We also set a hard minimum (1000) so a perfectly clean, pitch black frame doesn't trigger false positives
+        threshold = max(mean_val + (10 * std_val), 1000)
+
+        # Fine coordinates where intensity exceeds threshold
+        y_coords, x_coords = np.where(gray > threshold)
+        hp_count = len(y_coords)
+        out_json = os.path.join(static_dir, "hot_pixels.json")
+
+        if hp_count > 15000:
+            with open(out_json, "w") as f:
+                json.dump({"error": "LENS CAP OFF?", "pixels": []}, f)
+            return  -1
+
+        # Convert to a standard Python list of [y, x] pairs for JSON serialization
+        pixels_list = [[int(y), int(x)] for y, x in zip(y_coords, x_coords)]
+
+        with open(out_json, "w") as f:
+            json.dump({"error": None, "pixels": pixels_list}, f)
+        
+        return hp_count
+    except Exception as e:
+        print(f"[VOP WARNING] Mapping Error: {e}")
+        return -1
+    finally:
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+
+
+
+END_FILE: modules/color_utils.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/engine.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     engine.py
+Version:        v0.1.9
+Description:    Multiplicative Dual-World Engine.
+                Forces GLES 3.0 profile prior to display initialization.
+                Added contextual dark gray background for UI previews to visualize frustum bounds.
+"""
+import os
+import sys
+import json
+import time
+import argparse
+import subprocess
+import pygame
+import numpy as np
+import moderngl
+import cv2
+
+import interpolator
+import vop_math as vmath
+import camera_hardware as hw
+import color_utils as cutil
+import graphics_utils as gfx
+
+import traceback
+
+os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
+
+def log_audit(msg): 
+    print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}", flush=True)
+
+def run_vop_engine(job_path):
+    
+    with open(job_path, 'r') as f: 
+        job_data = json.load(f)
+    
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    static_dir = os.path.join(base_path, "static")
+    cam_mag_dir = os.path.join(base_path, "CamMag")
+    wp_dir = os.path.join(base_path, "WorkPrints")
+    
+    timeline = interpolator.Timeline(job_data)
+    
+    log_audit(f"Engine Starting | Job: {job_path} | Mode: {timeline.mode.upper()}")
+
+    pygame.init()
+    pygame.mouse.set_visible(False)
+    
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_ES)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
+    pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 0)
+    
+    # Hardware Init: Aggressive KMSDRM lock acquisition
+    WIDTH, HEIGHT = 1920, 1080
+    
+    try:
+        # Attempt 1: Standard grab of the DRM master lock
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+    except pygame.error:
+        # If the idle screen hasn't fully released the lock, wait and try a "Hail Mary"
+        log_audit("Hardware busy, retrying KMSDRM lock in 1s...")
+        time.sleep(1.0)
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+    
+    ctx, prog, vao = gfx.init_render_pipeline()
+    tex_mgr = gfx.TextureManager(ctx, os.path.join(base_path, "ProjMag"), job_data)
+
+    # Initializing mono_mode
+    mono_active = (job_data.get('mono_mode') == True)
+    prog['mono_mode'].value = mono_active
+
+    # Create an off-screen FBO for the BiPack layer to render into its own void
+    bp_tex = ctx.texture((WIDTH, HEIGHT), 4)
+    bp_fbo = ctx.framebuffer(color_attachments=[bp_tex])
+    
+    mag_scale = float(job_data.get('coord_scale', 1.0))
+    bp_scale = float(job_data.get('bipack_coord_scale', 1.0))
+
+    def render_dual_world(frame_num, t_norm, is_preview=False):
+        if timeline.mode == 'mds':
+            st = timeline.get_mds_state(float(frame_num), t_norm)
+        else:
+            st_base = timeline.get_state(frame_num)
+            t_start = frame_num - (st_base['sd'] * st_base['ph'])
+            t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
+            st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
+
+        ph_val = timeline.calculate_playhead_at(frame_num)
+        
+        tex_mag, asp_mag = tex_mgr.load(ph_val, is_bipack=False)
+        tex_bp, asp_bp = tex_mgr.load(ph_val, is_bipack=True)
+
+        bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
+        
+        # --- PASS 1: RENDER BIPACK INTO OFF-SCREEN FBO ---
+        bp_fbo.use()
+
+        if tex_bp == tex_mgr.white_tex:
+            # Bypass logic: If no BiPack is loaded, flood the FBO with pure white.
+            # Because we later do a multiplicative blend, pure white is 100% transparent.
+            # We skip the vao.render() entirely so keyframe data is ignored.
+            bp_fbo.clear(1.0, 1.0, 1.0, 1.0)
+        else:
+            # Normal logic: Clear to black (opaque) and render the mask.
+            bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
+
+            mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
+                                                st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+            prog['mvp'].write(mvp_bp)
+            prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+            tex_bp.use(0)
+            vao.render(moderngl.TRIANGLE_STRIP)
+
+        # --- PASS 2: RENDER MAG TO THE ACTUAL SCREEN ---
+        ctx.screen.use()
+        ctx.clear(*bg_color)
+
+        if tex_mag == tex_mgr.white_tex:
+            # Bypass logic: If no ProjMag image is loaded, force an Identity Matrix.
+            # This makes the 1x1 white texture act as an infinite, unmoving backlight,
+            # completely ignoring any leftover position/rotation keyframes.
+            mvp_mag = np.eye(4, dtype='f4').tobytes()
+        else:
+            # Normal logic: Calculate the frustum matrix based on keyframes.
+            mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, mag_scale,
+                                                   st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
+        
+        prog['mvp'].write(mvp_mag)
+        prog['filter_color'].write(st['pg'].astype('f4'))
+        tex_mag.use(0)
+        vao.render(moderngl.TRIANGLE_STRIP)
+        
+        # --- PASS 3: MULTIPLY THE FBO OVER THE SCREEN ---
+        ctx.enable(moderngl.BLEND)
+        ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
+
+        # Use a flat Identity Matrix to force the FBO quad to cover the entire screen
+        prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+        prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+        bp_tex.use(0)
+        vao.render(moderngl.TRIANGLE_STRIP)
+
+        ctx.disable(moderngl.BLEND)
+
+    def execute_exposure(frame_num, is_preview=False):
+        st = timeline.get_state(frame_num)
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
+        
+        # Safely extract the black clip float (defautling to 0.0 if empty)
+        raw_clip = job_data.get('black_clip', 0.0)
+        black_clip = float(raw_clip) if raw_clip != "" else 0.0
+
+        log_audit(f"Exposing Frame {frame_num} | Smear: {smr_ms}ms | Shutter Total: {total_ms}ms")
+        
+        buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
+        
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0), 
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
+        
+        hw.wait_for_sensor_prime()
+
+        anchor = time.time()
+        while (time.time() - anchor) * 1000 < total_ms:
+            elapsed = (time.time() - anchor) * 1000
+            
+            if 500.0 <= elapsed <= (500.0 + smr_ms):
+                t_norm = (elapsed - 500.0) / max(1.0, smr_ms)
+                render_dual_world(frame_num, t_norm, is_preview=False)
+            else:
+                ctx.clear(0.0, 0.0, 0.0, 1.0)
+                
+            pygame.display.flip()
+        
+        cam_proc.wait() 
+        
+        if is_preview:
+            # Pass mono_active and black_clip down to the preview generator
+            cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip)
+        else:
+            tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
+            out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
+            # Pass mono_active, black_clip, and static_dir down to the stacking sequence
+            cutil.process_and_stack_latent_image(buf_f, static_dir, out_f, tiff_flag, st['cg'], mono_active, black_clip)
+
+    task = job_data.get('type')
+    
+    if task == 'preview':
+        # Pass is_preview=True to get the dark gray background
+        render_dual_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
+        ctx.finish()
+        
+        raw_bytes = ctx.screen.read(components=4)
+        img_data = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((HEIGHT, WIDTH, 4))
+        img_data = cv2.flip(img_data, 0)
+        img_data = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
+        
+        out_file = os.path.join(static_dir, "probe_live.jpg")
+        cv2.imwrite(out_file, img_data)
+        
+        pygame.display.flip()
+        
+    elif task == 'cam_preview':
+        execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
+    
+    elif task == 'measure_noise':
+        # Grab exposure time based on the current Probe frame
+        probe_f = float(job_data.get('probe_frame', 1))
+        st = timeline.get_state(probe_f)
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
+
+        log_audit(f"Measuring Noise Floor | Simulating Frame {probe_f} ({total_ms}ms)")
+
+        # Force pure black to the screen
+        ctx.screen.use()
+        ctx.clear(0.0, 0.0, 0.0, 1.0)
+        pygame.display.flip()
+
+        buf_f = "/tmp/vop_noise_buf.dng"
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                      job_data.get('cam_res', '2028x1520'))
+        
+        hw.wait_for_sensor_prime()
+        time.sleep(total_ms / 1000.0) # Wait out the physical exposure time
+        cam_proc.wait()
+
+        # Analyze the result
+        noise_val = cutil.measure_noise_floor(buf_f, static_dir)
+        log_audit(f">>> RECOMMENDED BLACK CLIP: {noise_val:.6f} <<<")
+    
+    elif task == 'map_hot_pixels':
+        probe_f = float(job_data.get('probe_frame', 1))
+        st = timeline.get_state(probe_f)
+        smr_ms = float(st['exp']) * 1000.0
+        total_ms = smr_ms + 1000.0
+
+        log_audit(f"Mapping Hot Pixels | Frame {probe_f} ({total_ms}ms)")
+
+        ctx.screen.use()
+        ctx.clear(0.0, 0.0, 0.0, 1.0)
+        pygame.display.flip()
+
+        buf_f = "/tmp/vop_hp_buf.dng"
+        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                      job_data.get('cam_res', '2028x1520'))
+        
+        hw.wait_for_sensor_prime()
+        time.sleep(total_ms /1000.0)
+        cam_proc.wait()
+        
+        hp_count = cutil.map_hot_pixels(buf_f, static_dir)
+        if hp_count >= 0:
+            log_audit(f">>> MAPPED {hp_count} HOT PIXELS <<<")
+        else:
+            log_audit(f">>> LENS CAP CHECK FAILED. ABORTED. <<<")
+
+
+    elif task == 'execute':
+        # Fix: Ensure we are calculating based on actual frame count, not frame index
+        frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))
+        if frames:
+            f_start, f_end = int(min(frames)), int(max(frames))
+            total_frames = f_end - f_start + 1
+            start_t = time.time()
+            total_size_bytes = 0
+            files_found = 0
+            
+            # --- INITIAL HEARTBEAT BEFORE LOOP ---
+            with open("/tmp/vop_heartbeat", "w") as hbf:
+                json.dump({
+                    "current": 0,
+                    "total": total_frames,
+                    "eta": 0,
+                    "est_mb": 0.0,
+                    "msg": "PRIMING SENSOR..."
+                }, hbf)
+
+            for f in range(f_start, f_end + 1):
+                execute_exposure(f)
+                done = f - f_start + 1
+
+                # 1. Time Estimation (Remaining)
+                elapsed = time.time() - start_t
+                avg_time = elapsed / done
+                eta_sec = int(avg_time * (total_frames - done))
+
+                # 2. File Size Estimation (Total Project Size)
+                out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
+                if os.path.exists(out_f):
+                    total_size_bytes += os.path.getsize(out_f)
+                    files_found += 1
+                
+                # Calculate avg based only on files we've successfully measured
+                avg_size = total_size_bytes / max(1, files_found)
+                # We project the total final size of the whole job
+                total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
+
+                with open("/tmp/vop_heartbeat", "w") as hbf:
+                    json.dump({
+                        "current": done,        # Proper 0-100% progress
+                        "total": total_frames,
+                        "eta": eta_sec,
+                        "est_mb": round(total_proj_est_mb, 1),
+                        "msg": "EXPOSING"
+                    }, hbf)
+
+            # --- POST-PROCESS: GENERATE WORKPRINT MP4 ---
+            # Once the frame sequence is fully written to disk, we wrap the TIFFs into a h.264 mp4.
+            ts = int(time.time())
+            out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
+
+            # We use the 'glob' pattern type to gather all exposures in the CamMag directory.
+            # libx264 + yuv420p ensures the resulting video is playable in all modern browsers.
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-framerate", str(job_data.get('fps', 24)),
+                "-pattern_type", "glob", "-i", os.path.join(cam_mag_dir, "*.tif"),
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                out_mp4
+            ]
+            log_audit(f"Creating Workprint: {out_mp4}")
+            subprocess.run(ffmpeg_cmd)
+    tex_mgr.release()
+    pygame.quit()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--job", required=True)
+    try:
+        run_vop_engine(parser.parse_args().job)
+    except Exception as e:
+        log_audit(f"CRITICAL ENGINE FAILURE: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # This guarantees the hardware DRM lock is released no matter what happens
+        pygame.quit()
+        sys.exit(1)
+
+END_FILE: modules/engine.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/graphics_utils.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     graphics_utils.py
+Description:    GL Pipeline management.
+                Enforces #version 300 es and overrides ModernGL's default 330 requirement.
+                Added vertical flip to OpenCV image loading to match OpenGL texture coords.
+"""
+import moderngl
+import numpy as np
+import os
+import cv2
+
+def init_render_pipeline():
+    vert = """
+    #version 300 es
+    layout (location = 0) in vec2 in_vert;
+    layout (location = 1) in vec2 in_tex;
+    uniform mat4 mvp;
+    out vec2 v_tex;
+    void main() {
+        gl_Position = mvp * vec4(in_vert, 0.0, 1.0);
+        v_tex = in_tex;
+    }
+    """
+    
+    frag = """
+    #version 300 es
+    precision mediump float;
+    uniform sampler2D TexUnit;
+    uniform vec3 filter_color;
+    uniform bool mono_mode; // <-- Added the uniform receiver
+    
+    in vec2 v_tex;
+    out vec4 f_color;
+    
+    void main() {
+        vec4 tex_col = texture(TexUnit, v_tex);
+        
+        // <-- Convert to grayscale if the toggle is active
+        if (mono_mode) {
+            float gray = dot(tex_col.rgb, vec3(0.299, 0.587, 0.114));
+            tex_col.rgb = vec3(gray);
+        }
+        
+        f_color = tex_col * vec4(filter_color, 1.0);
+    }
+    """
+    
+    ctx = moderngl.create_context(require=300)
+    prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
+    
+    # Initialize the mono uniform to a safe default
+    if 'mono_mode' in prog:
+        prog['mono_mode'].value = False
+
+    verts = np.array([
+        -1.0,  1.0, 0.0, 1.0,
+         1.0,  1.0, 1.0, 1.0,
+        -1.0, -1.0, 0.0, 0.0,
+         1.0, -1.0, 1.0, 0.0
+    ], dtype='f4')
+    
+    vbo = ctx.buffer(verts)
+    vao = ctx.vertex_array(prog, [(vbo, '2f 2f', 'in_vert', 'in_tex')])
+    
+    return ctx, prog, vao
+
+class TextureManager:
+    def __init__(self, ctx, proj_dir, job_data):
+        self.ctx = ctx
+        self.proj_dir = proj_dir
+        self.bp_dir = os.path.join(os.path.dirname(proj_dir), "ProjBiPack")
+        self.cache = {}
+        
+        white = np.ones((1,1,3), dtype='uint8') * 255
+        self.white_tex = ctx.texture((1,1), 3, white.tobytes())
+
+    def load(self, playhead, is_bipack=False):
+        dir_path = self.bp_dir if is_bipack else self.proj_dir
+        if not os.path.exists(dir_path): 
+            return self.white_tex, 1.777
+            
+        files = sorted([f for f in os.listdir(dir_path) if f.lower().endswith(('.png','.jpg','.tif','.tiff'))])
+        if not files: 
+            return self.white_tex, 1.777
+            
+        idx = max(0, min(len(files)-1, int(playhead)))
+        f_path = os.path.join(dir_path, files[idx])
+        
+        if f_path in self.cache: 
+            return self.cache[f_path]
+        """
+        The default cv2.imread automatically strips the alpha channel 
+        during the read process, turning transparent pixels into pure 
+        white (255, 255, 255). Adding cv2.IMREAD_UNCHANGED forces OpenCV 
+        to pull the raw 4-channel (BGRA) data into memory if it is a PNG.
+        """
+        img = cv2.imread(f_path, cv2.IMREAD_UNCHANGED)  
+        if img is None: 
+            return self.white_tex, 1.777
+
+        # Multiply alpha into RGB to force transparent pixels to black (0,0,0)
+        if len(img.shape) == 3 and img.shape[2] == 4: # Checks if a 4th channel actually exists (so JPEGs don't crash).
+            alpha_mask = img[:, :, 3] / 255.0 # Normalizes the 0-255 alpha values into a 0.0 to 1.0 multiplier.
+            for c in range(3): # The for loop multiplies the Blue, Green, and Red channels by that mask. If a pixel is fully transparent (alpha 0.0), its RGB values become 0 (Black).
+                img[:,:,c] = (img[:, :, c] * alpha_mask).astype(np.uint8)
+            # Slice off the 4th channel to return strictly BGR for the pipeline
+            img = img[:, :, :3] # permanently deletes the alpha channel from the array so your OpenGL texture logic (self.ctx.texture) remains strictly 3-channel RGB, maintaining physical optical printer constraints.
+
+        h, w = img.shape[:2]
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # CRITICAL FIX: Flip image vertically to align OpenCV (0,0 top-left) 
+        # with OpenGL (0,0 bottom-left) texture coordinates
+        img = cv2.flip(img, 0)
+        
+        tex = self.ctx.texture((w, h), 3, img.tobytes())
+        self.cache[f_path] = (tex, w/h)
+        return tex, w/h
+
+    def release(self):
+        for t, a in self.cache.values(): 
+            t.release()
+        self.white_tex.release()
+
+END_FILE: modules/graphics_utils.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/idle_screen.py
+--------------------------------------------------------------------------------
+#!/usr/bin/env python3
+# VOP Idle Screen
+# Location:     modules/idle_screen.py
+# Description:  A fun little idle screen animation that should be running when the VOP HDMI screen is not being used.
+
+import pygame
+import os
+import sys
+import socket
+
+# Force Pygame to bypass X11 and use the hardware framebuffer
+os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8",80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def main():
+    # Explicitly initialize the display module to catch the REAL error
+    try:
+        pygame.display.init()
+    except pygame.error as e:
+        print(f"\n[CRITICAL ERROR] SDL2 Video Subsystem Failed: {e}")
+        print("Check KMSDRM permissions or device availability.\n")
+        sys.exit(1)
+
+    pygame.font.init()
+        
+    # Auto-detect resolution
+    infoObject = pygame.display.Info()
+    screen_w = infoObject.current_w
+    screen_h = infoObject.current_h
+
+    # Create the hardware display surface
+    screen = pygame.display.set_mode((screen_w, screen_h), pygame.FULLSCREEN)
+
+    # Hiding the mouse after the display context exists
+    pygame.mouse.set_visible(False)
+
+    BLACK = (0, 0, 0)
+    WHITE = (255, 255, 255)
+    
+    # Find the graphic in the graphics folder one level up.
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    img_path = os.path.join(base_dir, "graphics", "branding.png")
+
+    try:
+        logo = pygame.image.load(img_path).convert_alpha()
+    except FileNotFoundError:
+        print(f"Error: Could not load branding at {img_path}")
+        sys.exit(1)
+    
+    logo_w, logo_h = logo.get_rect().size
+
+    # Initial vectors
+    x, y = 100, 100
+    dx, dy = 3, 3
+
+    sys_font = pygame.font.SysFont("monospace", 36, bold=True)
+    ip_addr = get_local_ip()
+    port = sys.argv[1] if len(sys.argv) > 1 else "5000"
+    telemetry_text = sys_font.render(f"VOP ENGINE | {ip_addr}:{port}", True, WHITE)
+
+    # --- UNIFIED BOUNDING BOX CALCULATION --- #
+    # Retrieve dimensions of the rendered text surface
+
+    text_w = telemetry_text.get_width()
+    text_h = telemetry_text.get_height()
+    padding = 20 # Pixels of vertical space between the logo and the text
+
+    # Calculate the local physical dimensions required to hold both elements
+    # The width is dictated by whichever element is wider
+    box_w = max(logo_w, text_w)
+    # The height is the sum of both elements plus the padding
+    box_h = logo_h + padding + text_h
+    
+    clock = pygame.time.Clock()
+    running = True
+    
+    while running:
+        screen.fill(BLACK)
+
+        # Update the top-left coordinate of the unified bounding box
+        x += dx
+        y += dy
+
+        # DVD Bounce Collision
+        # Evaluated against the combined width and height to prevent either element from clipping
+        if x <= 0 or (x + box_w) >= screen_w:
+            dx *= -1
+        if y <= 0 or (y + box_h) >= screen_h:
+            dy *= -1
+
+        # Calculate the internal rendering coordinates for the logo
+        # Centers the logo horizontally inside the bounding box
+        logo_draw_x = x + (box_w - logo_w) // 2
+        logo_draw_y = y
+
+        # Calculate the internal rendering coordinates for the text
+        # Centers the text horizontally below the logo
+        text_draw_x = x + (box_w - text_w) // 2
+        text_draw_y = y + logo_h + padding
+
+        # Draw elements to the buffer at their computed offsets
+        screen.blit(logo, (logo_draw_x,logo_draw_y))
+        screen.blit(telemetry_text, (text_draw_x, text_draw_y))
+
+        pygame.display.flip()
+        clock.tick(60)
+if __name__ == "__main__":
+    main()
+
+END_FILE: modules/idle_screen.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/interpolator.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     interpolator.py
+Description:    Timeline state evaluation.
+                Integrated independent ProjBiPack (BP) spatial tracks.
+"""
+import numpy as np
+
+def hex_to_rgb(h):
+    h = h.lstrip('#')
+    return np.array([int(h[i:i+2], 16)/255.0 for i in (0, 2, 4)], dtype='f4')
+
+def ensure_vec3(arr_str, default_z=0.0):
+    try:
+        parts = arr_str.split(',') if isinstance(arr_str, str) else arr_str
+        vals = [float(x) for x in parts]
+        if len(vals) == 0: return np.array([0.0, 0.0, default_z], dtype='f4')
+        if len(vals) == 1: return np.array([vals[0], 0.0, default_z], dtype='f4')
+        if len(vals) == 2: return np.array([vals[0], vals[1], default_z], dtype='f4')
+        return np.array(vals[:3], dtype='f4')
+    except:
+        return np.array([0.0, 0.0, default_z], dtype='f4')
+
+def linear_to_oklab(rgb):
+    m1 = np.array([[0.41222, 0.53633, 0.05145], [0.21190, 0.68071, 0.10740], [0.08830, 0.28172, 0.62998]], dtype='f4')
+    m2 = np.array([[0.21045, 0.79362, -0.00407], [1.97799, -2.42860, 0.45060], [0.02590, 0.78277, -0.80867]], dtype='f4')
+    lms = np.dot(m1, rgb)
+    return np.dot(m2, np.cbrt(np.maximum(lms, 0)))
+
+def oklab_to_linear(lab):
+    m1_inv = np.array([[1.0, 0.39633, 0.21580], [1.0, -0.10556, -0.06385], [1.0, -0.08948, -1.29148]], dtype='f4')
+    m2_inv = np.array([[4.07674, -3.30771, 0.23097], [-1.26843, 2.60975, -0.34131], [-0.00419, -0.70347, 1.70760]], dtype='f4')
+    return np.clip(np.dot(m2_inv, np.dot(m1_inv, lab) ** 3), 0.0, 1.0)
+
+class Timeline:
+    def __init__(self, job_data):
+        self.job = job_data
+        
+        # Added 'm' to track Interpolation Mode (S/L)
+        self.tracks = {
+            'm': [], 'pos': [], 'rot': [], 'bp_pos': [], 'bp_rot': [], 'pg': [], 'cg': [], 
+            'exp': [], 'sd': [], 'ph': [], 'src': [], 'stp': [],
+            'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
+            'start_bp_p': [], 'stop_bp_p': [], 'start_bp_r': [], 'stop_bp_r': [],
+            'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
+        }
+        
+        self.mode = job_data.get('smear_mode', 'SSS').lower()
+        prefix = "mds_" if self.mode == 'mds' else "sss_"
+        
+        row_ids = set()
+        for k in job_data.keys():
+            if k.startswith(prefix + "f"):
+                idx = k.replace(prefix + "f", "")
+                if idx.isdigit(): row_ids.add(idx)
+
+        def require_float(key, fallback_if_unsubmitted=None):
+            """
+            Strict float parser.
+            This explicitly raises a ValueError with the exact UI element ID.
+            vop.py catches this exception, prints it to the terminal, and halts the engine cleanly.
+            """
+            # If the key wasn't submitted in the JSON at all, permit the fallback.
+            if key not in job_data and fallback_if_unsubmitted is not None:
+                return float(fallback_if_unsubmitted)
+                
+            raw = job_data.get(key)
+            
+            # If the user explicitly left the input box blank ("") or it evaluates to None
+            if raw == "" or raw is None:
+                raise ValueError(f"Input '{key}' is empty! Halting execution. Please provide a value.")
+                
+            try:
+                return float(raw)
+            except ValueError:
+                raise ValueError(f"Input '{key}' contains invalid data: '{raw}'. Must be a number.")
+
+        for idx in sorted(list(row_ids), key=int):
+
+            # f_val can still use safe_f or require_float, but since it dictates the loop, we ensure it's strictly parsed
+            f_val = require_float(f"{prefix}f{idx}")
+            
+            # Extract Interpolation Mode (S = Smooth, L = Linear)
+            self.tracks['m'].append({'f': f_val, 'val': job_data.get(f"{prefix}m{idx}", "S")})
+            
+            self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}p{idx}", "0,0,-1.0"), -1.0)})
+            self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}r{idx}", "0,0,0"), 0.0)})
+            self.tracks['bp_pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_p{idx}", "0,0,-1.0"), -1.0)})
+            self.tracks['bp_rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_r{idx}", "0,0,0"), 0.0)})
+            
+            self.tracks['pg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}c{idx}_hex", "#ffffff"))})
+            self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}cg{idx}_hex", "#ffffff"))})
+            
+            # --- THESE LINES ENFORCE STRICT PARSING ---
+            exp_key = f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}"
+            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
+            self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
+            self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
+            
+            # src and stp use the fallback arguments since they aren't always present in the standard UI
+            self.tracks['src'].append({'f': f_val, 'val': require_float(f"{prefix}src{idx}", -1.0)})
+            self.tracks['stp'].append({'f': f_val, 'val': require_float(f"{prefix}stp{idx}", 1.0)})
+
+            # MDS Start/Stop offsets (Ignored during SSS execution)
+            self.tracks['start_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"))})
+            self.tracks['stop_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_p{idx}", "0,0,0"))})
+            self.tracks['start_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_r{idx}", "0,0,0"))})
+            self.tracks['stop_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_r{idx}", "0,0,0"))})
+            
+            self.tracks['start_bp_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp_p{idx}", "0,0,0"))})
+            self.tracks['stop_bp_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp_p{idx}", "0,0,0"))})
+            self.tracks['start_bp_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp_r{idx}", "0,0,0"))})
+            self.tracks['stop_bp_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp_r{idx}", "0,0,0"))})
+
+            self.tracks['start_c'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}start_c{idx}_hex", "#ffffff"))})
+            self.tracks['stop_c'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}stop_c{idx}_hex", "#ffffff"))})
+            self.tracks['start_cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}start_cg{idx}_hex", "#ffffff"))})
+            self.tracks['stop_cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}stop_cg{idx}_hex", "#ffffff"))})
+
+        for track in self.tracks.values():
+            track.sort(key=lambda x: x['f'])
+
+    def _get_interp_mode(self, t):
+        """Helper to find if the current interval is set to Smooth ('S') or Linear ('L')"""
+        m_track = self.tracks.get('m', [])
+        if not m_track: return 'S'
+        
+        # Find the interpolation mode of the keyframe immediately preceding or equal to 't'
+        for i in range(len(m_track) - 1):
+            if m_track[i]['f'] <= t < m_track[i+1]['f']:
+                return m_track[i]['val']
+        return m_track[-1]['val']
+
+    def _get_val(self, key, t, is_color=False):
+        track = self.tracks.get(key, [])
+        if not track: return None
+        if t <= track[0]['f']: return track[0]['val']
+        if t >= track[-1]['f']: return track[-1]['val']
+        
+        for i in range(len(track) - 1):
+            if track[i]['f'] <= t <= track[i+1]['f']:
+                k1, k2 = track[i], track[i+1]
+                break
+                
+        # Base Linear Alpha (0.0 to 1.0 representing percentage traversed between k1 and k2)
+        alpha = (t - k1['f']) / (k2['f'] - k1['f'])
+        
+        # SSS Core Interpolation Logic:
+        # If the origin keyframe is 'S' (Smooth), apply Cosine Easing.
+        # This transforms the linear ramp into an S-curve, ensuring zero velocity 
+        # at the exact moment of the keyframe, producing fluid motion without mechanical stops.
+        if self.mode == 'sss':
+            if self._get_interp_mode(k1['f']) == 'S':
+                alpha = (1.0 - np.cos(alpha * np.pi)) / 2.0
+                
+        if is_color:
+            return oklab_to_linear(linear_to_oklab(k1['val']) + (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
+        return k1['val'] + (k2['val'] - k1['val']) * alpha
+
+    def get_state(self, t):
+        """
+        SSS Time Domain Mapping:
+        In SSS mode, 't' is not a whole integer, it is a fractional frame decimal.
+        engine.py calculates this 't' continuously during the physical exposure loop based on:
+        
+        1. SD (Shutter Duration): Multiplier of the standard frame interval. 
+           (e.g., SD = 1.0 means shutter is open for a full 1/24th distance, SD = 0.5 means half distance).
+        2. PH (Playhead Phase): Offsets the center point of the exposure. 
+           (e.g., PH = 0.5 centers the exposure symmetrically on the frame number. PH = 0.0 pushes the exposure to start exactly AT the frame number).
+           
+        This continuous 't' is passed to _get_val(), which smoothly interpolates absolute positions.
+        """
+        if not any(self.tracks.values()): return self.get_default_state()
+        
+        def safe_val(key, default_arr):
+            v = self._get_val(key, t)
+            return v if v is not None else default_arr
+            
+        def safe_col(key, default_arr):
+            v = self._get_val(key, t, True)
+            return v if v is not None else default_arr
+
+        # Checks for None explicitly so that 0.0 is passed through correctly
+        def safe_float(key, default_val):
+            v = self._get_val(key, t)
+            return float(v) if v is not None else default_val
+
+        return {
+            'p': safe_val('pos', np.array([0, 0, -1.0], dtype='f4')), 
+            'r': safe_val('rot', np.array([0, 0, 0], dtype='f4')),
+            'bp_p': safe_val('bp_pos', np.array([0, 0, -1.0], dtype='f4')), 
+            'bp_r': safe_val('bp_rot', np.array([0, 0, 0], dtype='f4')),
+            # Local offsets (lp/lr) are held at zero during SSS execution.
+            'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
+            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
+            'pg': safe_col('pg', np.array([1, 1, 1], dtype='f4')), 
+            'cg': safe_col('cg', np.array([1, 1, 1], dtype='f4')),
+
+            'exp': safe_float('exp', 1.0),
+            'sd': safe_float('sd', 1.0),
+            'ph': safe_float('ph', 0.5)
+        }
+
+    def get_mds_state(self, frame_num, t_norm):
+        if not any(self.tracks.values()): return self.get_default_state()
+        
+        st_base = self.get_state(frame_num)
+        
+        def safe_val(key, default_arr):
+            v = self._get_val(key, frame_num)
+            return v if v is not None else default_arr
+            
+        def safe_col(key, default_arr):
+            v = self._get_val(key, frame_num, True)
+            return v if v is not None else default_arr
+            
+        lp = safe_val('start_p', np.zeros(3,'f4')) + (safe_val('stop_p', np.zeros(3,'f4')) - safe_val('start_p', np.zeros(3,'f4'))) * t_norm
+        lr = safe_val('start_r', np.zeros(3,'f4')) + (safe_val('stop_r', np.zeros(3,'f4')) - safe_val('start_r', np.zeros(3,'f4'))) * t_norm
+        
+        lbp_p = safe_val('start_bp_p', np.zeros(3,'f4')) + (safe_val('stop_bp_p', np.zeros(3,'f4')) - safe_val('start_bp_p', np.zeros(3,'f4'))) * t_norm
+        lbp_r = safe_val('start_bp_r', np.zeros(3,'f4')) + (safe_val('stop_bp_r', np.zeros(3,'f4')) - safe_val('start_bp_r', np.zeros(3,'f4'))) * t_norm
+        
+        pg_start = safe_col('start_c', np.array([1,1,1],'f4'))
+        pg_stop = safe_col('stop_c', np.array([1,1,1],'f4'))
+        pg_val = oklab_to_linear(linear_to_oklab(pg_start) + (linear_to_oklab(pg_stop) - linear_to_oklab(pg_start)) * t_norm)
+        
+        cg_start = safe_col('start_cg', np.array([1,1,1],'f4'))
+        cg_stop = safe_col('stop_cg', np.array([1,1,1],'f4'))
+        cg_val = oklab_to_linear(linear_to_oklab(cg_start) + (linear_to_oklab(cg_stop) - linear_to_oklab(cg_start)) * t_norm)
+        
+        return {
+            'p': st_base['p'], 'r': st_base['r'], 'lp': lp, 'lr': lr,
+            'bp_p': st_base['bp_p'], 'bp_r': st_base['bp_r'], 'lbp_p': lbp_p, 'lbp_r': lbp_r,
+            'pg': pg_val, 'cg': cg_val, 'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
+        }
+
+    def get_default_state(self):
+        return {
+            'p': np.array([0, 0, -1.0], dtype='f4'), 'r': np.array([0, 0, 0], dtype='f4'),
+            'bp_p': np.array([0, 0, -1.0], dtype='f4'), 'bp_r': np.array([0, 0, 0], dtype='f4'),
+            'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
+            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
+            'pg': np.array([1, 1, 1], dtype='f4'), 'cg': np.array([1, 1, 1], dtype='f4'),
+            'exp': 1.0, 'sd': 1.0, 'ph': 0.5
+        }
+
+    def calculate_playhead_at(self, target_frame):
+        src_track = self.tracks.get('src', [])
+        if not src_track: return 0.0
+        anchor_val, anchor_frame = 0.0, 1
+        for k in reversed(src_track):
+            if k['f'] <= target_frame and k['val'] >= 0:
+                anchor_val, anchor_frame = k['val'], k['f']
+                break
+        if target_frame > anchor_frame:
+            for f in range(int(anchor_frame), int(target_frame)):
+                anchor_val += self._get_val('stp', f)
+        return anchor_val
+
+END_FILE: modules/interpolator.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: modules/vop_math.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     vop_math.py
+Version:        v0.1.2
+Description:    Centralized matrix projection logic.
+                Stripped dynamic frustum fitting. Geometry scale is now strictly 
+                driven by the static world_scale argument.
+"""
+import numpy as np
+from pyrr import Matrix44
+
+def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_rot, local_pos, local_rot, width, height):
+    # 1. Perspective Projection Matrix
+    # Defines the viewing volume based on the active FOV.
+    proj = Matrix44.perspective_projection(float(fov), width/height, 0.1, 1000.0)
+    
+    # 2. Physical Geometry Scale
+    # Base geometry is 1.0 units high. Width is defined by the image aspect ratio.
+    # Multiplying by world_scale dictates the absolute physical size of the quad in 3D space.
+    s_x = aspect_ratio * float(world_scale)
+    s_y = 1.0 * float(world_scale)
+    s_z = float(world_scale) 
+    
+    scale_mat = Matrix44.from_scale([s_x, s_y, s_z])
+    
+    # 3. Child Transform (Local Smear Space)
+    loc_rot_x = Matrix44.from_x_rotation(np.radians(float(local_rot[0]) * 360.0))
+    loc_rot_y = Matrix44.from_y_rotation(np.radians(float(local_rot[1]) * 360.0))
+    loc_rot_z = Matrix44.from_z_rotation(np.radians(float(local_rot[2]) * 360.0))
+    loc_trans = Matrix44.from_translation(local_pos)
+    local_mat = loc_trans * (loc_rot_z * loc_rot_y * loc_rot_x)
+    
+    # 4. Parent Transform (Global Master Space)
+    mst_rot_x = Matrix44.from_x_rotation(np.radians(float(master_rot[0]) * 360.0))
+    mst_rot_y = Matrix44.from_y_rotation(np.radians(float(master_rot[1]) * 360.0))
+    mst_rot_z = Matrix44.from_z_rotation(np.radians(float(master_rot[2]) * 360.0))
+    mst_trans = Matrix44.from_translation(master_pos)
+    master_mat = mst_trans * (mst_rot_z * mst_rot_y * mst_rot_x)
+    
+    # 5. Model Matrix Compilation & Final MVP
+    model_mat = master_mat * local_mat * scale_mat
+    mvp = proj * model_mat
+    
+    return mvp.astype('f4').tobytes()
+
+END_FILE: modules/vop_math.py
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: README.md
+--------------------------------------------------------------------------------
+# **DISCLAIMER!!!**
+
+This whole project is vibe-coded by arguing with google Gemini and it only barely runs on my prototype setup. At this moment I cannot take any responsibility for whatever setup you have or provide real guidance if you cannot replicate my results. This is my first big project with Python and Flask. I am learning this as I am going along. 
+
+Again. IF YOU BRICK ANYTHING USING CODE HERE I CANNOT HELP YOU!
+
+Also. This README is long as heck but I do know I have left out some very fundamental things. Mostly because I haven't gotten around to it yet. And also, this is my first public repo. I claim ignorance if I do not know what I am not putting on here. 
+
+Also. If you think the code is a mess. I claim ignorance. Most (if not all) of this is VibeCoded with Google Gemini. I have tried policing its output. But I... well... I just wouldn't know bad code if I saw it. 
+
+So. Once again...
+
+**RUN THIS CODE ON YOUR OWN HARDWARE ON YOUR OWN RISK!!!**
+
+![VOP Logo with a colorful streak](readme_graphics/vop-smear-logo-001.jpg)
+---
+# VOP
+
+## Release Notes:
+## v0.6.2 - (20260406)
+
+### Added
+- Added run_vop.sh to simplify starting the vop
+- Added the DVD-screensaver for when the VOP is idle
+- Added drop-zones to file uploads to circumvent any browser-related hangs when a folder disappears."
+  
+#### Fixed
+---
+## Archived Release Notes:
+If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+
+
+### V0.6.1 - (20260404) - "Changes to for the installation tutorial
+#### Added
+
+- Created 'Documentation' directory for project tracking.
+- Added tutorials to the wiki both for first installation of VOP and fullRGB fix.
+
+#### Changed
+
+- Moved the force_full_rgb.sh script to CaliTools/FullRGBFix/ to clean up the root
+- Added ffmpeg_metadata.txt to .gitignore to clean out unnecessary file.
+
+### V0.6.1 - (20260404) - "Changes to for the installation tutorial
+#### Added
+
+- Created 'Documentation' directory for project tracking.
+- Added tutorials to the wiki both for first installation of VOP and fullRGB fix.
+
+#### Changed
+
+- Moved the force_full_rgb.sh script to CaliTools/FullRGBFix/ to clean up the root
+- Added ffmpeg_metadata.txt to .gitignore to clean out unnecessary file.
+
+#### Fixed
+
+## Archived Release Notes:
+If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+=======
+### v0.6.0 - "The Great unification project"
+This finally brings together the separate SSS and MDS versions that grew into their own branches because of issues with AI coding drift. The only real casualty being the rudimentary JK Step Printing stuff I had put in the SSS fork because I need to actually get progress done with the unification and the JK stuff was always more of a bonus thing. It will come for realsies... but later. 
+
+This also brings me to the numbering scheme of the versions. I am taking that control back from the LLM. And therefore I need to say that whatever it may say in the files somewhere. From this day. This version. Is v0.6.0. And history for realsies... starts here. 
+
+I will also start putting the release notes on my website so if you want the older ones starting from today. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
+>>>>>>> origin/main
+
+## Description
+The VOP is a combination of hardware and software to make a tool that mimics several real world old tools used for animation, compositing and optical printing. 
+
+### What does it actually stand for?
+VOP stands for: 
+
+- Video - because it mainly deals with video sources instead of physical film.
+- Optical - because it uses an optical path between the hdmi-monitor and the sensor. 
+- Printer - because it functions somewhat like an optical printer. 
+
+### What does it aim to do?
+This tool aims to replicate a bunch of several functions that older machines used to do. 
+
+In essence. In its simplest form. It takes an input image. Puts it in a folder called ProjMag (short for Projector Magazine). And "projects" it onto an HDMI screen and the camera sensor records the light coming off that HDMI screen to a frame that's saved in a folder called CamMag. This image that is saved, is saved as a 16 bit linear color tiff. And if you do another exposure and target that same tiff. The VOP will merge the two using additive mix. Thus making a multiple exposure. 
+
+The real fun however starts when we start moving the image on the screen during the exposure. That way we can make motion blur like smears of the artwork. And using multiple exposures with virtual gels and bipacks. We can make colorful smears and pseudo-3D objects. 
+
+We (soon) can even feed it a video source using the optical printer functionality and with the bipacks we can mask out areas that we don't want to be exposed and then feed it some other artwork that's smeared and put it on the unexposed areas. 
+
+Once one start to grasp all the things these seemingly simple tools can do, a lot of very strange outputs can be possible. 
+---
+### TECHNICAL THINGS IT DOES
+The VOP is built to be operated like an optical printer. And it uses certain philosophies to get there. 
+
+#### File type
+For the VOP to work adequately, I have chosen to base it all around creation and manipulation of 16 bit linear colorspace tiff-files. This keeps things easy on the math. Adding another exposure is just adding it to the pixel values already on the files. This does mean that the resulting tiff's are skewed towards the darker end, but it retains as much as possible of the input data.
+
+In the VOP web interface you can change the **Cam Res** and **Compression** to wrangle file size and resolution requirements of your job. Full Res and no compression gives you the biggest files. 
+
+#### LIME
+The LIME system is what I call the philosophy of how the VOP should handle situations where it has captured an exposure and when it goes to write the file in the CamMag, it sees a file with the same name already there. 
+
+LIME is a short form of
+
+**LATENT**
+
+**IMAGE**
+
+**MULTIPLE**
+
+**EXPOSURE** 
+
+And it simply means that when an image file of the same name is already there. The VOP should add the new exposure to the existing one. We treat the image sequence in the Cam Mag as a series of Latent images. Just like how a roll of film has the images in a latent stage before it's processed. The **advantage** of course for this digital version is that we can peek at the latent file at any stage of the multiple exposures it's going to get without ruining the image. 
+
+The **"disadvantage"** is that once the new exposure is added to the latent image. You can't undo. You can only start over... from scratch. That is a feature. It will not be considered a bug.
+
+### What can't it do right now that I am working on adding?
+* At the moment of this writing it only has ProjMag and BiPack. That's it as far as sources go. I am planning on making a CamBiPack to assist with making holdout mattes.
+
+* I am also planning on revisiting functionality to take an input video and make a sequence of still images that's loaded in the ProjMag and BiPacks. This will enable simple step-printing with the exposure sheet setting how many frames should be advanced or regressed per new frame in the camera.
+
+* And as a bonus I am also planning on making an Animation Desk Mode (ADM). Where I can manually step through the main Frames. Put things on top of the HDMI monitor. And finally Trigger the exposure manually for each frame. I am also thinking of adding functionality to use LCD shuttered animation lights to light up the elements in front of the projection monitor. 
+
+* What I also am thinking of doing is making some sort of API or something available that let's the end user pipe in a video feed of their choosing from an external source. This can then be paired with the ADM to have physical artwork in front of a virtual volume stage. And the VOP can tell the external source when to advance or regress. But... this is a pipe-dream thing. I am not expecting to reach that stage any time soon. 
+
+### What does it NOT aim to do?
+* If you are looking for a reliable tool to do high end realistic composites with nondestructive workflows and deep 3D implementations. Look elsewhere. This is a tool to take 2D planes. Move them in virtual 3D space and expose a latent image file. If you mess up with the VOP. You need to start over. If you want to put in an .OBJ as the projection image. You'd need to fork this project. Because it's not at all in my targets anytime soon. 
+
+* If you are looking at this and thinking, why on earth do I not use the power of a modern GPU with Blender and do all these things all inside a desktop computer? Then all I can say is simply... if I wanted the perfect sound... I would have gotten the CD. I know this is a very convoluted workflow. But it is a workflow I want to explore, with all the faults and blemishes it entails. You don't get a vinyl record for the pristine sound. You get it for the very particular defects it brings to the sound.
+
+### Who is this intended to be used by?
+Mainly... me. I'm just putting this on a public repo in case someone out there stumbles upon it and wants to explore this particular workflow. Also. I am also open for suggestions on how to make this work better without sacrificing the intended workflow. 
+
+In short. If you want to try out making video the way motion pictures used to make things before computers arrived. Then have a go with using the VOP. 
+---
+## Installation
+Check the Wiki for current instructions that should work. At least, it has worked for me. 
+Link: [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
+
+### Hardware needed:
+- **Raspberry Pi 5 16GB** - probably, the VOP can be run on a lesser board. But this is what I have in my prototype.
+- **Raspberry Pi Camera HQ** - This is the camera I chose for my prototype. It provides low level access to everything through the cable. And it uses C and CS mount lenses on my prototype. There's also an M12 mount version that I have not tried myself. But I think the sensor and all electronics would be the same.
+- **Lens** - My prototype uses the versatile 8-50mm zoom. It's a bit finicky and not that great in terms of clarity. But until I get an OLED screen it'll do. I'll probably swap it out to a 25mm prime lens to reduce distortion and significantly bump up the clarity. 
+- **SD card with Raspberry Pi OS Lite (64 bit)** - Again. Probably can be run with other OS. But I chose this because it's built for the Pi and it is built to be run headless. No desktop environment or anything taking up precious resources. 
+- **HDMI Monitor** - This is what will be showing the image to the camera. My Prototype is using a simple desktop 22 inch monitor. I am looking into building the next prototype with a more fitting 13-14 inch UHD OLED. Because black levels are a big factor for this whole tool. And at the moment. You can't get better black levels than OLED.
+- **Tripod or gantry or something to line things up** - you'll want something steady to hold the camera, the pi and the HDMI monitor. You'll also want something that can be adjusted in all axes to line things up. 
+
+# Instructions for use
+That may look a bit overwhelming but.
+
+Please see the wiki for detailed instructions of how to do each thing.
+
+Link: [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
+
+# Contributing
+If you feel like you can contribute to the code. Give me a message somehow. If you have specific code things that can be fixed or improved. **Do the issues thing.** I am trying to keep the issues updated myself, so I might find it there. 
+
+But. I have a dayjob that is long away from coding and I am likely to label most incoming mail as spam. But I might find the contributions interesting enough to include. You are probably way... way better at coding things than my meager skills that's still heavily reliant on Google Gemini Vibe-coding. 
+
+This project is and will for the foreseeable future be open source. See the License: [Link to License](https://codeberg.org/jmalmsten-com/VOP/src/branch/main/LICENSE)
+
+END_FILE: README.md
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: run_vop.sh
+--------------------------------------------------------------------------------
+#!/bin/bash
+# VOP Launcher Script
+# This script bypasses manual venv activation by calling the local python binary directly.
+
+# 1. Determine the absolute path of the directory containing this script.
+# This prevents path errors if you run the script from your home folder or root.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+
+# 2. Define the path to the Python interpreter inside the virtual environment.
+# Executing this binary specifically loads the venv's site-packages.
+PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
+
+# 3. Define the path to the main application script.
+APP_SCRIPT="$SCRIPT_DIR/vop.py"
+
+# 4. Check if the python binary exists before trying to run it.
+if [ ! -f "$PYTHON_BIN" ]; then
+    echo "Error: Virtual environment not found at $PYTHON_BIN"
+    exit 1
+fi
+
+# 5. Launch the application.
+# 'exec' replaces the shell process with the Python process.
+# "$@" passes any arguments from this script (like --debug) into vop.py.
+echo "Starting VOP Server..."
+exec "$PYTHON_BIN" "$APP_SCRIPT" "$@"
+
+
+END_FILE: run_vop.sh
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: static/main.js
+--------------------------------------------------------------------------------
+/* VOP Module:     main.js
+Description:    Frontend logic.
+*/
+
+let local_sync_ts = 0; 
+let mdsMasterCount = 0;
+let sssMasterCount = 0;
+let isFirstLoad = true;
+let isEngineRunning = false;
+let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
+
+// Initialize the dropdown listener when the DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+    const modeSelect = document.getElementById('smear_mode');
+    if (modeSelect) {
+        currentMode = modeSelect.value;
+        toggleSheetVisibility();
+        
+        modeSelect.addEventListener('change', function(e) {
+            if (confirm("Switching modes is destructive. All keyframing will be thrown out. Are you sure you want to continue?")) {
+                currentMode = this.value;
+                document.getElementById('mds_sheet_body').innerHTML = '';
+                document.getElementById('sss_sheet_body').innerHTML = '';
+                mdsMasterCount = 0;
+                sssMasterCount = 0;
+                toggleSheetVisibility();
+                triggerSync();
+            } else {
+                this.value = currentMode; // Revert dropdown if cancelled
+            }
+        });
+    }
+});
+
+function toggleSheetVisibility() {
+    const mdsWrap = document.getElementById('mds_wrapper');
+    const sssWrap = document.getElementById('sss_wrapper');
+    if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
+    if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
+}
+
+async function uploadFile(inputId, textId, endpoint) {
+    const file = document.getElementById(inputId).files[0];
+    if(!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const resp = await fetch(endpoint, {method: 'POST', body: formData});
+        const data = await resp.json();
+        document.getElementById(textId).value = data.filename;
+        await triggerSync(); 
+    } catch(e) { console.error("Upload failed", e); }
+}
+
+async function triggerSync() {
+    local_sync_ts = Date.now();
+    await fetch('/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
+    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+}
+
+function collectParams() {
+    const p = { last_sync: local_sync_ts };
+    document.querySelectorAll('input, select').forEach(el => {
+        // Guard: Do not collect data from file inputs
+        if (el.id && el.type !== 'file') {
+            let val = el.type === 'checkbox' ? el.checked : el.value;
+            
+            // Cast string booleans back to native JavaScript booleans for the Python backend
+            if (val === 'true') val = true;
+            if (val === 'false') val = false;
+            
+            p[el.id] = val;
+        }
+    });
+    return p;
+}
+
+async function runTask(type) {
+    await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
+    if (type === 'preview' || type === 'cam_preview') {
+        document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+    }
+}
+
+function panic() { 
+    if (confirm("This stops whatever job is running. Are you sure?")) {
+        fetch('/panic', {method: 'POST'}); 
+    }
+}
+function nukeMag() { 
+    if (confirm("This deletes all latent frames that has been exposed. All will be trashed. Are you sure? This cannot be undone.")){
+        fetch('/nuke_mag', {method: 'POST'}); 
+    }
+}
+
+function nukeProjMag() {
+    if (confirm("This deletes whatever is in the Projector Magazine. Are you sure? This cannot be undone.")) {
+        fetch('/nuke_proj_mag', {method: 'POST'});
+        document.getElementById('image').value = '';
+        triggerSync();
+    }
+}
+
+function nukeProjBiPack() {
+    if (confirm("This deletes whatever is in the Projector BiPack. Are you sure? This cannot be undone.")) {
+        fetch('/nuke_proj_bipack', {method: 'POST'});
+        document.getElementById('bipack_image').value = '';
+        triggerSync();
+    }
+}
+
+async function nukeJob() {
+    if (confirm("Reset current session to default_job.json? This cannot be undone.")) {
+        await fetch('/nuke_job', {method: 'POST'});
+        window.location.reload(); // Triggers the fresh /status check
+    }
+}
+
+async function calcFitScale(scaleId, fitZId, magType) {
+    const fov = parseFloat(document.getElementById('fov').value);
+    const zDist = Math.abs(parseFloat(document.getElementById(fitZId).value)) || 1.0;
+
+    // 1. Get the aspect ratio of the loaded image
+    const aspectReq = await fetch(`/get_img_aspect?mag=${magType}`);
+    const aspectData = await aspectReq.json();
+    const imgAspect = aspectData.aspect || 1.777;
+
+    // 2. Ping the Python backend to calculate the exact static scale
+    try {
+        const fitReq = await fetch('/calculate_fit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect })
+        });
+        const fitData = await fitReq.json();
+
+        if (fitData.status === 'ok') {
+            document.getElementById(scaleId).value = fitData.scale.toFixed(4);
+            console.log(`[VOP UI] ${magType.toUpperCase()} Scale Fit to: ${fitData.scale.toFixed(4)}`);
+            await triggerSync();
+        } else {
+            console.error("Fit Calc Error:", fitData.message);
+        }
+    } catch (e) {
+        console.error("Failed to calculate fit", e);
+    }
+}
+
+function addMDSKeyframe() {
+    mdsMasterCount++; 
+    const idx = mdsMasterCount; 
+    
+    const existingRows = document.querySelectorAll('.mds-keyframe-group');
+    const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
+
+    // Default baseline
+    let vals = {
+        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
+        c: "#ffffff", cg: "#ffffff", exp: "1.0", f: 1,
+        sp: "0,0,0", sr: "0,0,0", sbp_p: "0,0,0", sbp_r: "0,0,0", sc: "#ffffff", scg: "#ffffff",
+        ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
+    };
+
+    if (lastRow) {
+        // Scraper helper: looks for an input that starts with the prefix and ends with the suffix
+        const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
+        const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
+        
+        vals = {
+            m: getV('.mds-master-row select'),
+            crn: getC('.mds-master-row input[type="checkbox"]'),
+            p: getV('.mds-master-row input[id*="_p"]:not([id*="bp"])'),
+            r: getV('.mds-master-row input[id*="_r"]:not([id*="bp"])'),
+            bp_p: getV('.mds-master-row .bp-input[id*="_p"]'),
+            bp_r: getV('.mds-master-row .bp-input[id*="_r"]'),
+            // Fixed Color Selectors: Targets hidden hex fields within specific row types
+            c: getV('.mds-master-row input[id^="mds_c"]:not([id*="cg"])[id$="_hex"]'),
+            cg: getV('.mds-master-row input[id^="mds_cg"][id$="_hex"]'),
+            exp: getV('.mds-master-row input[id*="mds_s"]'),
+            f: parseInt(getV('.mds-master-row input[id*="_f"]')) + 1,
+            
+            // Smear Start Scrapes
+            sp: getV('.mds-smear-row:nth-child(2) input[id*="_p"]:not([id*="bp"])'),
+            sr: getV('.mds-smear-row:nth-child(2) input[id*="_r"]:not([id*="bp"])'),
+            sbp_p: getV('.mds-smear-row:nth-child(2) .bp-input[id*="_p"]'),
+            sbp_r: getV('.mds-smear-row:nth-child(2) .bp-input[id*="_r"]'),
+            sc: getV('.mds-smear-row:nth-child(2) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
+            scg: getV('.mds-smear-row:nth-child(2) input[id*="_cg"][id$="_hex"]'),
+
+            // Smear Stop Scrapes
+            ep: getV('.mds-smear-row:nth-child(3) input[id*="_p"]:not([id*="bp"])'),
+            er: getV('.mds-smear-row:nth-child(3) input[id*="_r"]:not([id*="bp"])'),
+            ebp_p: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_p"]'),
+            ebp_r: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_r"]'),
+            ec: getV('.mds-smear-row:nth-child(3) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
+            ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]')
+        };
+    }
+
+    const body = document.getElementById('mds_sheet_body');
+    const row = document.createElement('div');
+    row.className = 'mds-keyframe-group';
+    row.innerHTML = `
+        <div class="sheet-row mds-master-row">
+            <div class="row-num">?</div>
+            <input type="number" id="mds_f${idx}" value="${vals.f}">
+            <select id="mds_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
+            <input type="checkbox" id="mds_crn${idx}" ${vals.crn?'checked':''}>
+            <div class="node-tag master">MST</div>
+            <input id="mds_p${idx}" value="${vals.p}">
+            <input id="mds_r${idx}" value="${vals.r}">
+            <input id="mds_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
+            <input id="mds_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
+            <input type="color" id="mds_c${idx}" value="${vals.c}" onchange="updateHex(this, 'mds_c${idx}_hex')">
+            <input type="hidden" id="mds_c${idx}_hex" value="${vals.c}">
+            <input type="color" id="mds_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'mds_cg${idx}_hex')">
+            <input type="hidden" id="mds_cg${idx}_hex" value="${vals.cg}">
+            <input type="number" step="0.1" id="mds_s${idx}" value="${vals.exp}">
+            <button class="del-btn" onclick="this.parentElement.parentElement.remove(); reindexMDS();">X</button>
+        </div>
+        <div class="sheet-row mds-smear-row">
+            <div></div><div></div><div></div><div></div>
+            <div class="node-tag smear">STRT</div>
+            <input id="mds_start_p${idx}" value="${vals.sp}">
+            <input id="mds_start_r${idx}" value="${vals.sr}">
+            <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
+            <input id="mds_start_bp_r${idx}" value="${vals.sbp_r}" class="bp-input">
+            <input type="color" id="mds_start_c${idx}" value="${vals.sc}" onchange="updateHex(this, 'mds_start_c${idx}_hex')">
+            <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
+            <div></div>
+            <div></div>
+        </div>
+        <div class="sheet-row mds-smear-row">
+            <div></div><div></div><div></div><div></div>
+            <div class="node-tag smear">STOP</div>
+            <input id="mds_stop_p${idx}" value="${vals.ep}">
+            <input id="mds_stop_r${idx}" value="${vals.er}">
+            <input id="mds_stop_bp_p${idx}" value="${vals.ebp_p}" class="bp-input">
+            <input id="mds_stop_bp_r${idx}" value="${vals.ebp_r}" class="bp-input">
+            <input type="color" id="mds_stop_c${idx}" value="${vals.ec}" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
+            <input type="hidden" id="mds_stop_c${idx}_hex" value="${vals.ec}">
+            <div></div>
+            <div></div>
+        </div>`;
+    body.appendChild(row);
+    reindexMDS();
+}
+
+function reindexMDS() {
+    document.querySelectorAll('.mds-keyframe-group').forEach((group, i) => {
+        group.querySelector('.row-num').innerText = i + 1;
+    });
+}
+
+function addSSSKeyframe() {
+    sssMasterCount++; 
+    const idx = sssMasterCount; 
+    
+    const existingRows = document.querySelectorAll('.sss-master-row');
+    const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
+
+    // SSS Base Defaults (Includes SD and PH)
+    let vals = {
+        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
+        c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1
+    };
+
+    if (lastRow) {
+        const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
+        const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
+        
+        vals = {
+            m: getV('select[id^="sss_m"]'),
+            crn: getC('input[type="checkbox"]'),
+            p: getV('input[id^="sss_p"]:not([id*="bp"])'),
+            r: getV('input[id^="sss_r"]:not([id*="bp"])'),
+            bp_p: getV('.bp-input[id^="sss_bp_p"]'),
+            bp_r: getV('.bp-input[id^="sss_bp_r"]'),
+            c: getV('input[id^="sss_c"][id$="_hex"]:not([id*="cg"])'),
+            cg: getV('input[id^="sss_cg"][id$="_hex"]'),
+            exp: getV('input[id^="sss_exp"]'),
+            sd: getV('input[id^="sss_sd"]'),
+            ph: getV('input[id^="sss_ph"]'),
+            f: parseInt(getV('input[id^="sss_f"]')) + 1
+        };
+    }
+
+    const body = document.getElementById('sss_sheet_body');
+    const row = document.createElement('div');
+    row.className = 'sheet-row sss-master-row';
+    
+   
+    row.innerHTML = `
+        <div class="row-num">?</div>
+        <input type="number" id="sss_f${idx}" value="${vals.f}">
+        <select id="sss_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
+        <input type="checkbox" id="sss_crn${idx}" ${vals.crn?'checked':''}>
+        <input id="sss_p${idx}" value="${vals.p}">
+        <input id="sss_r${idx}" value="${vals.r}">
+        <input id="sss_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
+        <input id="sss_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
+        <input type="color" id="sss_c${idx}" value="${vals.c}" onchange="updateHex(this, 'sss_c${idx}_hex')">
+        <input type="hidden" id="sss_c${idx}_hex" value="${vals.c}">
+        <input type="color" id="sss_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'sss_cg${idx}_hex')">
+        <input type="hidden" id="sss_cg${idx}_hex" value="${vals.cg}">
+        <input type="number" step="0.1" id="sss_exp${idx}" value="${vals.exp}">
+        <input type="number" step="0.1" id="sss_sd${idx}" value="${vals.sd}">
+        <input type="number" step="0.1" id="sss_ph${idx}" value="${vals.ph}">
+        <button class="del-btn" onclick="this.parentElement.remove(); reindexSSS();">X</button>
+    `;
+    body.appendChild(row);
+    reindexSSS();
+}
+
+function reindexSSS() {
+    document.querySelectorAll('.sss-master-row').forEach((row, i) => {
+        row.querySelector('.row-num').innerText = i + 1;
+    });
+}
+
+function updateHex(el, targetId) { document.getElementById(targetId).value = el.value; triggerSync(); }
+
+setInterval(async () => {
+    try {
+        const r = await fetch('/status');
+        const st = await r.json();
+        
+        if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
+            for (const [k, v] of Object.entries(st.params)) {
+                const el = document.getElementById(k);
+                // Guard: Do not attempt to write values to file inputs
+                if (el && el.type !== 'file') {
+                    if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
+                    else el.value = v;
+                }
+            }
+
+            // Read the mode that was just injected from the server parameters
+            const loadedMode = document.getElementById('smear_mode');
+            if (loadedMode) {
+                // Update the global JS state to match the server state
+                currentMode = loadedMode.value; 
+                // Force the DOM to display the correct sheet corresponding to the state
+                toggleSheetVisibility();
+            }
+
+            document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+            isFirstLoad = false;
+        }
+
+        document.getElementById('sync_indicator').innerHTML = st.params ? '<span style="color:#0f0">● ONLINE</span>' : '○ OFFLINE';
+        const msgEl = document.getElementById('st_msg');
+        const bar = document.getElementById('st_bar');
+        const etaEl = document.getElementById('st_eta');
+        
+        if (st.status === 'rendering' && st.heartbeat) {
+            isEngineRunning = true;
+            // FIXED: Use st.heartbeat.msg instead of st.msg
+            msgEl.innerText = `${st.heartbeat.msg} [${st.heartbeat.current}/${st.heartbeat.total}]`;
+            bar.style.width = (st.heartbeat.current/st.heartbeat.total*100) + "%";
+            
+            // Format ETA (HH:MM:SS) - Only if eta exists
+            if (st.heartbeat.eta !== undefined) {
+                const h = Math.floor(st.heartbeat.eta / 3600).toString().padStart(2, '0');
+                const m = Math.floor((st.heartbeat.eta % 3600) / 60).toString().padStart(2, '0');
+                const s = (st.heartbeat.eta % 60).toString().padStart(2, '0');
+                const mb = st.heartbeat.est_mb;
+                const sizeStr = mb > 1024 ? (mb / 1024).toFixed(2) + " GB" : mb + " MB";
+                if (etaEl) etaEl.innerText = `ETA: ${h}:${m}:${s} | TOTAL PROJ: ${sizeStr}`;
+            }
+        } else {
+            if (isEngineRunning) {
+                document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+                isEngineRunning = false;
+            }
+            msgEl.innerHTML = st.workprint ? `IDLE | <a href="${st.workprint}" target="_blank" style="color:#0cf">VIEW WORKPRINT</a>` : "Ready...";
+            bar.style.width = "0%";
+            if (etaEl) etaEl.innerText = ""; 
+        }
+    } catch(e) { console.error("Poll Error:", e); }
+}, 1000);
+
+// --- HTML5 Drag and Drop Fallback ---
+document.addEventListener('DOMContentLoaded', () => {
+    const setupDropZone = (elementId, inputId, textId, endpoint) => {
+        const dropZone = document.getElementById(elementId);
+        if (!dropZone) return;
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.border = "2px dashed #0cf";
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.style.border = "";
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dropZone.style.border = "";
+            
+            if (e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    const resp = await fetch(endpoint, {method: 'POST', body: formData});
+                    const data = await resp.json();
+                    document.getElementById(textId).value = data.filename;
+                    await triggerSync(); 
+                } catch(err) { console.error("Drag-Drop Upload failed", err); }
+            }
+        });
+    };
+
+    // Bind drop zones to the text input fields showing the active image
+    setupDropZone('image', 'file_input', 'image', '/upload_target');
+    setupDropZone('bipack_image', 'bp_file_input', 'bipack_image', '/upload_proj_bipack');
+});
+
+/* * Dispatches the dark frame measurement task to the engine and polls the
+ * server status. Once the engine stops, it retrieves the generated preview
+ * image and the measured noise value.
+ */
+async function triggerMeasurement() {
+    const resTxt = document.getElementById('noise_result_txt');
+    resTxt.innerText = "WAIT...";
+
+    // 1. Dispatch the job to the engine using the existing parameter collector
+    await fetch('/measure_noise', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+
+    });
+
+    // 2. Poll the server status endpoint every 1000ms
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/status');
+            const st = await r.json();
+
+            // Check if engine_running has flipped back to false
+            if (!st.status !== 'rendering' && attempts > 2) {
+                clearInterval(pollInterval);
+                
+                // Add a 500ms delay to allow the OS file buffer to write to disk
+                setTimeout(async () => {
+                    // Force the preview image to refresh
+                    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+                    
+                    // Fetch the generated JSON file
+                    const nRes = await fetch('/static/noise_data.json?t=' + Date.now());
+                    if (nRes.ok) {
+                        const data = await nRes.json();
+                        resTxt.innerText = data.measured_noise.toFixed(6); 
+                    } else {
+                        resTxt.innerText = "ERR";
+                    }
+                }, 500);
+            }           
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }, 1000);
+}
+
+async function triggerHotPixelMap() {
+    // 1. The reality check prompt!
+    if (!confirm("IMPORTANT: Please put the lens cap on the camera!\n\nThis will take a dark frame matching your current Probe Frame's exposuresetting to map defective pixels.\n\nClick OK when the lens cap is fully seated.")){
+        return;
+    }
+
+    const resTxt = document.getElementById('hp_result_txt');
+    resTxt.innerText = "MAPPING...";
+
+    // 2. Dispatch to the engine
+    await fetch ('/map_hot_pixels', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+    });
+
+    // 3. Poll for completion
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/status');
+            const st = await r.json();
+            
+            if (st.status !== 'rendering' && attempts > 2) {
+                clearInterval(pollInterval);
+                
+                // Allow OS disk buffer flush
+                setTimeout(async () => {
+                    const nRes = await fetch('/static/hot_pixels.json?t=' + Date.now());
+                    if (nRes.ok) {
+                        const data = await nRes.json();
+                        if (data.error) {
+                            resTxt.innerText = "ERR: CAP OFF";
+                            resTxt.style.color = "#f44";
+                        } else {
+                            resTxt.innerText = data.pixels.length + " FIXED";
+                            resTxt.style.color = "#0cf";
+                        }
+                    } else {
+                        resTxt.innerText = "FAILED";
+                    }
+                }, 500);
+            }
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }, 1000);
+}
+
+async function nukeHotPixels() {
+    if (confirm("Delete the hot pixel map? Defective pixels will no longer be suppressed in future exposures.")) {
+        await fetch('/nuke_hot_pixels', {method: 'POST'});
+        document.getElementById('hp_result_txt').innerText = "CLEARED";
+        document.getElementById('hp_result_txt').style.color = "#f44"; // Turn red to show it's disabled
+    }
+}
+
+
+END_FILE: static/main.js
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: static/style.css
+--------------------------------------------------------------------------------
+/* VOP Module:      style.css
+Description:        Stylings for the whole GUI
+*/
+
+/* ############### Global variables ############# */
+
+
+:root {
+    
+    /* >>> Global Brand & Accent Colors <<< */
+
+    --color-accent:         #0ad;   /* Used for text, borders, buttons, and BiPack Highlights */
+    --color-danger:         #500;   /* Panic Buttons */
+    --color-danger-text:    #f44;   /* Nuke Buttons */
+    --color-warning:        #fa0;   /* Nuke confirmation */
+
+    /* >>> Background & Panels */
+
+    --bg-body:  #0b0b0b;     /* Background for the whole thing */
+    --bg-panel: #1a1a1a;    /* Control deck, preview area */
+    --bg-group: #151515;    /* Group Boxes */
+    --bg-input: var(--bg-input);       /* Inputs, Progress bar track */
+
+    /* >>> Text Colors <<< */
+
+    --text-primary:     #ddd;   /* Body text */
+    --text-secondary:   #888;   /* Labels, cheat sheet text, group titles */
+    --text-muted:       #666;
+    --text-dark:        #000;   /* Text inside bright buttons */
+
+    /* >>> Borders <<< */
+    
+    --border-color:     #333;
+    --radius-standard:  4px; /* For most boxes and panels */
+    --radus-small:      3px; /* For buttons and cheat sheet items */
+
+    /* >>> Exposure Sheet Tags << */
+
+    --tag-master-bg: #123;
+    --tag-master-text: #0cf;
+    --tag-smear-bg: #210;
+    --tag-smear-text: #f80;
+    --tag-bipack-border: #057;
+}
+
+/* Custom Instant Tooltips - Targets the attribute directly! */
+[data-title] {
+    position: relative;
+    cursor: help;
+}
+
+/* The invisible box */
+[data-title]::after {
+    content:    attr(data-title);
+    position:   absolute;
+    bottom:     120%; 
+    left:       50%;
+    transform:  translateX(-50%) translateY(5px); 
+    
+    background:     var(--bg-group, #151515);
+    color:          var(--color-accent, #0cf);
+    padding:        6px 10px;
+    border:         1px solid var(--border-color, #333);
+    border-radius:  var(--radius-small, 3px);
+
+    font-size:      0.85em;
+    font-weight:    bold;
+    font-family:    sans-serif;
+    white-space:    nowrap;
+    
+    /* Make it invisible by default */
+    opacity:            0;
+    visibility:         hidden;
+    z-index:            9999; 
+    pointer-events:     none;
+    box-shadow:         0px 4px 12px rgba(0,0,0,0.8);
+    
+    /* Smooth fade and slide animation */
+    transition:     opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+
+/* Trigger the animation on hover */
+[data-title]:hover::after {
+    opacity:    1;
+    visibility: visible;
+    transform:  translateX(-50%) translateY(0); 
+}
+
+
+/* Universal Button Polish */
+.action-btn, .nuke-btn, .panic-btn, .add-btn, .del-btn, .upload-btn, .mini-btn {
+    transition:     filter 0.2s ease, transform 0.1s ease;
+}
+
+/* Make them 30% brighter when the mouse touches them */
+.action-btn:hover, .nuke-btn:hover, .panic-btn:hover, .add-btn:hover, .del-btn:hover, .upload-btn:hover, .mini-btn:hover {
+    filter:         brightness(1.3);
+}
+
+/* Give them a tiny "click" depression effect when pressed */
+.action-btn:active, .nuke-btn:active, .panic-btn:active, .add-btn:active, .del-btn:active, .upload-btn:active, .mini-btn:active {
+    transform:      scale(0.96);
+}
+
+body { 
+    background:     var(--bg-body); 
+    color:          var(--text-primary); 
+    font-family:    sans-serif; 
+    margin:         0; 
+    padding:        20px; 
+}
+
+.container { 
+    max-width:              1350px; 
+    margin:                 0 auto; 
+    display:                grid; 
+    grid-template-columns:  1fr 420px; 
+    gap:                    20px; 
+}
+
+.vop-header { 
+    grid-column:        1 / -1; 
+    display:            flex; 
+    justify-content:    space-between; 
+    align-items:        center; 
+    border-bottom:      1px solid var(--border-color); 
+}
+
+
+
+/* ###################### HEADER AND STATUS ############################ */
+/* Force flex parent to full width to enable right-justification */
+.status-meta { 
+    display:        flex; 
+    align-items:    center; 
+    gap:            12px; 
+    margin-bottom:  0; 
+    width:          100%; /* Forces the flex row to span the entire control-deck */
+    box-sizing:     border-box;
+}
+
+#st_eta {
+    font-size: 0.7em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.workprint-zone {
+    text-align: left;
+    padding-left: 2px;
+}
+
+.status-text { 
+    font-family:    monospace; 
+    color:          var(--color-accent); 
+    font-weight:    bold; 
+    min-width:      100px; 
+}
+
+/* Ensure the bar always acts as the flexible spacer */
+.status-bar-progress { 
+    flex-grow:      1; 
+    height:         10px; 
+    background:     var(--bg-input); 
+    border-radius:  5px; 
+    overflow:       hidden; 
+    min-width:      50px; /* Prevents the bar from disappearing entirely if text is long */
+}
+
+.progress-bar { 
+    width:      0%; 
+    height:     100%; 
+    background: var(--color-accent); 
+    transition: width 0.3s; 
+}
+
+.panic-btn { 
+    background:     #800; 
+    color:          #fff; 
+    padding:        5px 15px; 
+    font-weight:    bold; 
+    font-size:      0.75em; 
+    border:         none; 
+    cursor:         pointer; 
+}
+
+.nuke-btn { 
+    background:     #222; 
+    color:          var(--color-danger-text); 
+    padding:        5px 12px; 
+    border:         1px solid #444; 
+    font-size:      0.75em; 
+    cursor:         pointer; 
+}
+
+.nuke-btn[onclick="nukeJob()"] { 
+    color:  var(--color-warning); 
+}
+
+/* ################ PROBE / PREVIEW / EXECUTE ################### */
+
+.control-deck { 
+    grid-column:    1 / -1; 
+    background:     #1a1a1a; 
+    padding:        12px 15px; 
+    border-radius:  var(--radius-standard); 
+    border:         1px solid var(--border-color); 
+    margin-bottom:  20px; 
+}
+
+.probe-input {
+    width: 100%;
+    background: var(--bg-input);
+    color: var(--color-accent);
+    border: var(--border-light);
+    padding: 5px;
+    box-sizing: border-box;
+}
+
+.group-box { 
+    background:     #151515; 
+    border:         1px solid var(--border-color); 
+    border-radius:  var(--radius-standard); 
+    padding:        12px; 
+    margin-bottom:  10px; 
+}
+
+.group-box.bipack {
+    border-left: 3px solid var(--color-accent);
+}
+
+.group-title { 
+    font-size:          0.7em; 
+    color:              var(--text-secondary); 
+    text-transform:     uppercase; 
+    font-weight:        bold; 
+    margin-bottom:      8px; 
+    border-bottom:      1px solid var(--border-color); 
+}
+
+.constants-zone { 
+    display:                grid; 
+    grid-template-columns:  repeat(4, 1fr); 
+    gap:                    8px; 
+}
+
+.const-group label { 
+    display:        block; 
+    font-size:      0.6em; 
+    color:          var(--text-secondary); 
+    margin-bottom:  2px; 
+}
+
+.const-group input, .const-group select { 
+    width: 100%; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          var(--color-accent); 
+    padding:        4px; 
+    font-size:      0.8em; 
+    box-sizing:     border-box; 
+}
+
+.awb-group {
+    display:    flex;
+    gap:        2px;
+}
+
+.input-row { 
+    display:    flex; 
+    gap:        10px; 
+}
+
+.c-box { 
+    flex: 1; 
+}
+
+.c-box label { 
+    display:    block;
+    font-size:  0.6em;
+    color:      var(--text-secondary); 
+}
+
+.c-box input { 
+    width:          100%; 
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          #ccc; 
+    padding:        4px; 
+    font-size:      0.8em; 
+    box-sizing:     border-box; 
+}
+
+.preview-area { 
+    background:         #1a1a1a; 
+    border:             1px solid var(--border-color); 
+    min-width:          300px; 
+    max-width:          70vh; 
+    min-height:         200px; 
+    max-height:         50vh; 
+    display:            flex; 
+    align-items:        center; 
+    justify-content:    center; 
+    overflow:           hidden; 
+    grid-column:        1; 
+    grid-row:           3; 
+    justify-self:       center; 
+    align-self:         start; 
+}
+
+#probe_img { 
+    max-width:      100%; 
+    max-height:     100%; 
+    object-fit:     contain; 
+}
+
+.action-btn { 
+    background:         var(--color-accent); 
+    color:              var(--color-input); 
+    border:             none; 
+    padding:            8px; 
+    border-radius:      var(--radius-small); 
+    cursor:             pointer; 
+    font-weight:        bold; 
+    text-transform:     uppercase; 
+    font-size:          0.8em; 
+    width:              100%; 
+}
+
+.action-btn.cam_preview { 
+    background:     #333; 
+    color:          #ccc; 
+}
+
+.action-btn.danger { 
+    background:     var(--color-danger); 
+    color:          #faa; 
+    border:         1px solid #f55; 
+}
+
+.action-btn.execute {
+    /*grid-column: 1 / 3; */
+    background: #080; /* Success green, could be a --color-success var */
+    color: #fff;
+}
+
+
+
+.upload-cluster {
+    display: flex;
+    gap: 5px;
+    align-items: flex-end;
+}
+
+.upload-btn { 
+    background:     #222; 
+    color:          var(--color-accent); 
+    border:         1px solid var(--color-accent); 
+    padding:        4px 8px; 
+    cursor:         pointer; 
+    font-size:      0.7em; 
+}
+
+.mini-btn {
+    background:         var(--color-accent); 
+    color:              var(--color-input); 
+    border:             none; 
+    padding:            8px; 
+    border-radius:      var(--radius-small); 
+    cursor:             pointer; 
+    font-weight:        bold; 
+    text-transform:     uppercase; 
+    font-size:          0.8em; 
+    width:              auto; 
+}
+
+.mini-btn.danger { 
+    background:     var(--color-danger); 
+    color:          #faa; 
+    border:         1px solid #f55; 
+}
+
+/* ################ SHEET HEADER & MODE SELECTOR ############### */
+
+.sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sheet-title {
+    margin: 0;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 0.9em;
+    letter-spacing: 1px;
+}
+
+.mode-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mode-control label {
+    color: var(--color-accent);
+    font-size: 0.7em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.mode-control select {
+    background: var(--bg-input);
+    border: 1px solid var(--color-accent); /* Make it pop so it's obvious */
+    color: var(--color-accent);
+    padding: 4px 10px;
+    border-radius: var(--radius-small);
+    font-weight: bold;
+    cursor: pointer;
+}
+
+/* ################ EXPOSURE SHEET ############### */
+
+
+.sheet-row { 
+    display:        grid; 
+    gap:            4px; 
+    align-items:    center; 
+    margin-bottom:  2px; 
+}
+
+.mds-header, .mds-master-row, .mds-smear-row { 
+    grid-template-columns:  25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
+}
+
+.sss-header, .sss-master-row {
+    display: grid;
+    grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    gap: 5px;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.sss-header {
+    font-size: 0.8em;
+    text-align: center;
+    color: var(--color-sss-accent);
+}
+
+.sheet-row input {
+    background:     var(--color-input); 
+    border:         1px solid var(--border-color); 
+    color:          #fff; 
+    padding:        3px; 
+    font-size:      0.7em; 
+    text-align:     center; 
+    width:          100%; 
+    box-sizing:     border-box; 
+}
+
+.bp-header-text {
+    color:  var(--color-accent);
+}
+
+.bp-input { 
+    border-color:   var(--tag-bipack-border) !important; 
+    color:          var(--color-accent) !important; 
+}
+
+.sheet-color-input {
+    width: 100%;
+    height: 26px;
+    padding: 0;
+}
+
+.node-tag { 
+    font-size: 0.6em; 
+    font-weight: bold; 
+    text-align: center; 
+    padding: 2px; 
+    border-radius: 2px; 
+}
+
+.master { 
+    background:     var(--tag-master-bg); 
+    color:          var(--tag-master-text); 
+}
+
+.smear { 
+    background:     var(--tag-smear-bg); 
+    color:          var(--tag-smear-text); 
+}
+
+.controls-area {
+    grid-column:    2;
+    grid-row:       3 / span 2;
+}
+
+.sheets-area {
+    grid-column:    1;
+    grid-row:       4;
+    align-self:     start;
+}
+
+.mds-add-btn {
+    background: var(--tag-master-bg);
+    color:      var(--color-accent);
+    border:     1px solid var(--color-sss-accent); 
+    cursor:     pointer; 
+}
+/* style="background: #331122; color: #f0c; border: 1px solid #f0c;" */
+
+.sss-add-btn {
+    background: #331122; /* Maybe add to vars: --bg-sss-tag */
+    color:      var(--color-sss-accent);
+    border:     1px solid var(--color-sss-accent);
+    cursor:     pointer; 
+}
+
+/* ##################### The Cheat Sheet Styling ##################### */
+
+.cs-grid{
+    /* Making a responsive grid of columns having a minimum set width */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px; /* Space between grid cels */
+    margin-top: 10px;
+}
+
+.cs-item {
+    background:     rgba(255, 255, 255, 0.03); /* Subtle cell highlight */
+    padding:        8px 12px;
+    border:         1px solid var(--border-color); /* matching section border */
+    border-radius:  var(--radius-small);
+    line-height:    1.4;
+}
+
+.cs-item strong {       /* highlighting acronyms */
+    color: var(--color-accent);
+    display: inline-block;
+    min-width: 65px; /* keeps the acronyms aligned nicely if they wrap */
+}
+
+/* --- Noise Floor Measurement UI --- */
+
+/* --- Elegant Grid Divider --- */
+hr.section-divider {
+    grid-column:    1 / -1;                         /* Forces the element to span from the first column to the very last */
+    border:         0;                              /* Strips out the ugly default 3D browser borders */
+    border-top:     1px solid var(--border-color);  /* Draws a single, subtle, dark-gray line */
+    margin:         8px 0;                          /* Adds a little vertical breathing room above and below */
+    width:          100%;                           /* Ensures it fills the space completely */
+}
+
+/* Style the output text to look like a digital readout */
+#noise_result_txt, #hp_result_txt {
+    font-family:    monospace;              /* Monospaced font aligns the decimal points cleanly */
+    font-weight:    bold;                   /* Makes the readout pop against the dark UI*/
+    color:          var(--color-accent);    /* Matching standard VOP accent color */
+    margin-left:    8px;                    /* Provides breathing room from the MEASURE button */
+    min-width:      80px;                   /* Reserves fixed space so the UI doesn't jumpwhen switching from "WAIT..." to numbers */
+    display:        inline-block;           /* Allows the span to respect the min-width and margin properties */
+}
+
+/* Shrink the number input field to comfortably fit the button and readout on the same line */
+#black_clip {
+    width:  75px;
+}
+
+/* Ensure the parent container groups them tightly in a row */
+.const-group:has(#black_clip) {
+    display:        flex;       /* Activates flexbox layout */
+    align-items:    center;     /* Vertically centers the label, input button, and text */
+    gap:            5px;        /* Sets consistent spacing bbetween the elements */
+}
+
+.crush-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    grid-column: span 2; /* Forces this cell to span across two columns to fit the contents */
+}
+
+END_FILE: static/style.css
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: templates/index.html
+--------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VOP v0.6</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.11">
+</head>
+<body>
+    <div class="container">
+        
+        <div class="vop-header">
+            <h2>VOP v0.6.3</h2>
+            <div id="sync_indicator">○ OFFLINE</div>
+        </div>
+
+        {% include 'sections/status.html' %}
+
+        <div class="preview-area">
+            <img id="probe_img" alt="Live Preview">
+        </div>
+
+        <div class="controls-area">
+            <div class="group-box">
+                <div class="group-title">Probe / Preview</div>
+                <div class="input-row">
+                    <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
+                    <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
+                </div>
+                <div class="probe-controls" style="margin-top:10px;">
+                    <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
+                    <button class="action-btn cam_preview" onclick="runTask('cam_preview')">Cam View</button>
+                    <button class="action-btn execute" onclick="runTask('execute')">Execute Sequence</button>
+                </div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-title">Projection Mag</div>
+                <div class="upload-cluster">
+                    <div class="c-box" style="flex:1;"><label>Active Image</label><input type="text" id="image" readonly></div>
+                    <input type="file" id="file_input" style="display:none;" onchange="uploadFile('file_input', 'image', '/upload_target')">
+                    <button class="mini-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
+                    <button class="mini-btn danger" onclick="nukeProjMag()">NUKE</button>
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="fit_z" value="-1.0"></div>
+                    <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="coord_scale" value="1.0"></div>
+                    <div class="c-box" style="justify-content: flex-end;">
+                        <button class="mini-btn" onclick="calcFitScale('coord_scale', 'fit_z', 'proj')">FIT FOV</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group-box bipack">
+                <div class="group-title">Projection BiPack</div>
+                <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
+                    <div class="c-box" style="flex:1;"><label>Active Mask</label><input type="text" id="bipack_image" readonly></div>
+                    <input type="file" id="bp_file_input" style="display:none;" onchange="uploadFile('bp_file_input', 'bipack_image', '/upload_proj_bipack')">
+                    <button class="mini-btn" onclick="document.getElementById('bp_file_input').click()">UPLOAD</button>
+                    <button class="mini-btn danger" onclick="nukeProjBiPack()">NUKE</button>
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="bipack_fit_z" value="-1.0"></div>
+                    <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="bipack_coord_scale" value="1.0"></div>
+                    <div class="c-box" style="justify-content: flex-end;">
+                        <button class="mini-btn" onclick="calcFitScale('bipack_coord_scale', 'bipack_fit_z', 'bipack')">FIT FOV</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-title">Hardware Constants</div>
+                <div class="constants-zone">
+                    <div class="const-group"><label>FOV</label><input id="fov" type="number" value="45"></div>
+                    <div class="const-group"><label>Cam Res</label><input id="cam_res" value="2028x1520"></div>
+                    <div class="const-group"><label>FPS</label><input id="fps" type="number" value="24"></div>
+                    <div class="const-group"><label>Gain</label><input id="gain" type="number" value="1.0"></div>
+                    <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>
+                    <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
+                    <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
+                    <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                    <hr class="section-divider">
+                    <div class="const-group crush-group">
+                        <label>Noise Crusher</label>
+                        <input type="number" step="0.0001" id="black_clip" value="0.0" style="width: 75px;">
+                        <button class="mini-btn measure_noise" onclick="triggerMeasurement()">MEASURE</button>
+                        <span id="noise_result_txt"></span>
+                    </div>
+                    <hr class="section-divider">
+                    <div class="const-group crush-group">
+                        <label>Defect Mapping</label>
+                        <button class="mini-btn" onclick="triggerHotPixelMap()">MAP PIXELS</button>
+                        <button class="mini-btn danger" onclick="nukeHotPixels()">NUKE MAP</button>
+                        <span id="hp_result_txt"></span>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sheets-area">
+            <div class="sheet-header">
+                <h3 class="sheet-title">Exposure Sheet</h3>
+                <div class="mode-control">
+                    <label>Smear Mode</label>
+                    <select id="smear_mode">
+                        <option value="SSS" selected>SSS</option>
+                        <option value="MDS">MDS</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="sheet-container" id="mds_wrapper">
+                {% include 'sections/mds-xsheet.html' %}
+            </div>
+            
+            <div class="sheet-container" id="sss_wrapper" style="display: none;">
+                {% include 'sections/sss-xsheet.html' %}
+            </div>
+        </div>
+    </div>
+    <br> <!-- Should probably make this spacer more elegantly -->
+    <br>
+    <div>
+        {% include 'sections/cheat-sheet.html' %}
+    </div>
+    <script src="{{ url_for('static', filename='main.js') }}?v=63"></script>
+</body>
+</html>
+
+
+END_FILE: templates/index.html
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: templates/sections/cheat-sheet.html
+--------------------------------------------------------------------------------
+<div class="cheat-sheet-section">
+    <div class="cs-title">VOP CHEAT SHEET</div>
+    <div class="cs-grid">
+        <div class="cs-item"><strong>FR:</strong> Frame Number (Timeline Position)</div>
+        <div class="cs-item"><strong>INT:</strong> Interpolation (S=Smooth, L=Linear, I=EaseIn, O=EaseOut)</div>
+        <div class="cs-item"><strong>C:</strong> Corner (Check for sharp, non-spline turns)</div>
+        <div class="cs-item"><strong>POS:</strong> Position X, Y, Z (Camera Distance)</div>
+        <div class="cs-item"><strong>ROT:</strong> Rotation Pitch, Roll, Yaw (1 unit means full rotation)</div>
+        <div class="cs-item"><strong>BP POS:</strong> Position X, Y, Z (Camera Distance) for the BiPack</div>
+        <div class="cs-item"><strong>BP ROT:</strong> Rotation Pitch, Roll, Yaw (1 unit means full rotation) for the BiPack</div>
+        <div class="cs-item"><strong>PG:</strong> ProjGel (Multiplies against loaded image)</div>
+        <div class="cs-item"><strong>CG:</strong> CamGel (Multiplies against physical exposure)</div>
+        <div class="cs-item"><strong>EXP:</strong> Exposure Time (Physical Shutter duration in seconds)</div>
+        <div class="cs-item"><strong>SD:</strong> Smear Distance (Frames traveled during exposure)</div>
+        <div class="cs-item"><strong>PH:</strong> Phase (0.0=Trail, 0.5=Center, 1.0=Lead)</div>
+    </div>
+</div>
+
+END_FILE: templates/sections/cheat-sheet.html
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: templates/sections/mds-xsheet.html
+--------------------------------------------------------------------------------
+<div class="vop-sheet mds-sheet">
+    <div class="sheet-row mds-header">
+        <div>#</div>
+        <div data-title="Frame Number">FR</div>
+        <div data-title="Interpolation Mode">INT</div>
+        <div data-title="Corner/Sharp Turn">C</div>
+        <div data-title="Node Type">TYPE</div>
+        <div data-title="Proj Position (X,Y,Z)">POS<br>(X,Y,Z)</div>
+        <div data-title="Proj Rotation (P,R,Y)">ROT<br>(P,R,Y)</div>
+        <div data-title="BiPack Position (X,Y,Z)" class="bp-header-text">BP POS<br>(X,Y,Z)</div>
+        <div data-title="BiPack Rotation (P,R,Y)" class="bp-header-text">BP ROT<br>(P,R,Y)</div>
+        <div data-title="Projector Gel">PG</div>
+        <div data-title="Camera Gel">CG</div>
+        <div data-title="Exposure Time (Sec)">EXP</div>
+        <div></div>
+    </div>
+    <div id="mds_sheet_body"></div>
+</div>
+<div class="add-row">
+    <button class="mds-add-btn" onclick="addMDSKeyframe()">+ ADD MDS MASTER KEY</button>
+</div>
+
+END_FILE: templates/sections/mds-xsheet.html
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: templates/sections/sss-xsheet.html
+--------------------------------------------------------------------------------
+<div class="vop-sheet sss-sheet">
+    <div class="sheet-row sss-header">
+        <div>#</div>
+        <div data-title="Frame Number">FR</div>
+        <div data-title="Interpolation Mode">INT</div>
+        <div data-title="Corner/Sharp Turn">C</div>
+        <div data-title="Proj Position (X,Y,Z)">POS<br>(X,Y,Z)</div>
+        <div data-title="Proj Rotation (P,R,Y)">ROT<br>(P,R,Y)</div>
+        <div data-title="BiPack Position (X,Y,Z)" class="bp-header-text">BP POS<br>(X,Y,Z)</div>
+        <div data-title="BiPack Rotation (P,R,Y)" class="bp-header-text">BP ROT<br>(P,R,Y)</div>
+        <div data-title="Projector Gel">PG</div>
+        <div data-title="Camera Gel">CG</div>
+        <div data-title="Exposure Time (Sec)">EXP</div>
+        <div data-title="Shutter Duration">SD</div>
+        <div data-title="Playhead">PH</div>
+        <div></div>
+    </div>
+    <div id="sss_sheet_body"></div>
+</div>
+<div class="add-row" style="margin-top: 10px;">
+    <button class="sss-add-btn" onclick="addSSSKeyframe()">+ ADD SSS KEYFRAME</button>
+</div>
+
+END_FILE: templates/sections/sss-xsheet.html
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: templates/sections/status.html
+--------------------------------------------------------------------------------
+<div class="control-deck">
+    <div class="status-meta">
+        <span id="st_msg" class="status-text">IDLE</span>
+        
+        <div class="status-bar-progress">
+            <div id="st_bar" class="progress-bar"></div>
+        </div>
+
+        <span id="st_eta"></span>
+        
+        <button class="panic-btn" onclick="panic()">PANIC / ABORT</button>
+        <button class="nuke-btn" onclick="nukeMag()">NUKE MAG</button>
+        <button class="nuke-btn" onclick="nukeJob()">NUKE JOB</button>
+    </div>
+    
+    <div class="workprint-zone">
+        <a id="wp_download" href="#" style="display:none;" class="download-link"></a>
+    </div>
+</div>
+
+END_FILE: templates/sections/status.html
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+START_FILE: vop.py
+--------------------------------------------------------------------------------
+"""
+VOP Module:     vop.py
+Location:       vop.py
+Description:    Main Entry Point. Flask Web Server.               
+"""
+import os
+import sys
+import json
+import subprocess
+import logging
+import cv2
+import glob
+import math
+import socket
+
+idle_process = None
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
+from flask import Flask, jsonify, request, render_template, send_from_directory
+
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+app = Flask(__name__)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
+PROJ_BIPACK_DIR = os.path.join(BASE_DIR, "ProjBiPack")
+CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
+CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
+is_transitioning = False
+
+for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints")]:
+    os.makedirs(d, exist_ok=True)
+
+engine_process = None
+
+def launch_idle_screen(port=5000):
+    # Spawns the Pygame idle screen as a non-blocking background process
+    # using the global idle_process tracker initialized at the top of the file.
+    global idle_process
+    
+    # Ensure no duplicate processes are spawned to prevent framebuffer lockups
+    kill_idle_screen()
+
+    idle_path = os.path.join(BASE_DIR, "modules", "idle_screen.py")
+    # sys.executable ensures the subprocess uses the active venv Python binary
+    idle_process = subprocess.Popen([sys.executable, idle_path, str(port)])
+
+def kill_idle_screen():
+    global idle_process, is_transitioning
+    if idle_process is None:
+        return
+        
+    # Set the flag so the status heartbeat knows we are in limbo
+    is_transitioning = True
+    
+    # Grab a local reference and immediately clear the global pointer
+    proc = idle_process
+    idle_process = None
+    
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception as e:
+            print(f"[VOP SERVER] Error killing idle screen: {e}")
+
+def process_video_ingestion(filepath, target_dir):
+    """
+    Checks if an uploaded file is a video container.
+    If so, extracts all frames to zero-padded TIFFs matching the engine's
+    playhead expectations (0000.tif, 0001.tif) and deletes the original video.
+    
+    Extra thought. If future me needs, that could maybe be increased to 5 digits.
+    that would increase the incoming video's max length from 6 min 56 sec 16 frames to 
+    69 min 26 sec 16 frames (if my math is correct). But let's keep it at 4 digits for 
+    a max length "reel" of just under 7 minutes. It seems oddly realistic to real life systems
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
+
+    if ext in video_exts:
+        print(f"[VOP SERVER] Video detected! Extracting {filepath} to TIFF sequence...")
+
+        # The output pattern guarantees files like 0000.tif, 0001.tif, etc.
+        output_pattern = os.path.join(target_dir, "%04d.tif")
+
+        cmd = [
+            "ffmpeg", "-y", "-i", filepath,
+            "-start_number", "0",
+            output_pattern
+        ]
+
+        try:
+            # Supress output to keep the terminal clean, but let errors bubble up
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("[VOP SERVER] Frame extraction complete.")
+
+            # Clean up the original video container
+            os.remove(filepath)
+        
+        except subprocess.CalledProcessError as e:
+            print("[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
+            
+def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
+    z_dist = abs(float(ref_z))
+    if z_dist == 0: z_dist = 0.1 
+        
+    fov_rad = math.radians(float(fov))
+    screen_aspect = screen_width / screen_height
+    
+    # Calculate full physical dimensions of the camera's view
+    frustum_h = 2.0 * z_dist * math.tan(fov_rad / 2.0)
+    frustum_w = frustum_h * screen_aspect
+    
+    # The unscaled OpenGL quad spans from -1 to 1, meaning its base size is 2x2 units.
+    # We calculate the scale required to fit the width and the height separately,
+    # remembering to divide by 2.0 because of the quad's base size.
+    scale_for_width = frustum_w / (2.0 * img_aspect)
+    scale_for_height = frustum_h / 2.0
+    
+    # Return whichever scale is smaller to guarantee it fits entirely (letterbox or pillarbox)
+    return min(scale_for_width, scale_for_height)
+
+def dispatch_engine(task_type, payload):
+    global engine_process
+    print(f"\n[VOP SERVER] ACTION: {task_type.upper()}")
+
+    ## Terminate the idle screen immediately before launching the render engine
+    ## This prevents KMSDRM resource locking conflicts on the Pi hardware.
+    kill_idle_screen()
+
+    payload['type'] = task_type
+    with open(CURRENT_JOB_FILE, 'w') as f:
+        json.dump(payload, f, indent=4)
+        
+    # Defensive check for engine_process
+    if engine_process is not None and engine_process.poll() is None:
+        curr_engine = engine_process
+        engine_process = None # Clear global before waiting
+        curr_engine.terminate()
+        try:
+            curr_engine.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            curr_engine.kill()
+        
+    engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
+    engine_process = subprocess.Popen([sys.executable, engine_script, "--job", CURRENT_JOB_FILE])
+    
+    if task_type in ['preview', 'cam_preview']:
+        engine_process.wait()
+
+@app.route('/')
+def index(): 
+    return render_template('index.html')
+
+@app.route('/status', methods=['GET'])
+def status():
+    global engine_process, idle_process, is_transitioning
+    wp_dir = os.path.join(BASE_DIR, "WorkPrints")
+    latest_wp = ""
+    try:
+        wps = glob.glob(os.path.join(wp_dir, "*.mp4"))
+        if wps: latest_wp = os.path.basename(max(wps, key=os.path.getctime))
+    except: pass
+    
+    # v0.2.17 Update: Base dictionary merge for robust state hydration
+    params = {}
+    
+    # 1. ALWAYS load the default configuration first to establish the baseline
+    default_job_file = os.path.join(BASE_DIR, "configs", "default_job.json")
+    if os.path.exists(default_job_file):
+        try:
+            with open(default_job_file, 'r') as f: 
+                params = json.load(f)
+        except: pass
+
+    # 2. Layer the active session over the top to overwrite defaults with user choices
+    if os.path.exists(CURRENT_JOB_FILE):
+        try:
+            with open(CURRENT_JOB_FILE, 'r') as f: 
+                active_job = json.load(f)
+                if active_job:
+                    params.update(active_job)
+        except: pass
+
+    # 3. Engine heartbeat check and required Flask return statements
+    if engine_process is not None and engine_process.poll() is None:
+        is_transitioning = False # Engine has successfully taken over the lock
+        try:
+            with open("/tmp/vop_heartbeat", "r") as f:
+                hb = json.load(f)
+                return jsonify({"status": "rendering", "heartbeat": hb, "params": params, "latest_wp": latest_wp})
+        except:
+            return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
+    
+    # 4. ENGINE IS DEAD/IDLE
+    
+    # If we are waiting for hardware to clear (transitioning), do not revive idle screen
+    if is_transitioning:
+        return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
+
+    # If the engine is not running, but the idle screen is also dead, revive it.
+    if idle_process is None or idle_process.poll() is not None:
+        # This must be indented 4 spaces to stay within the IF scope
+        launch_idle_screen(5000)
+
+    # This return must be un-indented so it executes regardless of the IF block above
+    return jsonify({
+        "status": "idle", 
+        "params": params, 
+        "latest_wp": latest_wp, 
+        "workprint": f"/workprints/{latest_wp}" if latest_wp else None
+    })
+
+@app.route('/upload_target', methods=['POST'])
+def upload_target():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    print(f"[VOP SERVER] ACTION: UPLOAD PROJ MAG -> {file.filename}")
+
+    # Clear out the old files
+    for f in os.listdir(PROJ_MAG_DIR):
+        os.remove(os.path.join(PROJ_MAG_DIR, f))
+    
+    # Save the new file
+    filepath = os.path.join(PROJ_MAG_DIR, file.filename)
+    file.save(filepath)
+    
+    # Kick off the ingestion module ---
+    process_video_ingestion(filepath, PROJ_MAG_DIR)
+
+    return jsonify({"status": "ok", "filename": file.filename})
+
+@app.route('/upload_proj_bipack', methods=['POST'])
+def upload_proj_bipack():
+    print("[VOP SERVER] UPLOADING: ProjBiPack Mask")
+    file = request.files['file']
+    for f in os.listdir(PROJ_BIPACK_DIR): os.remove(os.path.join(PROJ_BIPACK_DIR, f))
+    file.save(os.path.join(PROJ_BIPACK_DIR, file.filename))
+    return jsonify({"status": "ok", "filename": file.filename})
+
+@app.route('/nuke_proj_mag', methods=['POST'])
+def nuke_proj_mag():
+    print("[VOP SERVER] ACTION: NUKE PROJ MAG")
+    for f in os.listdir(PROJ_MAG_DIR): os.remove(os.path.join(PROJ_MAG_DIR, f))
+    return jsonify({"status": "ok"})
+
+@app.route('/nuke_proj_bipack', methods=['POST'])
+def nuke_proj_bipack():
+    print("[VOP SERVER] ACTION: NUKE PROJ BIPACK")
+    for f in os.listdir(PROJ_BIPACK_DIR): os.remove(os.path.join(PROJ_BIPACK_DIR, f))
+    return jsonify({"status": "ok"})
+
+@app.route('/get_img_aspect', methods=['GET'])
+def get_img_aspect():
+    target = request.args.get('mag', 'proj')
+    check_dir = PROJ_BIPACK_DIR if target == 'bipack' else PROJ_MAG_DIR
+    try:
+        valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+        files = sorted([f for f in os.listdir(check_dir) if f.lower().endswith(valid_exts)])
+        
+        if files:
+            img = cv2.imread(os.path.join(check_dir, files[0]))
+            if img is not None: 
+                h, w = img.shape[:2]
+                aspect = w / h
+                print(f"[VOP SERVER] {target.upper()} Aspect Assessed: {w}x{h} ({aspect:.4f})")
+                return jsonify({"aspect": aspect})
+    except Exception as e: 
+        print(f"[VOP SERVER] Aspect Calc Error: {e}")
+        
+    return jsonify({"aspect": 1.777})
+
+@app.route('/calculate_fit', methods=['POST'])
+def calculate_fit():
+    print("[VOP SERVER] ACTION: CALCULATE FIT FOV")
+    data = request.json
+    try:
+        fov = float(data.get('fov', 45.0))
+        ref_z = float(data.get('ref_z', 1.0))
+        aspect = float(data.get('aspect_ratio', 1.777))
+        
+        req_scale = calculate_static_fit_scale(fov, ref_z, aspect)
+        return jsonify({"status": "ok", "scale": req_scale})
+    except Exception as e:
+        print(f"[VOP SERVER] Fit Calc Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 400
+        
+@app.route('/preview', methods=['POST'])
+def preview():
+    dispatch_engine('preview', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/cam_preview', methods=['POST'])
+def cam_preview():
+    dispatch_engine('cam_preview', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/execute', methods=['POST'])
+def execute_seq():
+    dispatch_engine('execute', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/measure_noise', methods=['POST'])
+def measure_noise():
+    # Dispatches the 'measure_noise' task to engine.py in a background process
+    dispatch_engine('measure_noise', request.json)
+    # Returns a 200 OK to the Javascript fetch so the UI knows the command was accepted
+    return jsonify({"status": "started"})
+
+@app.route('/map_hot_pixels', methods=['POST'])
+def map_hot_pixels():
+    dispatch_engine('map_hot_pixels', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/nuke_hot_pixels', methods=['POST'])
+def nuke_hot_pixels():
+    hp_file = os.path.join(BASE_DIR, "static", "hot_pixels.json")
+    if os.path.exists(hp_file):
+        os.remove(hp_file)
+    return jsonify({"status": "clear"})
+
+@app.route('/panic', methods=['POST'])
+def panic():
+    print("[VOP SERVER] ACTION: PANIC STOP")
+    global engine_process
+
+    # Ensure the idle screen is also terminated on a hard stop command
+    kill_idle_screen()
+
+    if engine_process and engine_process.poll() is None:
+        engine_process.terminate()
+        try:
+            engine_process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            engine_process.kill()
+            
+    subprocess.run(["pkill", "-9", "rpicam-still"])
+    return jsonify({"status": "panic_executed"})
+
+@app.route('/nuke_mag', methods=['POST'])
+def nuke_mag():
+    print("[VOP SERVER] ACTION: NUKE CAM MAG")
+    for f in os.listdir(CAM_MAG_DIR):
+        if f.endswith(".tif"): os.remove(os.path.join(CAM_MAG_DIR, f))
+    return jsonify({"status": "mag_cleared"})
+
+@app.route('/nuke_job', methods=['POST'])
+def nuke_job():
+    print("[VOP SERVER] ACTION: NUKE CURRENT JOB")
+    if os.path.exists(CURRENT_JOB_FILE):
+        os.remove(CURRENT_JOB_FILE)
+    return jsonify({"status": "job_nuked"})
+
+@app.route('/workprints/<filename>')
+def serve_workprint(filename):
+    return send_from_directory(os.path.join(BASE_DIR, "WorkPrints"), filename)
+
+def get_ip():
+    # Utility function to determine the local routing IP address.
+    # Uses a dummy UDP connection to 8.8.8.8 to force the OS to resolve the local interface IP.
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+        
+if __name__ == '__main__':
+    port = 5000
+    ip_addr = get_ip()
+
+    # Clear terminal space and print the formatted telemetry block
+    print("\n" + "="*50)
+    print(f" VOP Server is online.")
+    print(f" Status: Waiting for jobs")
+    print(f" WebGUI: http://{ip_addr}:{port}")
+    print("="*50 + "\n" )
+
+    # Launch the idle screen to the monitor upon initial system startup
+    launch_idle_screen(port)
+
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+END_FILE: vop.py
+--------------------------------------------------------------------------------
+
+
+
+================================================================================
+EOF - END OF PROJECT DUMP
+================================================================================

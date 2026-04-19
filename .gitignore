@@ -34,7 +34,7 @@ __pycache__/
 .vscode/
 
 # Ignore the dump.txt's
-*dump.txt
+vop_dump*
 
 # --- Exceptions ---
 !readme_graphics/
