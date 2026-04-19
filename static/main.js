@@ -116,6 +116,20 @@ async function nukeJob() {
     }
 }
 
+/* Darkroom Processing: LAB/INVERT
+ * Dispatches a background task to invert the mag of the latent image buffer.
+ * Highly destructive: Overwrites the original files in CamMag.
+ */
+async function triggerLabInvert() {
+    if (confirm("WARNING: LAB/INVERT\n\nThis will mathematically invert all exposedframes in the CamMag(acting as a negative). This overwrites the original files and is highly destructive. Are you sure you want to proceed?")){
+        await fetch('/lab_invert', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(collectParams())
+        });
+    }
+}
+
 async function calcFitScale(scaleId, fitZId, magType) {
     const fov = parseFloat(document.getElementById('fov').value);
     const zDist = Math.abs(parseFloat(document.getElementById(fitZId).value)) || 1.0;
