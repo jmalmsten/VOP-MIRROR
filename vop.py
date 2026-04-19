@@ -46,15 +46,25 @@ def launch_idle_screen(port=5000):
     idle_process = subprocess.Popen([sys.executable, idle_path, str(port)])
 
 def kill_idle_screen():
-    # Terminates the Pygame process to free up the hardware framebuffer for the engine.
     global idle_process
-    if idle_process is not None and idle_process.poll() is None:
-        idle_process.terminate()
+    # If it's already None, there's nothing to do
+    if idle_process is None:
+        return
+        
+    # Grab a local reference and immediately clear the global pointer
+    proc = idle_process
+    idle_process = None
+    
+    # Check if the local process reference is still active
+    if proc.poll() is None:
         try:
-            idle_process.wait(timeout=2.0) # Wait up to 2 seconds for clean exit
+            proc.terminate()
+            proc.wait(timeout=2.0)
         except subprocess.TimeoutExpired:
-            idle_process.kill() # Drop the hammer if it hangs
-        idle_process = None
+            # Check the local reference again to be safe
+            proc.kill()
+        except Exception as e:
+            print(f"[VOP SERVER] Error killing idle screen: {e}")
 
 def process_video_ingestion(filepath, target_dir):
     """
@@ -120,17 +130,20 @@ def dispatch_engine(task_type, payload):
     ## Terminate the idle screen immediately before launching the render engine
     ## This prevents KMSDRM resource locking conflicts on the Pi hardware.
     kill_idle_screen()
-    
+
     payload['type'] = task_type
     with open(CURRENT_JOB_FILE, 'w') as f:
         json.dump(payload, f, indent=4)
         
+    # Defensive check for engine_process
     if engine_process is not None and engine_process.poll() is None:
-        engine_process.terminate()
+        curr_engine = engine_process
+        engine_process = None # Clear global before waiting
+        curr_engine.terminate()
         try:
-            engine_process.wait(timeout=2.0)
+            curr_engine.wait(timeout=2.0)
         except subprocess.TimeoutExpired:
-            engine_process.kill()
+            curr_engine.kill()
         
     engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
     engine_process = subprocess.Popen([sys.executable, engine_script, "--job", CURRENT_JOB_FILE])
