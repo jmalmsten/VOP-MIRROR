@@ -598,3 +598,11 @@ hr.section-divider {
     background: var(--color-accent);
     color: #000;
 }
+
+/* Status Bar Action Buttons Container */
+.status-actions {
+    margin-top:         10px;
+    display:            flex;
+    justify-content:    flex-end;
+    gap:                10px;
+}

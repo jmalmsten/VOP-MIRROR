@@ -8,7 +8,7 @@
         <span id="st_eta"></span>
     </div>
     
-    <div class="status-actions" style="margin-top: 10px; display: flex; gap: 10px;">
+    <div class="status-actions">
         <button class="io-btn" onclick="exportJob()" title="Export current session to JSON">EXPORT JOB</button>
         <button class="io-btn" onclick="document.getElementById('import_file').click()" title="Load session from JSON">IMPORT JOB</button>
         <input type="file" id="import_file" style="display:none" accept=".json" onchange="importJob(this)">
