@@ -50,8 +50,17 @@ def run_vop_engine(job_path):
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 0)
     
+    # Hardware Init: Aggressive KMSDRM lock acquisition
     WIDTH, HEIGHT = 1920, 1080
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+    
+    try:
+        # Attempt 1: Standard grab of the DRM master lock
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+    except pygame.error:
+        # If the idle screen hasn't fully released the lock, wait and try a "Hail Mary"
+        log_audit("Hardware busy, retrying KMSDRM lock in 1s...")
+        time.sleep(1.0)
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
     
     ctx, prog, vao = gfx.init_render_pipeline()
     tex_mgr = gfx.TextureManager(ctx, os.path.join(base_path, "ProjMag"), job_data)
@@ -162,7 +171,7 @@ def run_vop_engine(job_path):
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
                 
             pygame.display.flip()
-        
+        g
         cam_proc.wait() 
         
         if is_preview:

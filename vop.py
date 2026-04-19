@@ -27,6 +27,7 @@ PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
 PROJ_BIPACK_DIR = os.path.join(BASE_DIR, "ProjBiPack")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
+is_transitioning = False
 
 for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints")]:
     os.makedirs(d, exist_ok=True)
@@ -46,22 +47,22 @@ def launch_idle_screen(port=5000):
     idle_process = subprocess.Popen([sys.executable, idle_path, str(port)])
 
 def kill_idle_screen():
-    global idle_process
-    # If it's already None, there's nothing to do
+    global idle_process, is_transitioning
     if idle_process is None:
         return
         
+    # Set the flag so the status heartbeat knows we are in limbo
+    is_transitioning = True
+    
     # Grab a local reference and immediately clear the global pointer
     proc = idle_process
     idle_process = None
     
-    # Check if the local process reference is still active
     if proc.poll() is None:
         try:
             proc.terminate()
             proc.wait(timeout=2.0)
         except subprocess.TimeoutExpired:
-            # Check the local reference again to be safe
             proc.kill()
         except Exception as e:
             print(f"[VOP SERVER] Error killing idle screen: {e}")
@@ -157,7 +158,7 @@ def index():
 
 @app.route('/status', methods=['GET'])
 def status():
-    global engine_process, idle_process
+    global engine_process, idle_process, is_transitioning
     wp_dir = os.path.join(BASE_DIR, "WorkPrints")
     latest_wp = ""
     try:
@@ -187,6 +188,7 @@ def status():
 
     # 3. Engine heartbeat check and required Flask return statements
     if engine_process is not None and engine_process.poll() is None:
+        is_transitioning = False # Engine has successfully taken over the lock
         try:
             with open("/tmp/vop_heartbeat", "r") as f:
                 hb = json.load(f)
@@ -195,11 +197,23 @@ def status():
             return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
     
     # 4. ENGINE IS DEAD/IDLE
+    
+    # If we are waiting for hardware to clear (transitioning), do not revive idle screen
+    if is_transitioning:
+        return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
+
     # If the engine is not running, but the idle screen is also dead, revive it.
     if idle_process is None or idle_process.poll() is not None:
+        # This must be indented 4 spaces to stay within the IF scope
         launch_idle_screen(5000)
 
-    return jsonify({"status": "idle", "params": params, "latest_wp": latest_wp, "workprint": f"/workprints/{latest_wp}" if latest_wp else None})
+    # This return must be un-indented so it executes regardless of the IF block above
+    return jsonify({
+        "status": "idle", 
+        "params": params, 
+        "latest_wp": latest_wp, 
+        "workprint": f"/workprints/{latest_wp}" if latest_wp else None
+    })
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
