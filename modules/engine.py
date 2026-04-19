@@ -349,7 +349,7 @@ def run_vop_engine(job_path):
                 filepath = os.path.join(cam_mag_dir, f)
 
                 # Load the frame natively as a 16-bit unsigned integer array
-                img = cv2.imread(filepath, cv.IMREAD_UNCHANGED)
+                img = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
                 if img is not None and img.dtype == np.uint16:
                     # Mathematical Inversion: 65535 is the absolute peak of 16-bit linear space.
                     # Subtracting the pixel value from peak inverts the linear curve.
