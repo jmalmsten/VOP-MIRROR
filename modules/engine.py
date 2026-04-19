@@ -23,8 +23,17 @@ import color_utils as cutil
 import graphics_utils as gfx
 
 import traceback
+import signal
 
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
+
+def handle_sigterm(signum, frame):
+    """Catches the Panic/Kill signal and gracefully releases the DRM master"""
+    log_audit("Caught SIGTERM! Releasing KMSDRM hardware lock...")
+    pygame.quit()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 def log_audit(msg): 
     print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.1.9): {msg}", flush=True)

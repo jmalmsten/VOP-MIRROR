@@ -7,9 +7,15 @@ import pygame
 import os
 import sys
 import socket
+import signal
 
 # Force Pygame to bypass X11 and use the hardware framebuffer
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
+
+def handle_sigterm(signum, frame):
+    """Catches the kill signal from vvop.py and releases the hardware lock cleanly"""
+    pygame.quit()
+    sys.exit(0)
 
 def get_local_ip():
     try:
