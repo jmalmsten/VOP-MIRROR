@@ -1,7 +1,7 @@
 #!/bin/bash
 # VOP Automated Deployment Script
 # Target: Raspberry Pi OS Lite
-# Version: 1.2.0
+# Version: 1.3.0
 #######################################################################################
 #
 #       Explaining why each thing is needed:
@@ -74,7 +74,7 @@
 #                                 camera frustum and aspect ratio scaling
 #   ___________________________________________________________________________________
 #
-#   Lastly, User permissions:
+#   Thirdly, User permissions:
 #   
 #   - video     - Grants Pygame and the KMS/DRM driver direct write access to the 
 #                 physical display hardware (e.g., /dev/dri/card0). This allows the 
@@ -89,10 +89,15 @@
 #                 hardware without an x11/wayland server. It also requires access to 
 #                 the TTY input device to catch keystrokes (like Ctrl-C or Pygame event
 #                 loops)
+#   ___________________________________________________________________________________
+#
+#   Lastly, Systemd Daemon:
+#
+#   - vop.service - The script automatically generates and enables a systemd service.
+#                   This ensures the VOP starts automatically on boot and continues 
+#                   running securely in the background even if you disconnect SSH.
 #
 #######################################################################################
-
-
 
 # 1. Halt execution immediately if any command fails
 set -e
@@ -138,23 +143,54 @@ echo "Compiling Pygame from source for KMSDRM support (this will take a few minu
 echo "Applying DRM, Render, and Input permissions to user: $USER..."
 sudo usermod -a -G video,render,input "$USER"
 
-# Make the start script executable automatically
+# Make the manual start script executable (kept for manual debugging if needed)
 if [ -f "run_vop.sh" ]; then
     chmod +x run_vop.sh
 fi
 
+# 7. Systemd Service Creation & Enabling
+echo "Configuring systemd service for automatic startup..."
+SERVICE_FILE="vop.service"
+
+# This block creates the vop.service file directly, dynamically injecting the current path and user
+cat <<EOF > "$SERVICE_FILE"
+[Unit]
+Description=VOP Server Daemon
+After=network.target
+
+[Service]
+User=$USER
+Group=$USER
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$SCRIPT_DIR/$VENV_DIR/bin/python3 $SCRIPT_DIR/vop.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Installing and enabling vop.service..."
+# Move the newly generated file into the OS system directory
+sudo mv "$SERVICE_FILE" /etc/systemd/system/
+# Tell the OS to refresh its list of available services
+sudo systemctl daemon-reload
+# Tell the OS to launch this service automatically on every boot
+sudo systemctl enable vop.service
+
 echo "========================================"
 echo "Deployment Complete."
-echo "Permissions have been modified. A system "
-echo "reboot is required."
+echo "Permissions modified and systemd service installed."
+echo "A system reboot is required."
 echo "========================================"
-echo "              - Bonus -"
-echo " To simplify starting the VOP. I have "
-echo " provided a bash script that starts the " 
-echo " venv for you. After reboot, find "
-echo " run_vop.sh run it to boot up the VOP"
+echo "              - Daemon Info -"
+echo " The VOP will now start automatically on boot."
+echo " To view live terminal logs at any time, run:"
+echo " sudo journalctl -u vop.service -f"
+echo "========================================"
 
-# 7. Reboot Prompt
+# 8. Reboot Prompt
 read -r -p "Reboot the system now? (y/N): " REBOOT_PROMPT
 if [[ "$REBOOT_PROMPT" =~ ^[Yy]$ ]]; then
     echo "Rebooting..."
