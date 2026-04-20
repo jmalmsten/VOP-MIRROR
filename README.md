@@ -28,6 +28,8 @@ So. Once again...
 - Added Export and Import buttons to enable saving and loading jobs. And during import, it will check to see if the version number matches the currently installed version.
 - Added LAB/INVERT button that inverts the frames that are in CamMag. This enables easier holdout matte workflows within the VOP.
 - Added a first draft of the deployment script 
+- Modified the deployment so the VOP now runs with systemd on the Pi. It therefore runs when the Pi boots and terminal output can be monitored with journal. And this also unshackles it from the current SSH connection. So you can start a long running job of hours in length. Turn off the client computer. Go to another client computer, connect and things will be continuing like normal. 
+- Removed the standalone changelog.md since the release notes are documented here in the readme and on my website.
 
 ## v0.6.2 - (20260406)
 
