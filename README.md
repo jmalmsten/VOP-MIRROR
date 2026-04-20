@@ -30,6 +30,10 @@ So. Once again...
 - Added a first draft of the deployment script 
 - Modified the deployment so the VOP now runs with systemd on the Pi. It therefore runs when the Pi boots and terminal output can be monitored with journal. And this also unshackles it from the current SSH connection. So you can start a long running job of hours in length. Turn off the client computer. Go to another client computer, connect and things will be continuing like normal. 
 - Removed the standalone changelog.md since the release notes are documented here in the readme and on my website.
+  
+---
+## Archived Release Notes:
+If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
 
 ## v0.6.2 - (20260406)
 
@@ -37,12 +41,6 @@ So. Once again...
 - Added run_vop.sh to simplify starting the vop
 - Added the DVD-screensaver for when the VOP is idle
 - Added drop-zones to file uploads to circumvent any browser-related hangs when a folder disappears."
-  
-#### Fixed
----
-## Archived Release Notes:
-If you are interested in older ones starting from v0.6.0. You can visit [jmalmsten.com/category/vop/](https://jmalmsten.com/category/vop/)
-
 
 ### V0.6.1 - (20260404) - "Changes to for the installation tutorial
 #### Added
