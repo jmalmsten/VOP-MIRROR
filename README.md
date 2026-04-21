@@ -1,7 +1,6 @@
 > [!WARNING]
 > **DISCLAIMER!!!**
-
-> *USE AT YOUR OWN RISK.** This project is a learning experiment coded in collaboration with AI. If you brick your hardware, I cannot provide support. Run this code only if you accept the risks of experimental software.
+> *USE AT YOUR OWN RISK.** This project is a learning experiment. If you brick your hardware, I cannot provide support. Run this code only if you accept the risks of experimental software.
 
 ![VOP Logo with a colorful streak](readme_graphics/vop-smear-logo-001.jpg)
 ---
@@ -37,7 +36,7 @@ Check the Wiki for current instructions that should work. At least, it has worke
 - [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
 
 # Contributing
-Please report bugs or suggest improvements via **Issues**. As this is a personal project, I prioritize workflow-specific features, but I welcome technical fixes.
+Please report bugs or suggest improvements via **Issues**. As this is a personal project, I will filter out what doesn't fit the intended workflow of the VOP, but I welcome suggestions, bug reports and solutions I have yet to think of!
 
 **License:** This project is open-source under the [AGPL-3.0 License](LICENSE).
 
