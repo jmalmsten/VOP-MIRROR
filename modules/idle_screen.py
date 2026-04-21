@@ -116,6 +116,8 @@ def main():
     running = True
     
     while running:
+        # Prevent SDL 2 event queue overflow and CPU lockup
+        pygame.event.pump()
         screen.fill(BLACK)
 
         # Update the top-left coordinate of the unified bounding box
