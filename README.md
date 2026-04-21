@@ -24,21 +24,21 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 ---
 > [!NOTE]
 > **TLDR:**
-
-### Technical Features
-- **16-bit Pipeline:** All processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
-- **Motion Blur:** Move artwork on-screen during exposure to create physical light smears.
-- **Virtual Gels & BiPacks:** Use digital mattes and color overlays to simulate traditional optical effects.
-
-### Hardware needed:
-- **Raspberry Pi 5 16GB** - The VOP uses less than 1 GB of RAM so a pi4 with 4GB should be plenty.  
-- **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens
-- **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
-- **HDMI Monitor** - Preferably an OLED (although the [black crush system](https://codeberg.org/jmalmsten-com/VOP/wiki/NoiseCrush) introduced in v0.6.3 helps a lot here for cheaper screens)
-
-## Installation and use
-Check the Wiki for current instructions that should work. At least, it has worked for me. 
-- [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
+>
+> ### Technical Features
+> - **16-bit Pipeline:** All > processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
+> - **Motion Blur:** Move artwork on-screen during exposure to create physical light smears.
+> - **Virtual Gels & BiPacks:** Use digital mattes and color overlays to simulate traditional optical effects.
+> 
+> ### Hardware needed:
+> - **Raspberry Pi 5 16GB** - The VOP uses less than 1 GB of RAM so a pi4 with 4GB should be plenty.  
+> - **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens
+>- **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
+> - **HDMI Monitor** - Preferably an OLED (although the [black crush system](https://codeberg.org/jmalmsten-com/VOP/wiki/NoiseCrush) introduced in v0.6.3 helps a lot here for cheaper screens)
+> 
+> ## Installation and use
+> Check the Wiki for current instructions that should work. At least, it has worked for me. 
+> - [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
 
 # Contributing
 Please report bugs or suggest improvements via **[ISSUES](https://codeberg.org/jmalmsten-com/VOP/issues)**. As this is a personal project, I will filter out what doesn't fit the intended workflow of the VOP, but I welcome suggestions, bug reports and solutions I have yet to think of!
