@@ -197,6 +197,7 @@ def run_vop_engine(job_path):
 
         anchor = time.time()
         while (time.time() - anchor) * 1000 < total_ms:
+            pygame.event.pump() # <<< inserted this to prevent Pi4 CPU lockup
             elapsed = (time.time() - anchor) * 1000
             
             if 500.0 <= elapsed <= (500.0 + smr_ms):
