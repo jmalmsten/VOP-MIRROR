@@ -71,7 +71,11 @@ def main():
     screen_h = infoObject.current_h
 
     # Create the hardware display surface
-    screen = pygame.display.set_mode((screen_w, screen_h), pygame.FULLSCREEN)
+    screen = pygame.display.set_mode(
+        (screen_w, screen_h), 
+        pygame.FULLSCREEN | pygame.DOUBLEBUF | pygame.SCALED,
+        vsync=1
+    )
 
     # Hiding the mouse after the display context exists
     pygame.mouse.set_visible(False)
