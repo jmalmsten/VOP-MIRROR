@@ -34,7 +34,7 @@ import os
 import sys
 import socket
 import signal
-# import time
+import time
 
 # Force Pygame to bypass X11 and use the hardware framebuffer
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
@@ -152,6 +152,6 @@ def main():
 
         pygame.display.flip()
         # clock.tick(60)
-        # time.sleep(0.033)
+        time.sleep(0.033)
 if __name__ == "__main__":
     main()
