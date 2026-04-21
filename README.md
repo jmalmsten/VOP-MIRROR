@@ -1,5 +1,5 @@
-> [!DISCLAIMER]
-> *USE AT YOUR OWN RISK.** This project is a learning experiment. If you brick your hardware, I cannot provide support. Run this code only if you accept the risks of experimental software.
+> [!IMPORTANT]
+> **USE AT YOUR OWN RISK.** This project is a learning experiment. If you brick your hardware, I cannot provide support. Run this code only if you accept the risks of experimental software.
 
 ![VOP Logo with a colorful streak](readme_graphics/vop-smear-logo-001.jpg)
 ---
