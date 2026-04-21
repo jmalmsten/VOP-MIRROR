@@ -10,7 +10,7 @@ The VOP (Video Optical Printer) is a combination of hardware and software to mak
 
 ### What does it aim to do?
 
-In essence. In its simplest form. It takes an input image. And "projects" it onto an HDMI screen in a virtual 3D plane. And during a long exposure, the camera sensor records the light coming off that HDMI screen to a frame that's saved in a folder called CamMag. This image is saved as a 16 bit linear color tiff. And if you do another exposure and target that same tiff. The VOP will merge the two using additive mix. The system is called here LIME. (Latent Image Multiple Exposures)
+In essence. In its simplest form. It takes an input image. And "projects" it onto an HDMI screen in a virtual 3D plane. And during a long exposure, the camera sensor records the light coming off that HDMI screen to a frame that's saved in a folder called CamMag. This image is saved as a 16 bit linear color tiff. And if you do another exposure and target that same tiff. The VOP will merge the two using additive mix. This additive workflow is named LIME. (Latent Image Multiple Exposures)
 
 This is all orchestrated with an exposure sheet to make a sequence. That sequence can then be moved to a desktop for further digital compositing and NLE work.
 
@@ -22,16 +22,18 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 **In short. If you want to try out making video and motion graphics the way motion pictures used to make things before computers arrived. Then have a go with using the VOP.**
 
 ---
+
+
 > [!NOTE]
-> **TLDR:**
+> ## TLDR
 >
 > ### Technical Features
-> - **16-bit Pipeline:** All > processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
+> - **16-bit Pipeline:** All processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
 > - **Motion Blur:** Move artwork on-screen during exposure to create physical light smears.
 > - **Virtual Gels & BiPacks:** Use digital mattes and color overlays to simulate traditional optical effects.
 > 
 > ### Hardware needed:
-> - **Raspberry Pi 5 16GB** - The VOP uses less than 1 GB of RAM so a pi4 with 4GB should be plenty.  
+> - **Raspberry Pi 5 or 4 (4GB+)** - The VOP is lightweight, typically using <1GB of RAM  
 > - **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens
 >- **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
 > - **HDMI Monitor** - Preferably an OLED (although the [black crush system](https://codeberg.org/jmalmsten-com/VOP/wiki/NoiseCrush) introduced in v0.6.3 helps a lot here for cheaper screens)
