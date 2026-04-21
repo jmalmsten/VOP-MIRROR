@@ -22,6 +22,13 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 **In short. If you want to try out making video and motion graphics the way motion pictures used to make things before computers arrived. Then have a go with using the VOP.**
 
 ---
+> [!NOTE]
+> **TLDR:**
+
+### Technical Features
+- **16-bit Pipeline:** All processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
+- **Motion Blur:** Move artwork on-screen during exposure to create physical light smears.
+- **Virtual Gels & BiPacks:** Use digital mattes and color overlays to simulate traditional optical effects.
 
 ### Hardware needed:
 - **Raspberry Pi 5 16GB** - The VOP uses less than 1 GB of RAM so a pi4 with 4GB should be plenty.  
