@@ -33,7 +33,7 @@ So. Once again...
 - Successfully tested with deployment to a USB stick instead of SD card
 - Rebuilt the RGB fixer to be deployed with its own deployment script. Still found among the CaliTools
 - Fixed license compliance and removed mention of PISS in the copyright text and license. 
-  
+
 ---
 
 ## v0.6.2 - (20260406)
@@ -135,7 +135,7 @@ The **"disadvantage"** is that once the new exposure is added to the latent imag
 * What I also am thinking of doing is making some sort of API or something available that let's the end user pipe in a video feed of their choosing from an external source. This can then be paired with the ADM to have physical artwork in front of a virtual volume stage. And the VOP can tell the external source when to advance or regress. But... this is a pipe-dream thing. I am not expecting to reach that stage any time soon. 
 
 ### What does it NOT aim to do?
-* If you are looking for a reliable tool to do high end realistic composites with nondestructive workflows and deep 3D implementations. Look elsewhere. This is a tool to take 2D planes. Move them in virtual 3D space and expose a latent image file. If you mess up with the VOP. You need to start over. If you want to put in an .OBJ as the projection image and manipulate PBR materials and real time raytraced lighting. You'd need to fork this project. Because it's not at all in my targets anytime soon. 
+* If you are looking for a reliable tool to do high end realistic composites with nondestructive workflows and deep 3D implementations. Look elsewhere. This is a tool to take 2D planes. Move them in virtual 3D space and expose a latent image file. If you mess up with the VOP. You need to start over. If you want to put in an .OBJ as the projection image and manipulate PBR materials and real time raytraced lightgit clone -b v0.6.3 https://codeberg.org/jmalmsten-com/VOP.giting. You'd need to fork this project. Because it's not at all in my targets anytime soon. 
 
 * If you are looking at this and thinking, why on earth do I not use the power of a modern GPU with Blender and do all these things all inside a desktop computer? Then all I can say is simply... 
     > "If I wanted the perfect sound... I would have gotten the CD."
