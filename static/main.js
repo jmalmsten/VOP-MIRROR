@@ -2,6 +2,34 @@
 Description:    Frontend logic.
 */
 
+/*
+#
+###########################################################################
+#
+#                                   VOP
+#                       Copyright (C) 2025  jmalmsten
+#
+#     This program is free software: you can redistribute it and/or modify 
+#     it under the terms of the GNU Affero General Public License as 
+#     published by the Free Software Foundation, either version 3 of the 
+#     License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful, but 
+#     WITHOUT ANY WARRANTY; without even the implied warranty of 
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+#     Affero General Public License for more details.
+#
+#     You should have received a copy of the GNU Affero General Public 
+#     License along with this program.  If not, see 
+#     <http://www.gnu.org/licenses/>.
+#
+#     Source code for this application can be found at 
+#     https://codeberg.org/jmalmsten-com/VOP
+#
+###########################################################################
+
+*/
+
 let local_sync_ts = 0; 
 let mdsMasterCount = 0;
 let sssMasterCount = 0;
@@ -113,6 +141,20 @@ async function nukeJob() {
     if (confirm("Reset current session to default_job.json? This cannot be undone.")) {
         await fetch('/nuke_job', {method: 'POST'});
         window.location.reload(); // Triggers the fresh /status check
+    }
+}
+
+/* Darkroom Processing: LAB/INVERT
+ * Dispatches a background task to invert the mag of the latent image buffer.
+ * Highly destructive: Overwrites the original files in CamMag.
+ */
+async function triggerLabInvert() {
+    if (confirm("WARNING: LAB/INVERT\n\nThis will mathematically invert all exposedframes in the CamMag(acting as a negative). This overwrites the original files and is highly destructive. Are you sure you want to proceed?")){
+        await fetch('/lab_invert', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(collectParams())
+        });
     }
 }
 
@@ -326,6 +368,34 @@ setInterval(async () => {
         const st = await r.json();
         
         if (isFirstLoad && st.params && Object.keys(st.params).length > 0) {
+
+            // --- Auto-reconstruct keyframe rows from saved data ---
+            let maxMDS = 0;
+            let maxSSS = 0;
+
+            // 1. Scan the imported parameters to find the highest keyframe index
+            for (const key of Object.keys(st.params)) {
+                if (key.startsWith('mds_f')) {
+                    const idx = parseInt(key.replace('mds_f', ''));
+                    if (idx > maxMDS) maxMDS = idx;
+                }
+                if (key.startsWith('sss_f')) {
+                    const idx = parseInt(key.replace('sss_f', ''));
+                    if (idx > maxSSS) maxSSS = idx;
+                }
+            }
+
+            // 2. Clear out any existing rows to prevent duplicates
+            document.getElementById('mds_sheet_body').innerHTML = '';
+            document.getElementById('sss_sheet_body').innerHTML = '';
+            mdsMasterCount = 0;
+            sssMasterCount = 0;
+
+            // 3. Dynamically build the exact number of empty HTML rows needed
+            for (let i = 0; i < maxMDS; i++) addMDSKeyframe();
+            for (let i = 0; i < maxSSS; i++) addSSSKeyframe();
+
+            // 4. Now that the input fields exist, hydrate them with the saved values
             for (const [k, v] of Object.entries(st.params)) {
                 const el = document.getElementById(k);
                 // Guard: Do not attempt to write values to file inputs
@@ -419,3 +489,160 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDropZone('image', 'file_input', 'image', '/upload_target');
     setupDropZone('bipack_image', 'bp_file_input', 'bipack_image', '/upload_proj_bipack');
 });
+
+/* * Dispatches the dark frame measurement task to the engine and polls the
+ * server status. Once the engine stops, it retrieves the generated preview
+ * image and the measured noise value.
+ */
+async function triggerMeasurement() {
+    const resTxt = document.getElementById('noise_result_txt');
+    resTxt.innerText = "WAIT...";
+
+    // 1. Dispatch the job to the engine using the existing parameter collector
+    await fetch('/measure_noise', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+
+    });
+
+    // 2. Poll the server status endpoint every 1000ms
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/status');
+            const st = await r.json();
+
+            // Check if engine_running has flipped back to false
+            if (!st.status !== 'rendering' && attempts > 2) {
+                clearInterval(pollInterval);
+                
+                // Add a 500ms delay to allow the OS file buffer to write to disk
+                setTimeout(async () => {
+                    // Force the preview image to refresh
+                    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+                    
+                    // Fetch the generated JSON file
+                    const nRes = await fetch('/static/noise_data.json?t=' + Date.now());
+                    if (nRes.ok) {
+                        const data = await nRes.json();
+                        resTxt.innerText = data.measured_noise.toFixed(6); 
+                    } else {
+                        resTxt.innerText = "ERR";
+                    }
+                }, 500);
+            }           
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }, 1000);
+}
+
+async function triggerHotPixelMap() {
+    // 1. The reality check prompt!
+    if (!confirm("IMPORTANT: Please put the lens cap on the camera!\n\nThis will take a dark frame matching your current Probe Frame's exposuresetting to map defective pixels.\n\nClick OK when the lens cap is fully seated.")){
+        return;
+    }
+
+    const resTxt = document.getElementById('hp_result_txt');
+    resTxt.innerText = "MAPPING...";
+
+    // 2. Dispatch to the engine
+    await fetch ('/map_hot_pixels', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+    });
+
+    // 3. Poll for completion
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/status');
+            const st = await r.json();
+            
+            if (st.status !== 'rendering' && attempts > 2) {
+                clearInterval(pollInterval);
+                
+                // Allow OS disk buffer flush
+                setTimeout(async () => {
+                    const nRes = await fetch('/static/hot_pixels.json?t=' + Date.now());
+                    if (nRes.ok) {
+                        const data = await nRes.json();
+                        if (data.error) {
+                            resTxt.innerText = "ERR: CAP OFF";
+                            resTxt.style.color = "#f44";
+                        } else {
+                            resTxt.innerText = data.pixels.length + " FIXED";
+                            resTxt.style.color = "#0cf";
+                        }
+                    } else {
+                        resTxt.innerText = "FAILED";
+                    }
+                }, 500);
+            }
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }, 1000);
+}
+
+async function nukeHotPixels() {
+    if (confirm("Delete the hot pixel map? Defective pixels will no longer be suppressed in future exposures.")) {
+        await fetch('/nuke_hot_pixels', {method: 'POST'});
+        document.getElementById('hp_result_txt').innerText = "CLEARED";
+        document.getElementById('hp_result_txt').style.color = "#f44"; // Turn red to show it's disabled
+    }
+}
+
+/* Job Management: Export
+Triggers a browser download of the current_job.json file.
+*/
+async function exportJob() {
+    // 1. Push the current DOM state to the server first
+    await fetch('/save_job', {
+        method: 'post',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectParams())
+    });
+
+    // 2. Trigger the browser download of the newly updated file
+    window.location.href = '/export_job';
+}
+
+/* Job Management: Import
+Uploads a JSON file, replaces current_job.json, and handles version warnings.
+*/
+async function importJob(input) {
+    if (!input.files || input.files.length === 0) return;
+
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const resp = await fetch('/import_job', { method: 'POST', body: formData});
+        const data = await resp.json();
+
+        if (data.status === 'ok') {
+            if (data.warning) {
+                alert(`COMPATIBILITY WARNING\n\n${data.warning}\n\nSome variables may have changed names or been removed. Verify your keyframes before executing.`);
+            }
+
+            // Clear the input so the same file can be selected again if needed
+            input.value = "";
+
+            // Force a full page reload to hydrate the DOM with the new JSON data
+            window.location.reload();
+        } else {
+            alert(`Import failed: ${data.error}`);
+            input.value = "";
+        }
+    } catch (err) {
+        console.error("Job import error:", err);
+        alert("A network error occurred during import.");
+        input.value = "";
+    }
+}

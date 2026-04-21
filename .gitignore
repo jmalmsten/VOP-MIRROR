@@ -16,6 +16,7 @@ vop_focus_tests/
 *.mkv
 current_job.json
 ffmpeg_metadata.txt
+static/noise_data.json
 
 # --- Python Junk ---
 __pycache__/
@@ -33,10 +34,13 @@ __pycache__/
 .vscode/
 
 # Ignore the dump.txt's
-*dump.txt
+vop_dump*.txt
 
 # --- Exceptions ---
+# Un-ignore the directories themselves
 !readme_graphics/
-!readme_graphics/branding.png
 !graphics/
+
+# Un-ignore all files within those directories, overriding the global *.jpg/png ignores
+!readme_graphics/*
 !graphics/*

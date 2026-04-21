@@ -2,6 +2,35 @@
 Description:        Stylings for the whole GUI
 */
 
+/*
+#
+###########################################################################
+#
+#                                   VOP
+#                       Copyright (C) 2025  jmalmsten
+#
+#     This program is free software: you can redistribute it and/or modify 
+#     it under the terms of the GNU Affero General Public License as 
+#     published by the Free Software Foundation, either version 3 of the 
+#     License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful, but 
+#     WITHOUT ANY WARRANTY; without even the implied warranty of 
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+#     Affero General Public License for more details.
+#
+#     You should have received a copy of the GNU Affero General Public 
+#     License along with this program.  If not, see 
+#     <http://www.gnu.org/licenses/>.
+#
+#     Source code for this application can be found at 
+#     https://codeberg.org/jmalmsten-com/VOP
+#
+###########################################################################
+
+*/
+
+
 /* ############### Global variables ############# */
 
 
@@ -542,4 +571,67 @@ body {
     color: var(--color-accent);
     display: inline-block;
     min-width: 65px; /* keeps the acronyms aligned nicely if they wrap */
+}
+
+/* --- Noise Floor Measurement UI --- */
+
+/* --- Elegant Grid Divider --- */
+hr.section-divider {
+    grid-column:    1 / -1;                         /* Forces the element to span from the first column to the very last */
+    border:         0;                              /* Strips out the ugly default 3D browser borders */
+    border-top:     1px solid var(--border-color);  /* Draws a single, subtle, dark-gray line */
+    margin:         8px 0;                          /* Adds a little vertical breathing room above and below */
+    width:          100%;                           /* Ensures it fills the space completely */
+}
+
+/* Style the output text to look like a digital readout */
+#noise_result_txt, #hp_result_txt {
+    font-family:    monospace;              /* Monospaced font aligns the decimal points cleanly */
+    font-weight:    bold;                   /* Makes the readout pop against the dark UI*/
+    color:          var(--color-accent);    /* Matching standard VOP accent color */
+    margin-left:    8px;                    /* Provides breathing room from the MEASURE button */
+    min-width:      80px;                   /* Reserves fixed space so the UI doesn't jumpwhen switching from "WAIT..." to numbers */
+    display:        inline-block;           /* Allows the span to respect the min-width and margin properties */
+}
+
+/* Shrink the number input field to comfortably fit the button and readout on the same line */
+#black_clip {
+    width:  75px;
+}
+
+/* Ensure the parent container groups them tightly in a row */
+.const-group:has(#black_clip) {
+    display:        flex;       /* Activates flexbox layout */
+    align-items:    center;     /* Vertically centers the label, input button, and text */
+    gap:            5px;        /* Sets consistent spacing bbetween the elements */
+}
+
+.crush-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    grid-column: span 2; /* Forces this cell to span across two columns to fit the contents */
+}
+
+.io-btn {
+    background:     #111;
+    color:          var(--color-accent);
+    border:         1px solid var(--color-accent);
+    padding:        5px 10px;
+    cursor:         pointer;
+    font-family:    monospace;
+    font-size:      0.9em;
+}
+
+.io-btn:hover {
+    background: var(--color-accent);
+    color: #000;
+}
+
+/* Status Bar Action Buttons Container */
+.status-actions {
+    margin-top:         10px;
+    display:            flex;
+    justify-content:    flex-end;
+    gap:                10px;
 }

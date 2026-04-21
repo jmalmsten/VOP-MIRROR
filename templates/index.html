@@ -1,15 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
+<!--
+#
+###########################################################################
+#
+#                                   VOP
+#                       Copyright (C) 2025  jmalmsten
+#
+#     This program is free software: you can redistribute it and/or modify 
+#     it under the terms of the GNU Affero General Public License as 
+#     published by the Free Software Foundation, either version 3 of the 
+#     License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful, but 
+#     WITHOUT ANY WARRANTY; without even the implied warranty of 
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+#     Affero General Public License for more details.
+#
+#     You should have received a copy of the GNU Affero General Public 
+#     License along with this program.  If not, see 
+#     <http://www.gnu.org/licenses/>.
+#
+#     Source code for this application can be found at 
+#     https://codeberg.org/jmalmsten-com/VOP
+#
+###########################################################################
+
+
+-->
+
 <head>
     <meta charset="UTF-8">
-    <title>VOP v0.6.0</title>
+    <title>VOP v0.6</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.11">
 </head>
 <body>
+    VOP &copy; 2026 jmalmsten. 
+            Licensed under <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPLv3</a>.
+            <a href="https://codeberg.org/jmalmsten-com/VOP">Source Code</a>
+    <br>
     <div class="container">
         
         <div class="vop-header">
-            <h2>VOP v0.6.2</h2>
+            <h2>VOP v0.6.3</h2>
             <div id="sync_indicator">○ OFFLINE</div>
         </div>
 
@@ -21,15 +54,17 @@
 
         <div class="controls-area">
             <div class="group-box">
-                <div class="group-title">Probe / Preview</div>
+                <div class="group-title">Probe / Preview / Execution</div>
                 <div class="input-row">
                     <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
                     <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
                 </div>
                 <div class="probe-controls" style="margin-top:10px;">
-                    <button class="action-btn" onclick="runTask('preview')">Proj Probe</button>
-                    <button class="action-btn cam_preview" onclick="runTask('cam_preview')">Cam View</button>
-                    <button class="action-btn execute" onclick="runTask('execute')">Execute Sequence</button>
+                    <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
+                    <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
+                    <hr class="section-divider">
+                    <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
+                    <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
                 </div>
             </div>
 
@@ -78,6 +113,21 @@
                     <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
                     <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
                     <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                    <hr class="section-divider">
+                    <div class="const-group crush-group">
+                        <label>Noise Crusher</label>
+                        <input type="number" step="0.0001" id="black_clip" value="0.0" style="width: 75px;">
+                        <button class="mini-btn measure_noise" onclick="triggerMeasurement()">MEASURE</button>
+                        <span id="noise_result_txt"></span>
+                    </div>
+                    <hr class="section-divider">
+                    <div class="const-group crush-group">
+                        <label>Defect Mapping</label>
+                        <button class="mini-btn" onclick="triggerHotPixelMap()">MAP PIXELS</button>
+                        <button class="mini-btn danger" onclick="nukeHotPixels()">NUKE MAP</button>
+                        <span id="hp_result_txt"></span>
+                    </div>
+                    <div></div>
                 </div>
             </div>
         </div>
@@ -103,6 +153,9 @@
             </div>
         </div>
     </div>
+    <br> <!-- Should probably make this spacer more elegantly -->
+    <br>
+    <hr class="section-divider">
     <div>
         {% include 'sections/cheat-sheet.html' %}
     </div>

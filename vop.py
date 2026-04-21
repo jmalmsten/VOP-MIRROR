@@ -1,9 +1,35 @@
 """
 VOP Module:     vop.py
-Version:        v0.2.15
 Location:       vop.py
 Description:    Main Entry Point. Flask Web Server.               
 """
+
+#
+###########################################################################
+#
+#                                   VOP
+#                       Copyright (C) 2025  jmalmsten
+#
+#     This program is free software: you can redistribute it and/or modify 
+#     it under the terms of the GNU Affero General Public License as 
+#     published by the Free Software Foundation, either version 3 of the 
+#     License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful, but 
+#     WITHOUT ANY WARRANTY; without even the implied warranty of 
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+#     Affero General Public License for more details.
+#
+#     You should have received a copy of the GNU Affero General Public 
+#     License along with this program.  If not, see 
+#     <http://www.gnu.org/licenses/>.
+#
+#     Source code for this application can be found at 
+#     https://codeberg.org/jmalmsten-com/VOP
+#
+###########################################################################
+
+
 import os
 import sys
 import json
@@ -13,6 +39,7 @@ import cv2
 import glob
 import math
 import socket
+from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
 
 idle_process = None
 
@@ -28,6 +55,8 @@ PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
 PROJ_BIPACK_DIR = os.path.join(BASE_DIR, "ProjBiPack")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
+VOP_VERSION ="0.6.3"
+is_transitioning = False
 
 for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints")]:
     os.makedirs(d, exist_ok=True)
@@ -47,12 +76,63 @@ def launch_idle_screen(port=5000):
     idle_process = subprocess.Popen([sys.executable, idle_path, str(port)])
 
 def kill_idle_screen():
-    # Terminates the Pygame process to free up the hardware framebuffer for the engine.
-    global idle_process
-    if idle_process is not None and idle_process.poll() is None:
-        idle_process.kill()
-        idle_process = None
+    global idle_process, is_transitioning
+    if idle_process is None:
+        return
+        
+    # Set the flag so the status heartbeat knows we are in limbo
+    is_transitioning = True
+    
+    # Grab a local reference and immediately clear the global pointer
+    proc = idle_process
+    idle_process = None
+    
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception as e:
+            print(f"[VOP SERVER] Error killing idle screen: {e}")
 
+def process_video_ingestion(filepath, target_dir):
+    """
+    Checks if an uploaded file is a video container.
+    If so, extracts all frames to zero-padded TIFFs matching the engine's
+    playhead expectations (0000.tif, 0001.tif) and deletes the original video.
+    
+    Extra thought. If future me needs, that could maybe be increased to 5 digits.
+    that would increase the incoming video's max length from 6 min 56 sec 16 frames to 
+    69 min 26 sec 16 frames (if my math is correct). But let's keep it at 4 digits for 
+    a max length "reel" of just under 7 minutes. It seems oddly realistic to real life systems
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
+
+    if ext in video_exts:
+        print(f"[VOP SERVER] Video detected! Extracting {filepath} to TIFF sequence...")
+
+        # The output pattern guarantees files like 0000.tif, 0001.tif, etc.
+        output_pattern = os.path.join(target_dir, "%04d.tif")
+
+        cmd = [
+            "ffmpeg", "-y", "-i", filepath,
+            "-start_number", "0",
+            output_pattern
+        ]
+
+        try:
+            # Supress output to keep the terminal clean, but let errors bubble up
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("[VOP SERVER] Frame extraction complete.")
+
+            # Clean up the original video container
+            os.remove(filepath)
+        
+        except subprocess.CalledProcessError as e:
+            print("[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
+            
 def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
     z_dist = abs(float(ref_z))
     if z_dist == 0: z_dist = 0.1 
@@ -80,13 +160,21 @@ def dispatch_engine(task_type, payload):
     ## Terminate the idle screen immediately before launching the render engine
     ## This prevents KMSDRM resource locking conflicts on the Pi hardware.
     kill_idle_screen()
-    
+
     payload['type'] = task_type
+    payload['vop_version'] = VOP_VERSION # Inject current system version
     with open(CURRENT_JOB_FILE, 'w') as f:
         json.dump(payload, f, indent=4)
         
+    # Defensive check for engine_process
     if engine_process is not None and engine_process.poll() is None:
-        engine_process.kill()
+        curr_engine = engine_process
+        engine_process = None # Clear global before waiting
+        curr_engine.terminate()
+        try:
+            curr_engine.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            curr_engine.kill()
         
     engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
     engine_process = subprocess.Popen([sys.executable, engine_script, "--job", CURRENT_JOB_FILE])
@@ -100,7 +188,7 @@ def index():
 
 @app.route('/status', methods=['GET'])
 def status():
-    global engine_process, idle_process
+    global engine_process, idle_process, is_transitioning
     wp_dir = os.path.join(BASE_DIR, "WorkPrints")
     latest_wp = ""
     try:
@@ -130,6 +218,7 @@ def status():
 
     # 3. Engine heartbeat check and required Flask return statements
     if engine_process is not None and engine_process.poll() is None:
+        is_transitioning = False # Engine has successfully taken over the lock
         try:
             with open("/tmp/vop_heartbeat", "r") as f:
                 hb = json.load(f)
@@ -138,18 +227,45 @@ def status():
             return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
     
     # 4. ENGINE IS DEAD/IDLE
+    
+    # If we are waiting for hardware to clear (transitioning), do not revive idle screen
+    if is_transitioning:
+        return jsonify({"status": "rendering", "params": params, "latest_wp": latest_wp})
+
     # If the engine is not running, but the idle screen is also dead, revive it.
     if idle_process is None or idle_process.poll() is not None:
+        # This must be indented 4 spaces to stay within the IF scope
         launch_idle_screen(5000)
 
-    return jsonify({"status": "idle", "params": params, "latest_wp": latest_wp, "workprint": f"/workprints/{latest_wp}" if latest_wp else None})
+    # This return must be un-indented so it executes regardless of the IF block above
+    return jsonify({
+        "status": "idle", 
+        "params": params, 
+        "latest_wp": latest_wp, 
+        "workprint": f"/workprints/{latest_wp}" if latest_wp else None
+    })
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
-    print("[VOP SERVER] UPLOADING: ProjMag Target")
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
     file = request.files['file']
-    for f in os.listdir(PROJ_MAG_DIR): os.remove(os.path.join(PROJ_MAG_DIR, f))
-    file.save(os.path.join(PROJ_MAG_DIR, file.filename))
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    print(f"[VOP SERVER] ACTION: UPLOAD PROJ MAG -> {file.filename}")
+
+    # Clear out the old files
+    for f in os.listdir(PROJ_MAG_DIR):
+        os.remove(os.path.join(PROJ_MAG_DIR, f))
+    
+    # Save the new file
+    filepath = os.path.join(PROJ_MAG_DIR, file.filename)
+    file.save(filepath)
+    
+    # Kick off the ingestion module ---
+    process_video_ingestion(filepath, PROJ_MAG_DIR)
+
     return jsonify({"status": "ok", "filename": file.filename})
 
 @app.route('/upload_proj_bipack', methods=['POST'])
@@ -222,6 +338,32 @@ def execute_seq():
     dispatch_engine('execute', request.json)
     return jsonify({"status": "started"})
 
+@app.route('/measure_noise', methods=['POST'])
+def measure_noise():
+    # Dispatches the 'measure_noise' task to engine.py in a background process
+    dispatch_engine('measure_noise', request.json)
+    # Returns a 200 OK to the Javascript fetch so the UI knows the command was accepted
+    return jsonify({"status": "started"})
+
+@app.route('/map_hot_pixels', methods=['POST'])
+def map_hot_pixels():
+    dispatch_engine('map_hot_pixels', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/nuke_hot_pixels', methods=['POST'])
+def nuke_hot_pixels():
+    hp_file = os.path.join(BASE_DIR, "static", "hot_pixels.json")
+    if os.path.exists(hp_file):
+        os.remove(hp_file)
+    return jsonify({"status": "clear"})
+
+@app.route('/lab_invert', methods=['POST'])
+def lab_invert():
+    # Dispatches the inversion task to the background engine.
+    # This ensures the Flask thread isn't blocked during I/O heavy operations
+    dispatch_engine('lab_invert', request.json)
+    return jsonify({"status": "started"})
+
 @app.route('/panic', methods=['POST'])
 def panic():
     print("[VOP SERVER] ACTION: PANIC STOP")
@@ -230,7 +372,13 @@ def panic():
     # Ensure the idle screen is also terminated on a hard stop command
     kill_idle_screen()
 
-    if engine_process: engine_process.kill()
+    if engine_process and engine_process.poll() is None:
+        engine_process.terminate()
+        try:
+            engine_process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            engine_process.kill()
+            
     subprocess.run(["pkill", "-9", "rpicam-still"])
     return jsonify({"status": "panic_executed"})
 
@@ -263,6 +411,60 @@ def get_ip():
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+# --- Export/Import aka Save/Load jobs! ---
+@app.route('/export_job', methods=['GET'])
+def export_job():
+    print("[VOP SERVER] ACTION: EXPORT CURRENT JOB")
+    if os.path.exists(CURRENT_JOB_FILE):
+        return send_file(CURRENT_JOB_FILE, as_attachment=True)
+    
+    # Fix: Ensure the 404 is passed outside the JSON dictionary
+    return jsonify({"error": "No active job found to export"}), 404
+
+@app.route('/import_job', methods=['POST'])
+def import_job():
+    print("[VOP SERVER] ACTION: IMPORT JOB")
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    try:
+        # Parse the uploaded file into a dictionary
+        job_data = json.load(file)
+
+        # Check for version mismatches
+        file_version = job_data.get('vop_version', 'legacy/unknown')
+        warning = None
+        if file_version != VOP_VERSION:
+            warning = f"System is v{VOP_VERSION}, but the file is v{file_version}."
+        
+        # Overwrite the current job file
+        with open(CURRENT_JOB_FILE, 'w') as f:
+            json.dump(job_data, f, indent=4)
+        
+        return jsonify({"status": "ok", "warning": warning})
+
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON format."}), 400
+    except Exception as e:
+        print(f"[VOP SERVER] Import Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/save_job', methods=['POST'])
+def save_job():
+    """Silently updates current_job.json with the UI state without triggering the engine."""
+    payload = request.json
+    payload['vop_version'] = VOP_VERSION
+    
+    with open(CURRENT_JOB_FILE, 'w') as f:
+        json.dump(payload, f, indent=4)
+        
+    return jsonify({"status": "ok"})
         
 if __name__ == '__main__':
     port = 5000
@@ -279,3 +481,4 @@ if __name__ == '__main__':
     launch_idle_screen(port)
 
     app.run(host='0.0.0.0', port=port, debug=False)
+
