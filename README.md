@@ -32,6 +32,7 @@ So. Once again...
 - Removed the standalone changelog.md since the release notes are documented here in the readme and on my website.
 - Successfully tested with deployment to a USB stick instead of SD card
 - Rebuilt the RGB fixer to be deployed with its own deployment script. Still found among the CaliTools
+- Fixed license compliance and removed mention of PISS in the copyright text and license. 
   
 ---
 
