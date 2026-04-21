@@ -34,6 +34,7 @@ import os
 import sys
 import socket
 import signal
+import time
 
 # Force Pygame to bypass X11 and use the hardware framebuffer
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
@@ -112,7 +113,7 @@ def main():
     # The height is the sum of both elements plus the padding
     box_h = logo_h + padding + text_h
     
-    clock = pygame.time.Clock()
+    # clock = pygame.time.Clock()
     running = True
     
     while running:
@@ -146,6 +147,7 @@ def main():
         screen.blit(telemetry_text, (text_draw_x, text_draw_y))
 
         pygame.display.flip()
-        clock.tick(60)
+        # clock.tick(60)
+        time.sleep(0.033)
 if __name__ == "__main__":
     main()
