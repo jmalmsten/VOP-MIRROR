@@ -50,6 +50,7 @@ import graphics_utils as gfx
 
 import traceback
 import signal
+import time
 
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 
@@ -197,6 +198,9 @@ def run_vop_engine(job_path):
 
         anchor = time.time()
         while (time.time() - anchor) * 1000 < total_ms:
+            # Adding this line to prevent pi4 CPU lockup
+            pygame.event.pump()
+
             elapsed = (time.time() - anchor) * 1000
             
             if 500.0 <= elapsed <= (500.0 + smr_ms):
