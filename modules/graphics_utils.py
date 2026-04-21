@@ -4,6 +4,32 @@ Description:    GL Pipeline management.
                 Enforces #version 300 es and overrides ModernGL's default 330 requirement.
                 Added vertical flip to OpenCV image loading to match OpenGL texture coords.
 """
+#
+###########################################################################
+#
+#                                   VOP
+#                       Copyright (C) 2025  jmalmsten
+#
+#     This program is free software: you can redistribute it and/or modify 
+#     it under the terms of the GNU Affero General Public License as 
+#     published by the Free Software Foundation, either version 3 of the 
+#     License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful, but 
+#     WITHOUT ANY WARRANTY; without even the implied warranty of 
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+#     Affero General Public License for more details.
+#
+#     You should have received a copy of the GNU Affero General Public 
+#     License along with this program.  If not, see 
+#     <http://www.gnu.org/licenses/>.
+#
+#     Source code for this application can be found at 
+#     https://codeberg.org/jmalmsten-com/VOP
+#
+###########################################################################
+
+
 import moderngl
 import numpy as np
 import os
