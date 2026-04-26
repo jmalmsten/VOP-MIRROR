@@ -290,7 +290,7 @@ body {
     width: 100%; 
     /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
-    color:          var(--color-accent); 
+    color:          #000; 
     padding:        4px; 
     font-size:      0.8em; 
     box-sizing:     border-box; 
@@ -320,7 +320,7 @@ body {
     width:          100%; 
     /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
-    color:          #ccc; 
+    color:          #000; 
     padding:        4px; 
     font-size:      0.8em; 
     box-sizing:     border-box; 
@@ -488,7 +488,7 @@ body {
 .sheet-row input {
     /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
-    color:          #fff; 
+    color:          #900; 
     padding:        3px; 
     font-size:      0.7em; 
     text-align:     center; 
