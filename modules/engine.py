@@ -50,6 +50,7 @@ import graphics_utils as gfx
 
 import traceback
 import signal
+import datetime                 # Required for formatting readable millisecond timestamps
 
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 
@@ -185,17 +186,27 @@ def run_vop_engine(job_path):
         raw_clip = job_data.get('black_clip', 0.0)
         black_clip = float(raw_clip) if raw_clip != "" else 0.0
 
-        log_audit(f"Exposing Frame {frame_num} | Smear: {smr_ms}ms | Shutter Total: {total_ms}ms")
-        
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
         
-        cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0), 
-                                    job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
+        # Log the exact moment the libcamera subprocess is triggered
+        t_trigger = time.time()
+        log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Triggering libcamera")
         
+        cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0), 
+                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
+        
+        # Python halts here for the duration of PRIME_WAIT_MS
         hw.wait_for_sensor_prime()
 
+        # The anchor marks the exact millisecond the HDMI render loop begins
         anchor = time.time()
-        frame_rendered = False  # Safety net for sub-VSync smear durations
+        
+        # Calculate and print the actual elapsed time spent waiting for the camera
+        boot_delay = (anchor - t_trigger) * 1000
+        log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Wait complete. Boot delay: {boot_delay:.1f}ms")
+        log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Starting HDMI sequence (500ms pre-roll)")
+
+        frame_rendered = False
 
         while (time.time() - anchor) * 1000 < total_ms:
             pygame.event.pump()
@@ -205,6 +216,10 @@ def run_vop_engine(job_path):
             missed_window = (elapsed > 500.0) and not frame_rendered
 
             if in_window or missed_window:
+                # Log the exact millisecond the first image frame is pushed to the GPU
+                if not frame_rendered:
+                     log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | First image frame rendered at {elapsed:.1f}ms")
+
                 clamped_elapsed = min(elapsed, 500.0 + smr_ms)
                 t_norm = (clamped_elapsed - 500.0) / max(1.0, smr_ms)
                 render_dual_world(frame_num, t_norm, is_preview=False)
@@ -212,11 +227,11 @@ def run_vop_engine(job_path):
             else:
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
 
-            # Force the CPU to wait for the GPU to finish rendering the frame
             ctx.finish()  
-        
-            # Swap the HDMI buffers
             pygame.display.flip()
+        
+        # Log when the HDMI loop completes
+        log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | HDMI sequence complete. Waiting for camera file IO.")
         
         cam_proc.wait()
         
