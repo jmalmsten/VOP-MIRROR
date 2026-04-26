@@ -293,6 +293,52 @@ def run_vop_engine(job_path):
         else:
             log_audit(f">>> LENS CAP CHECK FAILED. ABORTED. <<<")
 
+    elif task == 'idle':
+        log_audit("Entering Hardware-Accelerated Idle Mode")
+
+        img_path = os.path.join(base_path, "graphics", "branding.png")
+        if not os.path.exists(img_path):
+            log_audit(f"Missing branding.png at {img_path}")
+            sys.exit(1)
+        
+        # Load image and flip vertically (ModernGL expects the origin at the bottom-left)
+        logo_surface = pygame.image.load(img_path).convert_alpha()
+        logo_surface= pygame.transform.flip(logo_surface, False, True)
+        logo_data = pygame.image.tostring(logo_surface, "RGBA", False)
+
+        logo_w, logo_h = logo_surface.get_size()
+        tex_logo = ctx.texture((logo_w, logo_h), 4, logo_data)
+
+        asp_logo = logo_w / logo_h
+        x, y = 0.0, 0.0
+        dx, dy = 0.005, 0.005
+
+        running = True
+        while running:
+            # Prevent Pi CPU lockup
+            pygame.event.pump()
+
+            x += dx
+            y += dy
+            if x <= -0.8 or x >= 0.8: dx *= -1
+            if y <= -0.8 or y >= 0.8: dy *= -1
+
+            ctx.screen.use()
+            ctx.clear(0.0, 0.0, 0.0, 1.0)
+
+            # Construct a basic translation & scale matrix for 2D orthographic mapping
+            mvp = np.eye(4, dtype='f4')
+            mvp[0, 0] = 0.4 * asp_logo  # Scale X and maintain aspect ratio
+            mvp[1, 1] = 0.4             # Scale y
+            mvp[3, 0] = x               # Translate X
+            mvp[3, 1] = y               # Translate y
+
+            prog['mvp'].write(mvp.tobytes())
+            prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+            tex_logo.use(0)
+            vao.render(moderngl.TRIANGLE_STRIP)
+
+            pygame.display.flip()
 
     elif task == 'execute':
         # Fix: Ensure we are calculating based on actual frame count, not frame index

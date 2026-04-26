@@ -63,17 +63,20 @@ for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "Wo
 
 engine_process = None
 
-def launch_idle_screen(port=5000):
-    # Spawns the Pygame idle screen as a non-blocking background process
-    # using the global idle_process tracker initialized at the top of the file.
+def launch_idle_screen(port):
     global idle_process
-    
-    # Ensure no duplicate processes are spawned to prevent framebuffer lockups
-    kill_idle_screen()
+    if idle_process is None or idle_process.poll() is not None:
+        print ("[VOP SERVER] Launching GPU Idle Mode...")
 
-    idle_path = os.path.join(BASE_DIR, "modules", "idle_screen.py")
-    # sys.executable ensures the subprocess uses the active venv Python binary
-    idle_process = subprocess.Popen([sys.executable, idle_path, str(port)])
+        # Create a temporary job file to trigger the engine's idle branch
+        idle_job_path = "/tmp/vop_idle_job.json"
+        with open(idle_job_path, "w") as f:
+            import json
+            json.dump({"type": "idle"}, f)
+        
+        engline_script = os.path.join(BASE_DIR, "modules", "engine.py")
+        idle_process = subprocess.Popen([sys.executable, engine_script, "--job",idle_job_path])
+
 
 def kill_idle_screen():
     global idle_process, is_transitioning
