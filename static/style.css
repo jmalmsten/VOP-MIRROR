@@ -44,9 +44,9 @@ Description:        Stylings for the whole GUI
     --color-warning:        #fa0;   /* Nuke confirmation */
 
     /* ---------Just to see of defining it breaks stuff */
-    --color-input:          #000;
-    --color-sss-accent:     #000;
-    --border-light:         #000;
+    --color-input:          #fff;
+    --color-sss-accent:     #f44;
+    --border-light:         #fff;
     --bg-input:             #000;          /* Inputs, Progress bar track */
 
     /* >>> Background & Panels */

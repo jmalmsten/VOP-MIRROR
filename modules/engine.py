@@ -310,7 +310,7 @@ def run_vop_engine(job_path):
         tex_logo = ctx.texture((logo_w, logo_h), 4, logo_data)
 
         asp_logo = logo_w / logo_h
-        x, y = 0.0, 0.0
+        x, y = 0.0, 0.37
         dx, dy = 0.005, 0.005
 
         running = True
@@ -328,10 +328,10 @@ def run_vop_engine(job_path):
 
             # Construct a basic translation & scale matrix for 2D orthographic mapping
             mvp = np.eye(4, dtype='f4')
-            mvp[0, 0] = 0.4 * asp_logo  # Scale X and maintain aspect ratio
-            mvp[1, 1] = 0.4             # Scale y
-            mvp[3, 0] = x               # Translate X
-            mvp[3, 1] = y               # Translate y
+            mvp[0, 0] = 0.4 * asp_logo / (1920/1080)    # Scale X and maintain aspect ratio
+            mvp[1, 1] = 0.4                             # Scale y
+            mvp[3, 0] = x                               # Translate X
+            mvp[3, 1] = y                               # Translate y
 
             prog['mvp'].write(mvp.tobytes())
             prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))

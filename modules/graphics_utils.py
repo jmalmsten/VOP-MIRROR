@@ -112,7 +112,7 @@ class TextureManager:
         ]) if os.path.exists(bp_dir) else []
 
     def load(self, playhead, is_bipack=False):
-        files = self.bp_files if is_bipack else self.mag.files
+        files = self.bp_files if is_bipack else self.mag_files
 
         if not files:
             return self.white_tex, 1.777
