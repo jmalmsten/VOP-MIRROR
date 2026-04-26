@@ -182,7 +182,6 @@ def run_vop_engine(job_path):
         smr_ms = float(st['exp']) * 1000.0
         total_ms = smr_ms + 1000.0
         
-        # Safely extract the black clip float (defaulting to 0.0 if empty)
         raw_clip = job_data.get('black_clip', 0.0)
         black_clip = float(raw_clip) if raw_clip != "" else 0.0
 
@@ -191,32 +190,38 @@ def run_vop_engine(job_path):
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
         
         cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0), 
-                                      job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
+                                    job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
         
         hw.wait_for_sensor_prime()
 
         anchor = time.time()
+        frame_rendered = False  # Safety net for sub-VSync smear durations
+
         while (time.time() - anchor) * 1000 < total_ms:
-            pygame.event.pump() # <<< inserted this to prevent Pi4 CPU lockup
+            pygame.event.pump()
             elapsed = (time.time() - anchor) * 1000
-            
-            if 500.0 <= elapsed <= (500.0 + smr_ms):
-                t_norm = (elapsed - 500.0) / max(1.0, smr_ms)
+
+            in_window = 500.0 <= elapsed <= (500.0 + smr_ms)
+            missed_window = (elapsed > 500.0) and not frame_rendered
+
+            if in_window or missed_window:
+                clamped_elapsed = min(elapsed, 500.0 + smr_ms)
+                t_norm = (clamped_elapsed - 500.0) / max(1.0, smr_ms)
                 render_dual_world(frame_num, t_norm, is_preview=False)
+                frame_rendered = True
             else:
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
-                
+
+            ctx.finish()  # Flush GPU before swap — ensures camera sees rendered frame, not stale buffer
             pygame.display.flip()
         
-        cam_proc.wait() 
+        cam_proc.wait()
         
         if is_preview:
-            # Pass mono_active and black_clip down to the preview generator
             cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip)
         else:
             tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
             out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
-            # Pass mono_active, black_clip, and static_dir down to the stacking sequence
             cutil.process_and_stack_latent_image(buf_f, static_dir, out_f, tiff_flag, st['cg'], mono_active, black_clip)
 
     task = job_data.get('type')

@@ -36,7 +36,7 @@ import subprocess
 import time
 import os
 
-PRIME_WAIT_MS = 1500 # Pi 4B needs more init time than Pi 5
+PRIME_WAIT_MS = 2500 # Pi 4B needs more init time than Pi 5
 
 def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x1520"):
     """
