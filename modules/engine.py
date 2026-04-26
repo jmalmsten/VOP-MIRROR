@@ -240,7 +240,16 @@ def run_persistent_engine():
                 black_clip = float(raw_clip) if raw_clip != "" else 0.0
 
                 buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
-                
+                # ---------------------------------------------------------
+                # VRAM PRE-CACHING
+                # Execute disk I/O and allocate textures into GPU memory 
+                # before the precision hardware timing loop begins. This prevents
+                # the main thread from stalling during the first frame render.
+                # ---------------------------------------------------------
+                ph_val = timeline.calculate_playhead_at(frame_num)
+                tex_mgr.load(ph_val, is_bipack=False)
+                tex_mgr.load(ph_val, is_bipack=True)
+
                 # ---------------------------------------------------------
                 # PRE-EXPOSURE BLACKOUT
                 # Force the GPU to dump the idle screen and push pure black to the 
