@@ -8,6 +8,7 @@
 ## Notes:
 While not much is added in features. A massive rebuild has taken place to make the VOP run well on a Pi4B with 4GB RAM
 ## Added:
+- ProRes Render button! - So it's simpler to go from a bunch of tiffs to something we can use in an NLE or Compositor. It renders a ProRes 4444 file with no alpha channel and linear gamma. 
 ## Changed: 
 - Moved the prototype to Pi4B with 4GB for making sure it runs on lower hardware than the biggest 16 GB Pi5
 - Moved the idle screen to use OpenGL to simplify rendering systems and avoid the single CPU spiking that was discovered with moving to Pi4 platform.
@@ -27,4 +28,3 @@ While not much is added in features. A massive rebuild has taken place to make t
 - Verified Light-Shutter Architecture: Confirmed that the 500ms pre/post-roll sequence correctly encapsulates the smear animation, protecting the sensor from rolling shutter artifacts and ensuring a clean start/stop in total darkness.
 ## Fixes:
 - Various fixes and improvements. 
-## Removed:
