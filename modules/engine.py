@@ -29,40 +29,6 @@ Description:    Multiplicative Dual-World Engine.
 #
 ###########################################################################
 
-"""
-VOP Module:     engine.py
-Version:        v0.2.6
-Description:    Multiplicative Dual-World Engine.
-                Refactored into a persistent GPU daemon to maintain the KMSDRM 
-                hardware lock continuously. Uses IPC polling (/tmp/vop_cmd.json) 
-                to receive tasks from the Flask server seamlessly without dropping 
-                the HDMI signal.
-"""
-#
-###########################################################################
-#
-#                                   VOP
-#                       Copyright (C) 2025  jmalmsten
-#
-#     This program is free software: you can redistribute it and/or modify 
-#     it under the terms of the GNU Affero General Public License as 
-#     published by the Free Software Foundation, either version 3 of the 
-#     License, or (at your option) any later version.
-#
-#     This program is distributed in the hope that it will be useful, but 
-#     WITHOUT ANY WARRANTY; without even the implied warranty of 
-#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
-#     Affero General Public License for more details.
-#
-#     You should have received a copy of the GNU Affero General Public 
-#     License along with this program.  If not, see 
-#     <http://www.gnu.org/licenses/>.
-#
-#     Source code for this application can be found at 
-#     https://codeberg.org/jmalmsten-com/VOP
-#
-###########################################################################
-
 
 import os
 import sys
@@ -289,7 +255,7 @@ def run_persistent_engine():
                 t_trigger = time.time()
                 log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Triggering libcamera")
                 
-                cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0), 
+                cam_proc = hw.trigger_capture(buf_f, total_ms , job_data.get('gain', 1.0), 
                                               job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
                 
                 hw.wait_for_sensor_prime()
