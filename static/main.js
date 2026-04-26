@@ -645,7 +645,7 @@ async function renderProRes() {
                     clearInterval(pollInterval);
                     if (btn) { btn.innerText = 'RENDER PRORES'; btn.disabled = false; }
                     // 3. Trigger download
-                    window.location.href = '/prores/${st.filename}'; 
+                    window.location.href = `/prores/${st.filename}`; 
 
                 } else if (st.status === 'error') {
                     clearInterval(pollInterval);
