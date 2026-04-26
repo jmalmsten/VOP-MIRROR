@@ -1,6 +1,5 @@
 """
 VOP Module:     engine.py
-Version:        v0.1.9
 Description:    Multiplicative Dual-World Engine.
                 Forces GLES 3.0 profile prior to display initialization.
                 Added contextual dark gray background for UI previews to visualize frustum bounds.
@@ -276,9 +275,16 @@ def run_persistent_engine():
 
                 buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
                 
-                # --- NOTE: The 3.5s EDID sync delay has been removed ---
-                # Because the KMSDRM lock never drops in this new architecture, the HDMI
-                # signal remains continuously active. The camera can immediately fire.
+                # ---------------------------------------------------------
+                # PRE-EXPOSURE BLACKOUT
+                # Force the GPU to dump the idle screen and push pure black to the 
+                # HDMI monitor. This guarantees the physical room is dark before 
+                # the camera sensor powers up and opens its shutter.
+                # ---------------------------------------------------------
+                ctx.screen.use()
+                ctx.clear(0.0, 0.0, 0.0, 1.0)
+                ctx.finish()
+                pygame.display.flip()
                 
                 t_trigger = time.time()
                 log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Triggering libcamera")
