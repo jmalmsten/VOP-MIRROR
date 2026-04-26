@@ -515,7 +515,7 @@ async function triggerMeasurement() {
             const st = await r.json();
 
             // Check if engine_running has flipped back to false
-            if (!st.status !== 'rendering' && attempts > 2) {
+            if (st.status !== 'rendering' && attempts > 2) {
                 clearInterval(pollInterval);
                 
                 // Add a 500ms delay to allow the OS file buffer to write to disk
@@ -610,6 +610,59 @@ async function exportJob() {
 
     // 2. Trigger the browser download of the newly updated file
     window.location.href = '/export_job';
+}
+
+/**
+ * Kicks off a background ffmpeg ProRes 4444 encode from the current CamMag,
+ * polls until complete, then triggers a browser download of the .mov file.
+ */
+async function renderProRes() {
+    const btn = document.querySelector('.prores-btn');
+    if (btn) { btn.innerText = 'RENDERING...'; btn.disabled = true; }
+
+    try {
+        // 1. Start the background render, passing current fps from the UI
+        const startResp = await fetch('/render_prores', {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fps: collectParams().fps || 24 })
+        });
+        const startData = await startResp.json();
+
+        if (!startResp.ok) {
+            alert(`ProRes render failed to start: ${startData.error || startData.status}`);
+            if (btn) { btn.innerText = 'RENDER PRORES'; btn.disabled = false; }
+            return;
+        }
+
+        // 2. Poll /prores_status until ffmpeg finishes
+        const pollInterval = setInterval(async () => {
+            try {
+                const r = await fetch('/prores_status');
+                const st = await r.json();
+
+                if (st.status === 'done') {
+                    clearInterval(pollInterval);
+                    if (btn) { btn.innerText = 'RENDER PRORES'; btn.disabled = false; }
+                    // 3. Trigger download
+                    window.location.href = `/prores/${st.filename}`; 
+
+                } else if (st.status === 'error') {
+                    clearInterval(pollInterval);
+                    if(btn) { btn.innerText = 'RENDER PRORES'; btn.disabled = false; }
+                    alert(`ProRes render Failed (ffmpeg exit code: ${st.code})`);
+                }
+                // 'rendering' -> keep polling
+            } catch (e) {
+                console.error("ProRes poll error:", e);
+            }
+        }, 2000); // Poll every 2s - no need to hammer it
+
+    } catch (e) {
+        console.error("ProRes render error:", e);
+        if (btn) { btn.innerText = 'RENDER PRORES'; btn.disabled = false; }
+        alert("A network error occurred starting the ProRes render.");
+    }
 }
 
 /* Job Management: Import

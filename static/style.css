@@ -43,12 +43,18 @@ Description:        Stylings for the whole GUI
     --color-danger-text:    #f44;   /* Nuke Buttons */
     --color-warning:        #fa0;   /* Nuke confirmation */
 
+    /* ---------Just to see of defining it breaks stuff */
+    /* --color-input:          #fff; */
+    --color-sss-accent:     #f44;
+    --border-light:         #fff;
+    --bg-input:             #000;          /* Inputs, Progress bar track */
+
     /* >>> Background & Panels */
 
     --bg-body:  #0b0b0b;     /* Background for the whole thing */
     --bg-panel: #1a1a1a;    /* Control deck, preview area */
     --bg-group: #151515;    /* Group Boxes */
-    --bg-input: var(--bg-input);       /* Inputs, Progress bar track */
+    
 
     /* >>> Text Colors <<< */
 
@@ -61,7 +67,7 @@ Description:        Stylings for the whole GUI
     
     --border-color:     #333;
     --radius-standard:  4px; /* For most boxes and panels */
-    --radus-small:      3px; /* For buttons and cheat sheet items */
+    --radius-small:     3px; /* For buttons and cheat sheet items */
 
     /* >>> Exposure Sheet Tags << */
 
@@ -282,9 +288,9 @@ body {
 
 .const-group input, .const-group select { 
     width: 100%; 
-    background:     var(--color-input); 
+    /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
-    color:          var(--color-accent); 
+    color:          #000; 
     padding:        4px; 
     font-size:      0.8em; 
     box-sizing:     border-box; 
@@ -312,9 +318,9 @@ body {
 
 .c-box input { 
     width:          100%; 
-    background:     var(--color-input); 
+    /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
-    color:          #ccc; 
+    color:          #000; 
     padding:        4px; 
     font-size:      0.8em; 
     box-sizing:     border-box; 
@@ -345,7 +351,7 @@ body {
 
 .action-btn { 
     background:         var(--color-accent); 
-    color:              var(--color-input); 
+    /* color:              var(--color-input); */
     border:             none; 
     padding:            8px; 
     border-radius:      var(--radius-small); 
@@ -392,7 +398,7 @@ body {
 
 .mini-btn {
     background:         var(--color-accent); 
-    color:              var(--color-input); 
+    /* color:              var(--color-input); */
     border:             none; 
     padding:            8px; 
     border-radius:      var(--radius-small); 
@@ -480,9 +486,9 @@ body {
 }
 
 .sheet-row input {
-    background:     var(--color-input); 
+    /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
-    color:          #fff; 
+    color:          #900; 
     padding:        3px; 
     font-size:      0.7em; 
     text-align:     center; 
@@ -555,7 +561,7 @@ body {
     /* Making a responsive grid of columns having a minimum set width */
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 12px; /* Space between grid cels */
+    gap: 12px; /* Space between grid cells */
     margin-top: 10px;
 }
 
@@ -590,7 +596,7 @@ hr.section-divider {
     font-weight:    bold;                   /* Makes the readout pop against the dark UI*/
     color:          var(--color-accent);    /* Matching standard VOP accent color */
     margin-left:    8px;                    /* Provides breathing room from the MEASURE button */
-    min-width:      80px;                   /* Reserves fixed space so the UI doesn't jumpwhen switching from "WAIT..." to numbers */
+    min-width:      80px;                   /* Reserves fixed space so the UI doesn't jump when switching from "WAIT..." to numbers */
     display:        inline-block;           /* Allows the span to respect the min-width and margin properties */
 }
 
@@ -603,7 +609,7 @@ hr.section-divider {
 .const-group:has(#black_clip) {
     display:        flex;       /* Activates flexbox layout */
     align-items:    center;     /* Vertically centers the label, input button, and text */
-    gap:            5px;        /* Sets consistent spacing bbetween the elements */
+    gap:            5px;        /* Sets consistent spacing between the elements */
 }
 
 .crush-group {

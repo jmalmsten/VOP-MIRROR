@@ -9,6 +9,7 @@
     </div>
     
     <div class="status-actions">
+        <button class="io-btn prores-btn" onclick="renderProRes()" title="Render Prores 4444 from CamMag (linear tagged for NLE/Compositing)">RENDER PRORES</button>
         <button class="io-btn" onclick="exportJob()" title="Export current session to JSON">EXPORT JOB</button>
         <button class="io-btn" onclick="document.getElementById('import_file').click()" title="Load session from JSON">IMPORT JOB</button>
         <input type="file" id="import_file" style="display:none" accept=".json" onchange="importJob(this)">

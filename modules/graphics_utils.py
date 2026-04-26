@@ -93,24 +93,32 @@ def init_render_pipeline():
 class TextureManager:
     def __init__(self, ctx, proj_dir, job_data):
         self.ctx = ctx
-        self.proj_dir = proj_dir
-        self.bp_dir = os.path.join(os.path.dirname(proj_dir), "ProjBiPack")
         self.cache = {}
-        
+
         white = np.ones((1,1,3), dtype='uint8') * 255
         self.white_tex = ctx.texture((1,1), 3, white.tobytes())
 
+        valid_exts = ('.png', '.jpg', '.tif', '.tiff')
+        bp_dir = os.path.join(os.path.dirname(proj_dir), "ProjBiPack")
+
+        self.mag_files = sorted([
+            os.path.join(proj_dir, f) for f in os.listdir(proj_dir)
+            if f.lower().endswith(valid_exts)
+        ]) if os.path.exists(proj_dir) else []
+
+        self.bp_files = sorted([
+            os.path.join(bp_dir, f) for f in os.listdir(bp_dir)
+            if f.lower().endswith(valid_exts)
+        ]) if os.path.exists(bp_dir) else []
+
     def load(self, playhead, is_bipack=False):
-        dir_path = self.bp_dir if is_bipack else self.proj_dir
-        if not os.path.exists(dir_path): 
-            return self.white_tex, 1.777
-            
-        files = sorted([f for f in os.listdir(dir_path) if f.lower().endswith(('.png','.jpg','.tif','.tiff'))])
-        if not files: 
+        files = self.bp_files if is_bipack else self.mag_files
+
+        if not files:
             return self.white_tex, 1.777
             
         idx = max(0, min(len(files)-1, int(playhead)))
-        f_path = os.path.join(dir_path, files[idx])
+        f_path = files[idx]
         
         if f_path in self.cache: 
             return self.cache[f_path]
@@ -127,8 +135,8 @@ class TextureManager:
         # Multiply alpha into RGB to force transparent pixels to black (0,0,0)
         if len(img.shape) == 3 and img.shape[2] == 4: # Checks if a 4th channel actually exists (so JPEGs don't crash).
             alpha_mask = img[:, :, 3] / 255.0 # Normalizes the 0-255 alpha values into a 0.0 to 1.0 multiplier.
-            for c in range(3): # The for loop multiplies the Blue, Green, and Red channels by that mask. If a pixel is fully transparent (alpha 0.0), its RGB values become 0 (Black).
-                img[:,:,c] = (img[:, :, c] * alpha_mask).astype(np.uint8)
+            # Multiplies the Blue, Green, and Red channels by that mask. If a pixel is fully transparent (alpha 0.0), its RGB values become 0 (Black).
+            img[:, :, :3] = (img[:, :, :3] * alpha_mask[:, :, np.newaxis]).astype(np.uint8)
             # Slice off the 4th channel to return strictly BGR for the pipeline
             img = img[:, :, :3] # permanently deletes the alpha channel from the array so your OpenGL texture logic (self.ctx.texture) remains strictly 3-channel RGB, maintaining physical optical printer constraints.
 

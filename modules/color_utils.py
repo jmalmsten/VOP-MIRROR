@@ -247,7 +247,7 @@ def map_hot_pixels(buffer_file, static_dir):
         # We also set a hard minimum (1000) so a perfectly clean, pitch black frame doesn't trigger false positives
         threshold = max(mean_val + (10 * std_val), 1000)
 
-        # Fine coordinates where intensity exceeds threshold
+        # Find coordinates where intensity exceeds threshold
         y_coords, x_coords = np.where(gray > threshold)
         hp_count = len(y_coords)
         out_json = os.path.join(static_dir, "hot_pixels.json")
