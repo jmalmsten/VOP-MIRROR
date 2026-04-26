@@ -44,7 +44,6 @@ from flask import Flask, jsonify, request, render_template, send_from_directory,
 idle_process = None
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
-from flask import Flask, jsonify, request, render_template, send_from_directory
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -71,10 +70,9 @@ def launch_idle_screen(port):
         # Create a temporary job file to trigger the engine's idle branch
         idle_job_path = "/tmp/vop_idle_job.json"
         with open(idle_job_path, "w") as f:
-            import json
             json.dump({"type": "idle"}, f)
         
-        engline_script = os.path.join(BASE_DIR, "modules", "engine.py")
+        engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
         idle_process = subprocess.Popen([sys.executable, engine_script, "--job",idle_job_path])
 
 
@@ -126,7 +124,7 @@ def process_video_ingestion(filepath, target_dir):
         ]
 
         try:
-            # Supress output to keep the terminal clean, but let errors bubble up
+            # Suppress output to keep the terminal clean, but let errors bubble up
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("[VOP SERVER] Frame extraction complete.")
 
@@ -134,7 +132,7 @@ def process_video_ingestion(filepath, target_dir):
             os.remove(filepath)
         
         except subprocess.CalledProcessError as e:
-            print("[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
+            print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
             
 def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
     z_dist = abs(float(ref_z))

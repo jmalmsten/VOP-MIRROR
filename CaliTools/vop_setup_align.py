@@ -34,7 +34,6 @@ import os, sys, time, subprocess, numpy as np
 import moderngl, pygame
 
 # --- STATIC CONFIG ---
-PI_IP = "192.168.2.3"
 DESKTOP_IP = "192.168.2.8"
 PORT = "5555"
 

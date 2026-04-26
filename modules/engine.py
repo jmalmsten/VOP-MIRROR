@@ -182,7 +182,7 @@ def run_vop_engine(job_path):
         smr_ms = float(st['exp']) * 1000.0
         total_ms = smr_ms + 1000.0
         
-        # Safely extract the black clip float (defautling to 0.0 if empty)
+        # Safely extract the black clip float (defaulting to 0.0 if empty)
         raw_clip = job_data.get('black_clip', 0.0)
         black_clip = float(raw_clip) if raw_clip != "" else 0.0
 
@@ -342,7 +342,7 @@ def run_vop_engine(job_path):
 
     elif task == 'execute':
         # Fix: Ensure we are calculating based on actual frame count, not frame index
-        frames = sorted(list(set([k['f'] for k in timeline.tracks['pos']])))
+        frames = sorted({k['f'] for k in timeline.tracks['pos']})
         if frames:
             f_start, f_end = int(min(frames)), int(max(frames))
             total_frames = f_end - f_start + 1
@@ -457,13 +457,14 @@ def run_vop_engine(job_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--job", required=True)
+    exit_code = 1 # Assume failure unless we succeed
     try:
         run_vop_engine(parser.parse_args().job)
+        exit_code = 0 # engine completed without throwing
     except Exception as e:
         log_audit(f"CRITICAL ENGINE FAILURE: {e}")
-        import traceback
         traceback.print_exc()
     finally:
         # This guarantees the hardware DRM lock is released no matter what happens
         pygame.quit()
-        sys.exit(1)
+        sys.exit(exit_code)

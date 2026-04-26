@@ -239,12 +239,19 @@ class Timeline:
             v = self._get_val(key, frame_num, True)
             return v if v is not None else default_arr
             
-        lp = safe_val('start_p', np.zeros(3,'f4')) + (safe_val('stop_p', np.zeros(3,'f4')) - safe_val('start_p', np.zeros(3,'f4'))) * t_norm
-        lr = safe_val('start_r', np.zeros(3,'f4')) + (safe_val('stop_r', np.zeros(3,'f4')) - safe_val('start_r', np.zeros(3,'f4'))) * t_norm
-        
-        lbp_p = safe_val('start_bp_p', np.zeros(3,'f4')) + (safe_val('stop_bp_p', np.zeros(3,'f4')) - safe_val('start_bp_p', np.zeros(3,'f4'))) * t_norm
-        lbp_r = safe_val('start_bp_r', np.zeros(3,'f4')) + (safe_val('stop_bp_r', np.zeros(3,'f4')) - safe_val('start_bp_r', np.zeros(3,'f4'))) * t_norm
-        
+        start_p    = safe_val('start_p',    np.zeros(3, 'f4'))
+        stop_p     = safe_val('stop_p',     np.zeros(3, 'f4'))
+        start_r    = safe_val('start_r',    np.zeros(3, 'f4'))
+        stop_r     = safe_val('stop_r',     np.zeros(3, 'f4'))
+        start_bp_p = safe_val('start_bp_p', np.zeros(3, 'f4'))
+        stop_bp_p  = safe_val('stop_bp_p',  np.zeros(3, 'f4'))
+        start_bp_r = safe_val('start_bp_r', np.zeros(3, 'f4'))
+        stop_bp_r  = safe_val('stop_bp_r',  np.zeros(3, 'f4'))
+
+        lp    = start_p    + (stop_p    - start_p)    * t_norm
+        lr    = start_r    + (stop_r    - start_r)    * t_norm
+        lbp_p = start_bp_p + (stop_bp_p - start_bp_p) * t_norm
+        lbp_r = start_bp_r + (stop_bp_r - start_bp_r) * t_norm
         pg_start = safe_col('start_c', np.array([1,1,1],'f4'))
         pg_stop = safe_col('stop_c', np.array([1,1,1],'f4'))
         pg_val = oklab_to_linear(linear_to_oklab(pg_start) + (linear_to_oklab(pg_stop) - linear_to_oklab(pg_start)) * t_norm)
