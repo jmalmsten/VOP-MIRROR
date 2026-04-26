@@ -36,6 +36,8 @@ import subprocess
 import time
 import os
 
+PRIME_WAIT_MS = 1500 # Pi 4B needs more init time than Pi 5
+
 def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x1520"):
     """
     Executes rpicam-still in an independent parallel process.
@@ -67,7 +69,7 @@ def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x
 
 def wait_for_sensor_prime():
     """
-    Blocks execution for 700ms to accommodate the sensor initialization offset.
-    This prevents the projector from flashing the smear before the camera is listening.
+    Blocks execution for PRIME_WAIT_MS to accommodate sensor initialization.
+    This value must match the offset passed to trigger_capture() in engine.py.
     """
-    time.sleep(0.7)
+    time.sleep(PRIME_WAIT_MS / 1000.0)

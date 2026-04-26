@@ -190,7 +190,7 @@ def run_vop_engine(job_path):
         
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
         
-        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0), 
+        cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0), 
                                       job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
         
         hw.wait_for_sensor_prime()
@@ -254,7 +254,7 @@ def run_vop_engine(job_path):
         pygame.display.flip()
 
         buf_f = "/tmp/vop_noise_buf.dng"
-        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+        cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0),
                                       job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
                                       job_data.get('cam_res', '2028x1520'))
         
@@ -279,7 +279,7 @@ def run_vop_engine(job_path):
         pygame.display.flip()
 
         buf_f = "/tmp/vop_hp_buf.dng"
-        cam_proc = hw.trigger_capture(buf_f, total_ms + 700.0, job_data.get('gain', 1.0),
+        cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0),
                                       job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
                                       job_data.get('cam_res', '2028x1520'))
         
@@ -311,7 +311,7 @@ def run_vop_engine(job_path):
 
         asp_logo = logo_w / logo_h
         x, y = 0.0, 0.37
-        dx, dy = 0.005, 0.005
+        dx, dy = 0.00125, 0.00115
 
         running = True
         while running:
@@ -339,6 +339,7 @@ def run_vop_engine(job_path):
             vao.render(moderngl.TRIANGLE_STRIP)
 
             pygame.display.flip()
+            time.sleep(1 / 60) # Cap at 60 fps - prevents CPU lockup and runaway speed
 
     elif task == 'execute':
         # Fix: Ensure we are calculating based on actual frame count, not frame index
