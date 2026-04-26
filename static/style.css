@@ -44,7 +44,7 @@ Description:        Stylings for the whole GUI
     --color-warning:        #fa0;   /* Nuke confirmation */
 
     /* ---------Just to see of defining it breaks stuff */
-    --color-input:          #fff;
+    /* --color-input:          #fff; */
     --color-sss-accent:     #f44;
     --border-light:         #fff;
     --bg-input:             #000;          /* Inputs, Progress bar track */
@@ -288,7 +288,7 @@ body {
 
 .const-group input, .const-group select { 
     width: 100%; 
-    background:     var(--color-input); 
+    /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
     color:          var(--color-accent); 
     padding:        4px; 
@@ -318,7 +318,7 @@ body {
 
 .c-box input { 
     width:          100%; 
-    background:     var(--color-input); 
+    /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
     color:          #ccc; 
     padding:        4px; 
@@ -351,7 +351,7 @@ body {
 
 .action-btn { 
     background:         var(--color-accent); 
-    color:              var(--color-input); 
+    /* color:              var(--color-input); */
     border:             none; 
     padding:            8px; 
     border-radius:      var(--radius-small); 
@@ -398,7 +398,7 @@ body {
 
 .mini-btn {
     background:         var(--color-accent); 
-    color:              var(--color-input); 
+    /* color:              var(--color-input); */
     border:             none; 
     padding:            8px; 
     border-radius:      var(--radius-small); 
@@ -486,7 +486,7 @@ body {
 }
 
 .sheet-row input {
-    background:     var(--color-input); 
+    /* background:     var(--color-input); */
     border:         1px solid var(--border-color); 
     color:          #fff; 
     padding:        3px; 

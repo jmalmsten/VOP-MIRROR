@@ -212,7 +212,10 @@ def run_vop_engine(job_path):
             else:
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
 
-            ctx.finish()  # Flush GPU before swap — ensures camera sees rendered frame, not stale buffer
+            # Force the CPU to wait for the GPU to finish rendering the frame
+            ctx.finish()  
+        
+            # Swap the HDMI buffers
             pygame.display.flip()
         
         cam_proc.wait()
