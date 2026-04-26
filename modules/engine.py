@@ -283,10 +283,31 @@ def run_persistent_engine():
                         render_dual_world(frame_num, t_norm, is_preview=False)
                         frame_rendered = True
                     else:
+                        # OPTICAL SHUTTER ENFORCEMENT
+                        # Draw a physical black quad to force the GPU to swap the buffer
+                        ctx.screen.use()
                         ctx.clear(0.0, 0.0, 0.0, 1.0)
+                        prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+                        prog['filter_color'].write(np.array([0.0, 0.0, 0.0], dtype='f4'))
+                        tex_mgr.white_tex.use(0)
+                        vao.render(moderngl.TRIANGLE_STRIP)
 
                     ctx.finish()  
                     pygame.display.flip()
+                
+                # ---------------------------------------------------------
+                # POST-EXPOSURE BLACKOUT
+                # Guarantee the screen drops to black by forcing geometry
+                # ---------------------------------------------------------
+                ctx.screen.use()
+                ctx.clear(0.0, 0.0, 0.0, 1.0)
+                prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+                prog['filter_color'].write(np.array([0.0, 0.0, 0.0], dtype='f4'))
+                tex_mgr.white_tex.use(0)
+                vao.render(moderngl.TRIANGLE_STRIP)
+                ctx.finish()
+                pygame.display.flip()
+                # ---------------------------------------------------------
                 
                 log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | HDMI sequence complete. Waiting for camera file IO.")
                 cam_proc.wait()
