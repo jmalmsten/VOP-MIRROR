@@ -63,11 +63,13 @@ COMMAND_FILE = "/tmp/vop_cmd.json"
 VOP_VERSION ="0.6.5"
 
 # Initialize required directory structure on boot if missing
-for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints")]:
+PRORES_DIR = os.path.join(BASE_DIR, "ProRes")
+for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints"), PRORES_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Single global reference for the persistent GPU engine subprocess
 engine_process = None
+prores_process = None
 
 def ensure_engine_running():
     """
@@ -242,6 +244,76 @@ def status():
         "latest_wp": latest_wp, 
         "workprint": f"/workprints/{latest_wp}" if latest_wp else None
     })
+
+@app.route('/render_prores', methods=['POST'])
+def render_prores():
+    """
+    Kicks off a background ffmpeg ProRes 4444 render from the current CamMag TIFFs.
+    Tagged as Linear/Rec.709 for direct Resolve/Fusion import without baked gamma.
+    Returns immediately - poll /prores_status for completion.
+    """
+    global prores_process
+    
+    # Refuse if already running
+    if prores_process and prores_process.poll() is None:
+        return jsonify({"status": "already_running"}), 409
+    
+    tiffs = sorted(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif")))
+    if not tiffs:
+        return jsonify({"error": "No frames found in CamMag"}), 404
+    
+    try:
+        fps = request.json.get('fps', 24) if request.json else 24
+        ts = int(time.time())
+        out_mov = os.path.join(PRORES_DIR, f"vop_prores_{ts}.mov")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(fps),
+            "-pattern_type", "glob",
+            "-i", os.path.join(CAM_MAG_DIR, "*.tif"),
+            "-c:v", "prores_ks",
+            "-profile:v", "4444",
+            "-pix_fmt", "yuv444p10le",
+            # Tag as linear light, Rec.709 primaries - no gamma baked in.
+            # Resolve/Fusion reads these flags and handles the transform in the projects
+            # color management pipeline. Set Input Color Space to "Linear" in Resolve.
+            "-color_trc", "linear",
+            "-colorspace", "bt709",
+            "-color_primaries", "bt709",
+            out_mov
+        ]
+
+        print(f"[VOP SERVER] ACTION: RENDER PRORES -> {os.path.basename(out_mov)}")
+        prores_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr= subprocess.DEVNULL)
+
+        return jsonify({"status": "started", "filename": os.path.basename(out_mov)})
+
+    except Exception as e:
+        print(f"[VOP SERVER] ProRes render error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/prores_status', methods=['GET'])
+def prores_status():
+    """ Polls the background ProRes ffmpeg process for completion. """
+    global prores_process
+    if prores_process is None:
+        return jsonify({"status": "idle"})
+    code = prores_process.poll()
+    if code is None:
+        return jsonify({"status": "rendering"})
+    elif code == 0:
+        # Find the most recently created.mov to return the filename
+        movs = glob.glob(os.path.join(PRORES_DIR, "*.mov"))
+        filename = os.path.basename(max(movs, key=os.path.getctime)) if movs else ""
+        return jsonify({"status": "done", "filename":filename})
+    else:
+        return jsonify({"status": "error", "code": code})
+
+@app.route('/prores/<filename>')
+def serve_prores(filename):
+    """ Serves the rendered ProRes file for browser download. """
+    return send_from_directory(PRORES_DIR, filename, as_attachment=True)
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
