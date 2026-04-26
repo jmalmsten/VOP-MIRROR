@@ -188,14 +188,26 @@ def run_vop_engine(job_path):
 
         buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
         
-        # Log the exact moment the libcamera subprocess is triggered
+        # -------------------------------------------------------------------
+        # INSERT NEW CODE BLOCK HERE
+        # -------------------------------------------------------------------
+        # EDID HARDWARE SYNC DELAY
+        # If this is a preview or the first frame of a sequence, the KMSDRM 
+        # lock was recently acquired. We must pause execution to allow the 
+        # physical HDMI monitor to complete its EDID handshake and ignite the LCD.
+        # This occurs BEFORE triggering the camera to prevent long, empty exposures.
+        if frame_num == 1.0 or is_preview:
+            log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Waiting 3.5s for HDMI EDID Sync")
+            time.sleep(3.5)
+        # -------------------------------------------------------------------
+            
         t_trigger = time.time()
         log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | Triggering libcamera")
         
+        # The total shutter duration is now accurately constrained to total_ms + 1500ms
         cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0), 
                                       job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0), job_data.get('cam_res','2028x1520'))
         
-        # Python halts here for the duration of PRIME_WAIT_MS
         hw.wait_for_sensor_prime()
 
         # The anchor marks the exact millisecond the HDMI render loop begins
