@@ -72,7 +72,7 @@
                 <div class="group-title">Projection Mag</div>
                 <div class="upload-cluster">
                     <div class="c-box" style="flex:1;"><label>Active Image</label><input type="text" id="image" readonly></div>
-                    <input type="file" id="file_input" style="display:none;" onchange="uploadFile('file_input', 'image', '/upload_target')">
+                    <input type="file" id="file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('file_input', 'image', '/upload_target')">
                     <button class="mini-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjMag()">NUKE</button>
                 </div>
@@ -89,7 +89,7 @@
                 <div class="group-title">Projection BiPack</div>
                 <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
                     <div class="c-box" style="flex:1;"><label>Active Mask</label><input type="text" id="bipack_image" readonly></div>
-                    <input type="file" id="bp_file_input" style="display:none;" onchange="uploadFile('bp_file_input', 'bipack_image', '/upload_proj_bipack')">
+                    <input type="file" id="bp_file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('bp_file_input', 'bipack_image', '/upload_proj_bipack')">
                     <button class="mini-btn" onclick="document.getElementById('bp_file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjBiPack()">NUKE</button>
                 </div>

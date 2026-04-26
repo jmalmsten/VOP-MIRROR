@@ -67,18 +67,35 @@ function toggleSheetVisibility() {
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
 }
 
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+
 async function uploadFile(inputId, textId, endpoint) {
     const file = document.getElementById(inputId).files[0];
     if(!file) return;
+
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    const isVideo = VIDEO_EXTS.has(ext);
+    const textEl = document.getElementById(textID);
+
+    if (isVideo) {
+        textEl.value = 'EXTRACTING FRAMES - PLEASE WAIT...';
+    }
+
     const formData = new FormData();
     formData.append('file', file);
+
     try {
-        const resp = await fetch(endpoint, {method: 'POST', body: formData});
+        const resp = await fetch(endpoint, { method: 'POST', body: formData });
         const data = await resp.json();
-        document.getElementById(textId).value = data.filename;
-        await triggerSync(); 
-    } catch(e) { console.error("Upload failed", e); }
-}
+        // Show the original filename so the user knows what was loaded
+        textEl.value = data.filename;
+        await triggerSync();
+    } catch(e) {
+        console.error("Upload failed", e);
+        textEl.value = 'UPLOAD FAILED';
+    }
+}    
+    
 
 async function triggerSync() {
     local_sync_ts = Date.now();

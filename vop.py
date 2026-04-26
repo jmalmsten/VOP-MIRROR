@@ -345,6 +345,7 @@ def upload_proj_bipack():
     file = request.files['file']
     for f in os.listdir(PROJ_BIPACK_DIR): os.remove(os.path.join(PROJ_BIPACK_DIR, f))
     file.save(os.path.join(PROJ_BIPACK_DIR, file.filename))
+    process_video_ingestion(filepath, PROJ_BIPACK_DIR)
     return jsonify({"status": "ok", "filename": file.filename})
 
 @app.route('/nuke_proj_mag', methods=['POST'])
