@@ -334,7 +334,7 @@ def run_vop_engine(job_path):
 
         asp_logo = logo_w / logo_h
         x, y = 0.0, 0.37
-        dx, dy = 0.00125, 0.00115
+        dx, dy = 0.00225, 0.00215
 
         running = True
         while running:
