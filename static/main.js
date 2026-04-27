@@ -266,6 +266,13 @@ function addMDSKeyframe() {
             <select id="mds_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
             <input type="checkbox" id="mds_crn${idx}" ${vals.crn?'checked':''}>
             <div class="node-tag master">MST</div>
+            <!-- JK printer inputs: insert AFTER the MST node-tag, BEFORE the PM POS input. -->
+            <input type="number" step="1"           id="mds_pm_gate${idx}" value="${vals.pm_gate}" class="pm-jk-cell jk-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_pm_cam${idx}"  value="${vals.pm_cam}"  class="pm-jk-cell jk-input">
+            <input type="number" step="1"           id="mds_pm_stp${idx}"  value="${vals.pm_stp}"  class="pm-jk-cell jk-input">
+            <input type="number" step="1"           id="mds_bp_gate${idx}" value="${vals.bp_gate}" class="bp-jk-cell jk-input bp-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_bp_cam${idx}"  value="${vals.bp_cam}"  class="bp-jk-cell jk-input bp-input">
+            <input type="number" step="1"           id="mds_bp_stp${idx}"  value="${vals.bp_stp}"  class="bp-jk-cell jk-input bp-input">
             <input id="mds_p${idx}" value="${vals.p}">
             <input id="mds_r${idx}" value="${vals.r}">
             <input id="mds_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
@@ -278,7 +285,7 @@ function addMDSKeyframe() {
             <button class="del-btn" onclick="this.parentElement.parentElement.remove(); reindexMDS();">X</button>
         </div>
         <div class="sheet-row mds-smear-row">
-            <div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STRT</div>
             <input id="mds_start_p${idx}" value="${vals.sp}">
             <input id="mds_start_r${idx}" value="${vals.sr}">
@@ -290,7 +297,7 @@ function addMDSKeyframe() {
             <div></div>
         </div>
         <div class="sheet-row mds-smear-row">
-            <div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STOP</div>
             <input id="mds_stop_p${idx}" value="${vals.ep}">
             <input id="mds_stop_r${idx}" value="${vals.er}">
@@ -320,8 +327,11 @@ function addSSSKeyframe() {
 
     // SSS Base Defaults (Includes SD and PH)
     let vals = {
-        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
-        c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1
+        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0", 
+        c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1,
+        // JK Printer defaults: empty gate (no anchor, just continue), 1:1 playback rate
+        pm_gate: "", pm_cam: "1", pm_stp: "1",
+        bp_gate: "", bp_cam: "1", bp_stp: "1"
     };
 
     if (lastRow) {
@@ -340,7 +350,18 @@ function addSSSKeyframe() {
             exp: getV('input[id^="sss_exp"]'),
             sd: getV('input[id^="sss_sd"]'),
             ph: getV('input[id^="sss_ph"]'),
-            f: parseInt(getV('input[id^="sss_f"]')) + 1
+            f: parseInt(getV('input[id^="sss_f"]')) + 1,
+            // JK Printer scrape from previous row.
+            // GATE: always blank on a NEW keyframe, even if the previous row anchored.
+            //       Anchoring on every keyframe would prevent the playhead from
+            //       accumulating the user's intended CAM:STP advancement between them.
+            // CAM/STP: copy from the previous row so the chosen rate continues by default.
+            pm_gate: "",
+            pm_cam: getV('input[id^="sss_pm_cam"]') || "1",
+            pm_stp: getV('input[id^="sss_pm_stp"]') || "1",
+            bp_gate: "",
+            bp_cam: getV('input[id^="sss_bp_cam"]') || "1",
+            bp_stp: getV('input[id^="sss_bp_stp"]') || "1"
         };
     }
 
@@ -354,6 +375,12 @@ function addSSSKeyframe() {
         <input type="number" id="sss_f${idx}" value="${vals.f}">
         <select id="sss_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
         <input type="checkbox" id="sss_crn${idx}" ${vals.crn?'checked':''}>
+        <input type="number" step="1"           id="sss_pm_gate${idx}" value="${vals.pm_gate}" class="pm-jk-cell jk-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_pm_cam${idx}"  value="${vals.pm_cam}"  class="pm-jk-cell jk-input">
+        <input type="number" step="1"           id="sss_pm_stp${idx}"  value="${vals.pm_stp}"  class="pm-jk-cell jk-input">
+        <input type="number" step="1"           id="sss_bp_gate${idx}" value="${vals.bp_gate}" class="bp-jk-cell jk-input bp-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_bp_cam${idx}"  value="${vals.bp_cam}"  class="bp-jk-cell jk-input bp-input">
+        <input type="number" step="1"           id="sss_bp_stp${idx}"  value="${vals.bp_stp}"  class="bp-jk-cell jk-input bp-input">
         <input id="sss_p${idx}" value="${vals.p}">
         <input id="sss_r${idx}" value="${vals.r}">
         <input id="sss_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
@@ -369,6 +396,22 @@ function addSSSKeyframe() {
     `;
     body.appendChild(row);
     reindexSSS();
+}
+
+// Toggle .has-pm-video / .has-bp-video classes on the SSS and MDS sheet
+// wrappers based on /status frame counts. CSS rules in style.css use these
+// classes to expand the grid template (revealing JK columns) and unhide the 
+// individual JK input cells.
+//
+// >1 frame is the threshold: a single TIFF (still image) doesn't benefit from
+// JK printer controls since GATE clamps to frame 0 anyway, so we keep the
+// columns hidden for stills to reduce sheet clutter.
+function applyVideoVisibility(pmFrames, bpFrames) {
+    const sheets = document.querySelectorAll('.sss-sheet, .mds-sheet');
+    sheets.forEach(sheet => {
+        sheet.classList.toggle('has-pm-video', pmFrames > 1);
+        sheet.classList.toggle('has-bp-video', bpFrames > 1);
+    });
 }
 
 function reindexSSS() {
@@ -464,6 +507,8 @@ setInterval(async () => {
             bar.style.width = "0%";
             if (etaEl) etaEl.innerText = ""; 
         }
+        // Drive JK printer column visibility from server-reported source frame counts.
+        applyVideoVisibility(st.pm_frames || 0, st.bp_frames || 0);
     } catch(e) { console.error("Poll Error:", e); }
 }, 1000);
 

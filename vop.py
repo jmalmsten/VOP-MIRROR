@@ -122,7 +122,22 @@ def process_video_ingestion(filepath, target_dir):
         
         except subprocess.CalledProcessError as e:
             print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
-            
+
+def count_source_frames(directory)
+    """
+    Counts image frames in a media directory (PROJ_MAG_DIR or PROJ_BIPACK_DIR).
+
+    Used by /status to tell the web UI wether a layer holds a still image
+    (1 frame or a video sequence (>1 frame). The UI uses this to show or hide
+    the JK Optical Printer (GATE/CAM/STP) inputs in the exposure sheets,
+    since those columns are only meaningful when there's a sequence to travrse.
+    """
+    if not os.path.exists(directory):
+        return 0
+    valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+    return len([f for f in os.listdir(directory) if f.lower().endswith(valid_exts)])
+
+
 def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
     """
     Calculates the required scaling factor to fit an image of arbitrary aspect ratio
@@ -234,7 +249,15 @@ def status():
             # Read telemetry written by engine.py for UI progress bars
             with open("/tmp/vop_heartbeat", "r") as f:
                 hb = json.load(f)
-                return jsonify({"status": "rendering", "heartbeat": hb, "params": params, "latest_wp": latest_wp})
+                return jsonify({
+                    "status": "rendering", 
+                    "heartbeat": hb, 
+                    "params": params, 
+                    "latest_wp": latest_wp,
+                    # JK printer column visibility hints for the web UI
+                    "pm_frames": count_source_frames(PROJ_MAG_DIR),
+                    "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
+                })
         except:
             pass
 
@@ -243,6 +266,9 @@ def status():
         "params": params, 
         "latest_wp": latest_wp, 
         "workprint": f"/workprints/{latest_wp}" if latest_wp else None
+        # JK printer column visibility hints for the web UI
+        "pm_frames": count_source_frames(PROJ_MAG_DIR),
+        "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
     })
 
 @app.route('/render_prores', methods=['POST'])

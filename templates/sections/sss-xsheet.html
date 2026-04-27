@@ -1,13 +1,44 @@
+<!-- 
+    SSS Exposure Sheet
+    
+    Column order (left to right) follows the optical signal flow:
+        identity      -> # FR INT C
+        source frame  -> PM GATE PM CAM PM STP    (visible only if PM holds video)
+        source frame  -> BP GATE BP CAM BP STP    (visible only if BP holds video)
+        spatial       -> PM POS PM ROT BP POS BP ROT
+        light         -> PG CG
+        exposure      -> EXP SD PH
+        action        -> [delete]
+    
+    The .pm-jk-cell / .bp-jk-cell classes are visibility hooks. CSS in 
+    style.css collapses these columns when the parent .sss-sheet wrapper 
+    lacks the .has-pm-video / .has-bp-video classes (toggled by main.js 
+    based on /status frame counts).
+-->
 <div class="vop-sheet sss-sheet">
     <div class="sheet-row sss-header">
         <div>#</div>
         <div data-title="Frame Number">FR</div>
         <div data-title="Interpolation Mode">INT</div>
         <div data-title="Corner/Sharp Turn">C</div>
-        <div data-title="Proj Position (X,Y,Z)">POS<br>(X,Y,Z)</div>
-        <div data-title="Proj Rotation (P,R,Y)">ROT<br>(P,R,Y)</div>
+        
+        <!-- JK Printer: ProjMag layer (only shown when PM holds a video sequence) -->
+        <div data-title="ProjMag Gate Frame Anchor (empty = inherit)" class="pm-jk-cell">PM<br>GATE</div>
+        <div data-title="ProjMag Camera-Frame Hold (CAM:STP, x)" class="pm-jk-cell">PM<br>CAM</div>
+        <div data-title="ProjMag Gate-Frame Step (CAM:STP, y, signed)" class="pm-jk-cell">PM<br>STP</div>
+        
+        <!-- JK Printer: BiPack layer (only shown when BP holds a video sequence) -->
+        <div data-title="BiPack Gate Frame Anchor (empty = inherit)" class="bp-jk-cell bp-header-text">BP<br>GATE</div>
+        <div data-title="BiPack Camera-Frame Hold (CAM:STP, x)" class="bp-jk-cell bp-header-text">BP<br>CAM</div>
+        <div data-title="BiPack Gate-Frame Step (CAM:STP, y, signed)" class="bp-jk-cell bp-header-text">BP<br>STP</div>
+        
+        <!-- Spatial -->
+        <div data-title="ProjMag Position (X,Y,Z)">PM POS<br>(X,Y,Z)</div>
+        <div data-title="ProjMag Rotation (P,R,Y)">PM ROT<br>(P,R,Y)</div>
         <div data-title="BiPack Position (X,Y,Z)" class="bp-header-text">BP POS<br>(X,Y,Z)</div>
         <div data-title="BiPack Rotation (P,R,Y)" class="bp-header-text">BP ROT<br>(P,R,Y)</div>
+        
+        <!-- Light & exposure -->
         <div data-title="Projector Gel">PG</div>
         <div data-title="Camera Gel">CG</div>
         <div data-title="Exposure Time (Sec)">EXP</div>
@@ -17,6 +48,6 @@
     </div>
     <div id="sss_sheet_body"></div>
 </div>
-<div class="add-row" style="margin-top: 10px;">
+<div class="add-row sss-add-row">
     <button class="sss-add-btn" onclick="addSSSKeyframe()">+ ADD SSS KEYFRAME</button>
 </div>

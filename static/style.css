@@ -555,6 +555,93 @@ body {
     cursor:     pointer; 
 }
 
+/* ============================================================
+   JK Optical Printer column visibility & grid templates
+   ------------------------------------------------------------
+   The SSS and MDS sheets have four possible column layouts depending
+   on which optical layers hold video sequences:
+
+        neither:    no JK columns visible (column count: base)
+        PM only:     3 JK columns (PM-GATE, PM-CAM, PM-STP)
+        BP only:     3 JK columns (BP-GATE, BP-CAM, BP-STP)
+        both:        6 JK columns
+    
+   The JK cells themselves are hidden via display:noneeeee when their
+   layer doesn't have video. The grid template is then sized to match 
+   the actual visible colun count.
+   ============================================================ */
+
+/* --- SSS Sheet grid templated --- */
+
+
+/* Default: neither layer holds video. No JK columns. */
+.sss-header, .sss-master-row {
+    grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+}
+
+/* Exactly one layer holds video (3 JK columns visible). */
+.sss-sheet.has-pm-video:not(.has-bp-video) .sss-header,
+.sss-sheet.has-pm-video:not(.has-bp-video) .sss-master-row,
+.sss-sheet.has-bp-video:not(.has-pm-video) .sss-header,
+.sss-sheet.has-bp-video:not(.has-pm-video) .sss-master-row {
+    grid-template-columns: 30px 60px 50px 30px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+}
+
+/* Both layers hold video (all 6 JK columns visible). */
+.sss-sheet.has-pm-video.has-bp-video .sss-header,
+.sss-sheet.has-pm-video.has-bp-video .sss-master-row {
+    grid-template-columns: 30px 60px 50px 30px 45px 40px 40px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+}
+
+/* --- MDS Sheet grid templates --- */
+/* Same logic as SSS but with the existing MDS pixel widths and the TYPE column. */
+.mds-header, .mds-master-row, .mds-smear-row {
+    grid-template-columns: 25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+}
+
+.mds-sheet.has-pm-video:not(.has-bp-video) .mds-header,
+.mds-sheet.has-pm-video:not(.has-bp-video) .mds-master-row,
+.mds-sheet.has-pm-video:not(.has-bp-video) .mds-smear-row,
+.mds-sheet.has-bp-video:not(.has-pm-video) .mds-header,
+.mds-sheet.has-bp-video:not(.has-pm-video) .mds-master-row,
+.mds-sheet.has-bp-video:not(.has-pm-video) .mds-smear-row {
+    grid-template-columns: 25px 90px 40px 25px 70px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+}
+
+.mds-sheet.has-pm-video.has-bp-video .mds-header,
+.mds-sheet.has-pm-video.has-bp-video .mds-master-row,
+.mds-sheet.has-pm-video.has-bp-video .mds-smear-row {
+    grid-template-columns: 25px 90px 40px 25px 70px 45px 40px 40px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+}
+
+/* --- Cell visibility --- */
+/* Hide JK cells when their layer doesn't hold video. The empty placeholder
+   divs in the MDS smear sub-rows also carry these classes, so they collapse
+   in lockstep with the master row's actual inputs. */
+.sss-sheet:not(.has-pm-video) .pm-jk-cell,
+.mds-sheet:not(.has-pm-video) .pm-jk-cell {
+    display: none;
+}
+.sss-sheet:not(.has-bp-video) .bp-jk-cell,
+.mds-sheet:not(.has-bp-video) .bp-jk-cell {
+    display: none;
+}
+
+/* --- JK input styling --- */
+/* Tight integer inputs - shorter than the position/rotation fields. The
+   .bp-input class on BP variants already applies the BiPack accent color
+   (border + text), inherited from the existing .bp-input rule earlier in
+   this file. Nothing extra to do for color coding. */
+.jk-input {
+    font-variant-numeric: tabular-nums;  /* keep digits aligned across rows */
+}
+
+/* --- Replaces the inline 'margin-top: 10px' that used to live on the
+       SSS add-row div. Per project styling rule, no inline styles. --- */
+.sss-add-row {
+    margin-top: 10px;
+}
+
 /* ##################### The Cheat Sheet Styling ##################### */
 
 .cs-grid{

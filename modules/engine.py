@@ -188,10 +188,16 @@ def run_persistent_engine():
                     t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
                     st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
 
-                ph_val = timeline.calculate_playhead_at(frame_num)
-                
-                tex_mag, asp_mag = tex_mgr.load(ph_val, is_bipack=False)
-                tex_bp, asp_bp = tex_mgr.load(ph_val, is_bipack=True)
+                # Resolve playhead positions independently for each optical layer.
+                # The ProjMag and BiPack run on separate JK printer tracks - so a job
+                # could, for example, hold the projmag still while reverse running the
+                # bipack, just like a real optical printer's two independently-clocked
+                # magazine heads.
+                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
+                ph bp = timeline.calculate_playhead at(frame_num, layer='bp')
+
+                tex_mag, asp_mag = tex_mgr.load(ph_pm, is_bipack=False)
+                tex_bp,  asp_bp  = tex_mgr.load(ph_bp, is_bipack=True)
 
                 bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
                 
@@ -246,9 +252,11 @@ def run_persistent_engine():
                 # before the precision hardware timing loop begins. This prevents
                 # the main thread from stalling during the first frame render.
                 # ---------------------------------------------------------
-                ph_val = timeline.calculate_playhead_at(frame_num)
-                tex_mgr.load(ph_val, is_bipack=False)
-                tex_mgr.load(ph_val, is_bipack=True)
+
+                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
+                ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
+                tex_mgr.load(ph_pm, is_bipack=False)
+                tex_mgr.load(ph_bp, is_bipack=True))
 
                 # ---------------------------------------------------------
                 # PRE-EXPOSURE BLACKOUT
