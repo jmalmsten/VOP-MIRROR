@@ -94,10 +94,9 @@ def process_video_ingestion(filepath, target_dir):
     If so, extracts all frames to zero-padded TIFFs matching the engine's
     playhead expectations (0000.tif, 0001.tif) and deletes the original video.
     
-    Extra thought. If future me needs, that could maybe be increased to 5 digits.
-    that would increase the incoming video's max length from 6 min 56 sec 16 frames to 
-    69 min 26 sec 16 frames (if my math is correct). But let's keep it at 4 digits for 
-    a max length "reel" of just under 7 minutes. It seems oddly realistic to real life systems
+    Forces 8-bit RGB output (-pix_fmt rgb24) because higher bit-depth source 
+    codecs like ProRes 422 HQ would otherwise produce 16-bit TIFFs that the 
+    moderngl texture pipeline (which expects 8-bit RGB) cannot consume.
     """
     ext = os.path.splitext(filepath)[1].lower()
     video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
@@ -107,18 +106,17 @@ def process_video_ingestion(filepath, target_dir):
 
         output_pattern = os.path.join(target_dir, "%04d.tif")
 
-        # ffmpeg flags: -y (overwrite), -i (input), -start_number 0 (force index 0)
         cmd = [
             "ffmpeg", "-y", "-i", filepath,
+            "-pix_fmt", "rgb24",          # ← force 8-bit RGB output
             "-start_number", "0",
             output_pattern
         ]
 
         try:
-            # Execute ffmpeg blocking call. Redirect stdout/stderr to DEVNULL to prevent terminal spam
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("[VOP SERVER] Frame extraction complete.")
-            os.remove(filepath) # Delete the source video to conserve storage
+            os.remove(filepath)
         
         except subprocess.CalledProcessError as e:
             print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
