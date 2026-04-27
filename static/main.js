@@ -216,6 +216,9 @@ function addMDSKeyframe() {
     let vals = {
         m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
         c: "#ffffff", cg: "#ffffff", exp: "1.0", f: 1,
+        // JK Printer defaults: empty gate (no anchor, just continue), 1:1 playback rate
+        pm_gate: "", pm_cam: "1", pm_stp: "1",
+        bp_gate: "", bp_cam: "1", bp_stp: "1",
         sp: "0,0,0", sr: "0,0,0", sbp_p: "0,0,0", sbp_r: "0,0,0", sc: "#ffffff", scg: "#ffffff",
         ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
     };
@@ -252,7 +255,18 @@ function addMDSKeyframe() {
             ebp_p: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_p"]'),
             ebp_r: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_r"]'),
             ec: getV('.mds-smear-row:nth-child(3) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
-            ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]')
+            ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]'),
+            // JK Printer scrape from previous row.
+            // GATE: always blank on a NEW keyframe, even if the previous row anchored.
+            //       Anchoring on every keyframe would prevent the playhead from
+            //       accumulating the user's intended CAM:STP advancement between them.
+            // CAM/STP: copy from the previous row so the chosen rate continues by default.
+            pm_gate: "",
+            pm_cam: getV('.mds-master-row input[id^="mds_pm_cam"]') || "1",
+            pm_stp: getV('.mds-master-row input[id^="mds_pm_stp"]') || "1",
+            bp_gate: "",
+            bp_cam: getV('.mds-master-row input[id^="mds_bp_cam"]') || "1",
+            bp_stp: getV('.mds-master-row input[id^="mds_bp_stp"]') || "1"
         };
     }
 

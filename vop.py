@@ -265,7 +265,7 @@ def status():
         "status": status_state, 
         "params": params, 
         "latest_wp": latest_wp, 
-        "workprint": f"/workprints/{latest_wp}" if latest_wp else None
+        "workprint": f"/workprints/{latest_wp}" if latest_wp else None,
         # JK printer column visibility hints for the web UI
         "pm_frames": count_source_frames(PROJ_MAG_DIR),
         "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
