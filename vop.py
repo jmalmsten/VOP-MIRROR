@@ -123,14 +123,14 @@ def process_video_ingestion(filepath, target_dir):
         except subprocess.CalledProcessError as e:
             print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
 
-def count_source_frames(directory)
+def count_source_frames(directory):
     """
     Counts image frames in a media directory (PROJ_MAG_DIR or PROJ_BIPACK_DIR).
 
-    Used by /status to tell the web UI wether a layer holds a still image
-    (1 frame or a video sequence (>1 frame). The UI uses this to show or hide
+    Used by /status to tell the web UI whether a layer holds a still image
+    (1 frame or a video sequence (>1 frame)). The UI uses this to show or hide
     the JK Optical Printer (GATE/CAM/STP) inputs in the exposure sheets,
-    since those columns are only meaningful when there's a sequence to travrse.
+    since those columns are only meaningful when there's a sequence to traverse.
     """
     if not os.path.exists(directory):
         return 0

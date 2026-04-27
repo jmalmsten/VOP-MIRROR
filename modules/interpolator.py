@@ -63,7 +63,7 @@ class Timeline:
         self.job = job_data
         
         #   *_gate : Optional integer. The hardcoded gate frame anchor.
-        #            None means "inherit from earlier anchor / continue accumulating."
+        #            None means "inherit from earlier anchor / continue accumulating".
         #   *_cam  : Positive integer >= 1. Number of camera (timeline) frames to
         #            HOLD each gate frame before advancing. The "x" in CAM:STP.
         #   *_stp  : Signed integer. Number of gate frames to ADVANCE after each hold.
@@ -88,7 +88,7 @@ class Timeline:
                 idx = k.replace(prefix + "f", "")
                 if idx.isdigit(): row_ids.add(idx)
         
-        def parse_optional_int():
+        def parse_optional_int(key):
             """
             GATE parser. Returns int or None.
             
@@ -98,18 +98,18 @@ class Timeline:
             Any integer value (including 0 and negatives) => int (a hardcoded anchor).
 
             This is how the user signals 'don't reset the playhead here' vs
-            'snap the gate to this exact frame number'
+            'snap the gate to this exact frame number'.
             """
             if key not in job_data:
                 return None
             raw = job_data.get(key)
-            if raw == "" or raw is None
+            if raw == "" or raw is None:
                 return None
             try:
                 return int(raw)
             except (ValueError, TypeError):
                 raise ValueError(
-                    f"input '{key}' contains invalid data: '{raw}'. "
+                    f"Input '{key}' contains invalid data: '{raw}'. "
                     f"GATE must be an integer or empty (empty = inherit)."
                 )
 
@@ -118,7 +118,7 @@ class Timeline:
             CAM parser of CAM:STP. Must be a positive integer >= 1.
 
             CAM=0 would be a divide-by-zero ('advance every 0 frames').
-            Empty/missing falls back to the default of 1 (norma 1:1 playback). 
+            Empty/missing falls back to the default of 1 (normal 1:1 playback). 
             """                
             if key not in job_data:
                 return default
@@ -129,9 +129,9 @@ class Timeline:
                 val = int(raw)
             except (ValueError, TypeError):
                 raise ValueError(
-                    f"input '{key}' contains invalid data: '{raw}'. CAM must be an integer."
+                    f"Input '{key}' contains invalid data: '{raw}'. CAM must be an integer."
                 )
-            if val <1:
+            if val < 1:
                 raise ValueError(
                     f"Input '{key}' is {val}. CAM must be 1 or greater. "
                     f"CAM is the camera-frame divisor and zero or negative values "
@@ -411,7 +411,7 @@ class Timeline:
            hold_counter. When hold_counter reaches CAM, advance the gate by STP
            and reset the counter.
 
-           This produces the staccatto judder of a real JK printer:
+           This produces the staccato judder of a real JK printer:
            3:2 yields gate values 1,1,1,3,3,3,5,5,5... rather than smoothly
            interpolating between rates.
         """
@@ -449,10 +449,10 @@ class Timeline:
             stp = self._get_step_held(stp_key, f, default=1)
 
             # Defensive clamp: parser already enforces cam>=1, but if the track is
-            # somehow empty or returns none, fall back to 1 to avoid an infinite hold.
+            # somehow empty or returns None, fall back to 1 to avoid an infinite hold.
             if cam is None or cam < 1:
                 cam = 1
-            if stp is none:
+            if stp is None:
                 stp = 1
             
             hold_counter += 1

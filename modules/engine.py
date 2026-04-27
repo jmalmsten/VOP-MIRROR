@@ -194,7 +194,7 @@ def run_persistent_engine():
                 # bipack, just like a real optical printer's two independently-clocked
                 # magazine heads.
                 ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
-                ph bp = timeline.calculate_playhead at(frame_num, layer='bp')
+                ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
 
                 tex_mag, asp_mag = tex_mgr.load(ph_pm, is_bipack=False)
                 tex_bp,  asp_bp  = tex_mgr.load(ph_bp, is_bipack=True)
@@ -256,7 +256,7 @@ def run_persistent_engine():
                 ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
                 ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
                 tex_mgr.load(ph_pm, is_bipack=False)
-                tex_mgr.load(ph_bp, is_bipack=True))
+                tex_mgr.load(ph_bp, is_bipack=True)
 
                 # ---------------------------------------------------------
                 # PRE-EXPOSURE BLACKOUT

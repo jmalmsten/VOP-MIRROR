@@ -285,8 +285,14 @@ function addMDSKeyframe() {
             <button class="del-btn" onclick="this.parentElement.parentElement.remove(); reindexMDS();">X</button>
         </div>
         <div class="sheet-row mds-smear-row">
-            <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STRT</div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
             <input id="mds_start_p${idx}" value="${vals.sp}">
             <input id="mds_start_r${idx}" value="${vals.sr}">
             <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
@@ -295,16 +301,24 @@ function addMDSKeyframe() {
             <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
             <div></div>
             <div></div>
+            <div></div>
         </div>
         <div class="sheet-row mds-smear-row">
-            <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STOP</div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
             <input id="mds_stop_p${idx}" value="${vals.ep}">
             <input id="mds_stop_r${idx}" value="${vals.er}">
             <input id="mds_stop_bp_p${idx}" value="${vals.ebp_p}" class="bp-input">
             <input id="mds_stop_bp_r${idx}" value="${vals.ebp_r}" class="bp-input">
             <input type="color" id="mds_stop_c${idx}" value="${vals.ec}" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
             <input type="hidden" id="mds_stop_c${idx}_hex" value="${vals.ec}">
+            <div></div>
             <div></div>
             <div></div>
         </div>`;
