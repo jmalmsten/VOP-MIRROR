@@ -75,7 +75,7 @@ async function uploadFile(inputId, textId, endpoint) {
 
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     const isVideo = VIDEO_EXTS.has(ext);
-    const textEl = document.getElementById(textID);
+    const textEl = document.getElementById(textId);
 
     if (isVideo) {
         textEl.value = 'EXTRACTING FRAMES - PLEASE WAIT...';
