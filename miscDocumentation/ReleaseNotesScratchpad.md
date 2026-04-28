@@ -25,6 +25,7 @@ run_vop.sh
 ### Added layer visibility toggle
 This is so that we can quickly disable visibility of ProjMag or BiPack or both. When off, they go white. Which makes them effectively invisible when merging together with multiply. If both are off, we get a pure white image. This can be tinted with PG to do image-wide color addition. 
 ## Changed:
-- Added PM to the headers of the exposure sheet to clarify which columns are responsible for the Projection Mag.
+### Added PM to the headers of the exposure sheet to clarify which columns are responsible for the Projection Mag.
+### rearranged things to fit better in the exposure sheet
 ## Fixes: 
 ## Removed:
