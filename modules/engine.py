@@ -82,12 +82,15 @@ def validate_black_clip(raw_clip):
     """
     try:
         val = float(raw_clip) if raw_clip != "" else 0.0
-    
     except (TypeError, ValueError):
-        log_audit(f"WARNING: Nosie Crusher value {val} is unreasonable (must be 0.0 - 1.0). "
-                  f"Did you mayhaps forget the leading decimal? Disabling crusher for this"
-                  f"exposure.")
+        log_audit(f"WARNING: black_clip value '{raw_clip}' is not a number. Ignoring (treating as 0.0).")
         return 0.0
+    
+    if val >= 1.0:
+        log_audit(f"WARNING: Noise Crusher value {val} is unreasonable (must be 0.0 - 1.0). "
+                  f"Did you mayhaps forget the leading decimal? Disabling crusher for this exposure.")
+        return 0.0
+    
     if val < 0.0:
         log_audit(f"WARNING: Noise Crusher value {val} is negative. Treating as 0.0.")
         return 0.0
