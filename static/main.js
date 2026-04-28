@@ -617,7 +617,23 @@ async function triggerMeasurement() {
                     const nRes = await fetch('/static/noise_data.json?t=' + Date.now());
                     if (nRes.ok) {
                         const data = await nRes.json();
-                        resTxt.innerText = data.measured_noise.toFixed(6); 
+                        const measured = data.measured_noise.toFixed(6);
+
+                        // Render as a clickable element. We use a span with a class
+                        // rather than a <a> tag so it stays inline with the rest of 
+                        // the result text and doesn't get default link styling that
+                        // would clash with the rest of the UI
+                        resTxt.innerHTML = `<span class="noise-clickable" title="Click to copy into Noise Crusher">${measured}</span>`;
+
+                        // Wire up the click. We attach the listener AFTER setting innerHTML
+                        // because the span doesn't exist until innerHTML has been parsed.
+                        resTxt.querySelector('.noise-clickable').addEventListener('click', () => {
+                            const target = document.getElementById('black_clip');
+                            target.value = measured;
+                            // Dispatch a change event so any sync logic listening to the
+                            // input (like the auto-save / job-state tracker) picks it up
+                            target.dispatchEvent(new Event('chagne', { bubbles: true}));
+                        });
                     } else {
                         resTxt.innerText = "ERR";
                     }

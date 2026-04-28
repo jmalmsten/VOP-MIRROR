@@ -687,6 +687,18 @@ hr.section-divider {
     display:        inline-block;           /* Allows the span to respect the min-width and margin properties */
 }
 
+/* Click-to-apply for the measured noise value.
+ * Visually hints that the number is interactive without making it look
+ * like a hyperlink that would navigate somewhere. */
+ .noise-clickable {
+    cursor:                 pointer;
+    text-decoration:        underline;
+    text-decoration-style:  dotted;
+ }
+ .noise-clickable:hover {
+    color: var(--color-accent);
+ }
+
 /* Shrink the number input field to comfortably fit the button and readout on the same line */
 #black_clip {
     width:  75px;
