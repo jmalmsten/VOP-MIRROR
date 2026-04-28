@@ -17,7 +17,10 @@ These fields only become visible when the input of either ProjectionMag (PM) or 
 This is mostly to avoid situations where I miss part of the float in my manual copy-pasting. 
 ### Added sanity checker to the exposure routines.
 This forces valued in the Noise Crusher to be 0.0 - 1.0 and if they are outside. It clamps it into range and warns the user. 
-
+### Added a pull_and_run_vop_nightly.sh
+Mostly to speed simplify development and testing.
+Regular users are probably better off using the normal
+run_vop.sh
 ## Changed:
 - Added PM to the headers of the exposure sheet to clarify which columns are responsible for the Projection Mag.
 ## Fixes: 
