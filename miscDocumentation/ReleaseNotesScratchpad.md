@@ -15,6 +15,8 @@ These fields only become visible when the input of either ProjectionMag (PM) or 
     So far. No auto-looping commands. But they are coming later.
 ### Added ability to click the measured black level to auto-copy the numbers to the Noise-crusher text input
 This is mostly to avoid situations where I miss part of the float in my manual copy-pasting. 
+### Added sanity checker to the exposure routines.
+This forces valued in the Noise Crusher to be 0.0 - 1.0 and if they are outside. It clamps it into range and warns the user. 
 
 ## Changed:
 - Added PM to the headers of the exposure sheet to clarify which columns are responsible for the Projection Mag.
