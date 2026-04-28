@@ -413,8 +413,11 @@ body {
     min-width: 0;
 }
 
-.layer-eye {
-    /* Hide the native checkbox and replace with an emoji glyph */
+.c-box input.layer-eye {
+    /* Hide the native checkbox and replace with an emoji glyph.
+     * Selector includes .c-box to outweigh the universal '.c-box input' 
+     * width:100% rule that would otherwise stretch this checkbox across 
+     * the entire row. */
     appearance: none;
     -webkit-appearance: none;
     width: 22px;
@@ -425,23 +428,22 @@ body {
     font-size: 18px;
     line-height: 22px;
     text-align: center;
-    /* Glyph rendered via ::before pseudo-element so we can swap it on :checked */
+    padding: 0;
+    flex: 0 0 22px;
     position: relative;
 }
 
-.layer-eye::before {
-    /* Default (unchecked) state: closed eye */
+.c-box input.layer-eye::before {
     content: "🙈";
     opacity: 0.5;
 }
 
-.layer-eye:checked::before {
-    /* Checked = layer visible */
+.c-box input.layer-eye:checked::before {
     content: "👁";
     opacity: 1.0;
 }
 
-.layer-eye:hover::before {
+.c-box input.layer-eye:hover::before {
     opacity: 0.8;
 }
 
