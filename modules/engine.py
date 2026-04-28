@@ -88,7 +88,7 @@ def validate_black_clip(raw_clip):
                   f"Did you mayhaps forget the leading decimal? Disabling crusher for this"
                   f"exposure.")
         return 0.0
-    if val < 0.0
+    if val < 0.0:
         log_audit(f"WARNING: Noise Crusher value {val} is negative. Treating as 0.0.")
         return 0.0
     
