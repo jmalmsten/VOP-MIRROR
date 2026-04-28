@@ -70,6 +70,30 @@ signal.signal(signal.SIGTERM, handle_sigterm)
 def log_audit(msg): 
     print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.2.6): {msg}", flush=True)
 
+def validate_black_clip(raw_clip):
+    """
+    Coerces and sanity-checks the noise crusher input.
+
+    Returns a float in the range [0.0-1.0]. Anything <=0 disables the crusher.
+    Values >= 1.0 would crush the entire 16-bit range to black, so we refusee
+    them and warn loudly. This is a guardrail against the classic "missing
+    decimal point"  pasted-value mistake (e.g. typing 003704 instead of 0.003704
+    yields 3704.0 which silently nukes every captured photo to pure black)
+    """
+    try:
+        val = float(raw_clip) if raw_clip != "" else 0.0
+    
+    except (TypeError, ValueError):
+        log_audit(f"WARNING: Nosie Crusher value {val} is unreasonable (must be 0.0 - 1.0). "
+                  f"Did you mayhaps forget the leading decimal? Disabling crusher for this"
+                  f"exposure.")
+        return 0.0
+    if val < 0.0
+        log_audit(f"WARNING: Noise Crusher value {val} is negative. Treating as 0.0.")
+        return 0.0
+    
+    return val
+
 def run_persistent_engine():
     """
     Main loop for the persistent GPU engine. It acquires the hardware lock once 
@@ -242,8 +266,7 @@ def run_persistent_engine():
                 smr_ms = float(st['exp']) * 1000.0
                 total_ms = smr_ms + 1000.0
                 
-                raw_clip = job_data.get('black_clip', 0.0)
-                black_clip = float(raw_clip) if raw_clip != "" else 0.0
+                black_clip = validate_black_clip(job_data.get('black_clip', 0.0))
 
                 buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
                 # ---------------------------------------------------------
