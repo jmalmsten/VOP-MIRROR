@@ -53,7 +53,8 @@ Description:        Stylings for the whole GUI
     --bg-group:             #151515;    /* Group Boxes */
     --bg-input:             #000;       /* Inputs, progress bar track */
     --bg-button-muted:      #222;       /* Nuke buttons, upload-btn, cam_preview */
-
+    --bg-input-field:       #0d0d0d;    /* Input field background - slightly darker */
+    
     /* >>> Text Colors <<< */
 
     --text-primary:         #ddd;       /* Body text */
@@ -291,8 +292,9 @@ body {
 
 .const-group input, .const-group select { 
     width:              100%; 
+    background:         var(--bg-input-field);
     border:             1px solid var(--border-color); 
-    color:              #000; 
+    color:              var(--text-primary); 
     padding:            4px; 
     font-size:          0.8em; 
     box-sizing:         border-box; 
@@ -320,11 +322,24 @@ body {
 
 .c-box input { 
     width:              100%; 
+    background:         var(--bg-input-field);
     border:             1px solid var(--border-color); 
-    color:              #000; 
+    color:              var(text-primary); 
     padding:            4px; 
     font-size:          0.8em; 
     box-sizing:         border-box; 
+}
+
+/* Focused input feedback. Border lights up to the accent color so the
+ * user can see at a glance which field they're typing into - important
+ * in low-light usage where peripheral vision struggles to track cursors. */
+.const-group input:focus,
+.const-group select:focus,
+.c-box input:focus,
+.sheet-row input:focus,
+.probe-input:focus {
+    outline:        none;
+    border-color:   var(--color-accent);
 }
 
 .preview-area { 
@@ -545,8 +560,9 @@ body {
 }
 
 .sheet-row input {
+    background:         var(--bg-input-field);
     border:             1px solid var(--border-color); 
-    color:              #900; 
+    color:              var(--text-primary);
     padding:            3px; 
     font-size:          0.7em; 
     text-align:         center; 
