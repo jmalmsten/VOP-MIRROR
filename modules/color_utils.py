@@ -140,8 +140,17 @@ def write_screen_capture(pixels, width, height, static_dir):
 
 def measure_noise_floor(buffer_file, static_dir):
     """
-    Analyzes a dark frame, draws a bounding box for UI feedback,
+    Analyzes a dark frame to determine the sensor's noise ceiling at the 
+    current exposure settings, draws a bounding box for UI feedback,
     and exports the result to a static JSON for the frontend.
+    
+    Uses the 99.9th percentile of the center crop rather than the mean — 
+    the noise crusher is a threshold, so the value we want is the *ceiling* 
+    the noise reaches, not its average. Setting the crusher to the mean would
+    let roughly half the noise distribution survive crushing.
+    
+    Hot pixels are patched before measurement so they don't dominate the 
+    percentile statistic.
     """
     
     if not os.path.exists(buffer_file):
@@ -152,37 +161,38 @@ def measure_noise_floor(buffer_file, static_dir):
             # Strictly linear 16-bit extraction
             rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
         
+        # Patch hot pixels first so they don't contaminate the measurement
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+        
         # Center crop 200x200
         h, w, _ = rgb.shape
         cy, cx = h // 2, w // 2
-
-        # Slice the numpy array to isolate the center patch
         crop = rgb[cy-100:cy+100, cx-100:cx+100]
-
-        # Calculate mean intensity and normalize to 0.0 - 1.0 float
-        mean_16bit = np.mean(crop)
-        noise_float = float(mean_16bit /65535.0)
-
+        
+        # 99.9th percentile: the value that 99.9% of pixels fall below.
+        # This is the noise's effective ceiling — set the crusher just above 
+        # this and all noise gets zeroed without sacrificing legitimate signal.
+        # We use 99.9 rather than 100 (max) so that a single random outlier 
+        # pixel can't skew the result; 99.9% of 200x200 = ~40,000 of 40,000 
+        # pixels must agree.
+        ceiling_16bit = np.percentile(crop, 99.9)
+        noise_float = float(ceiling_16bit / 65535.0)
+        
         # --- PREVIEW GENERATION ---
-        # Convert to BGR for OpenCV Processing
         img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        # Downscale 16-bit to 8-bit for JPEG saving
-        img_8bit = (img_bgr /256.0).astype(np.uint8)
-
+        img_8bit = (img_bgr / 256.0).astype(np.uint8)
+        
         # Burn a bright green rectangle to show the user exactly what area was measured
-        # Parameters: image, top-left coord, bottom-right coord, color (BGR), thickness
         cv2.rectangle(img_8bit, (cx-100, cy-100), (cx+100, cy+100), (0, 255, 0), 2)
-
-        # Export the visual preview for the UI
         cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img_8bit)
-
+        
         # Export the numerical result to a dedicated static JSON file
         out_json = os.path.join(static_dir, "noise_data.json")
         with open(out_json, "w") as f:
             json.dump({"measured_noise": noise_float}, f)
-
+        
         return noise_float
-
+    
     except Exception as e:
         print(f"[VOP WARNING] Noise Measurement Error: {e}")
         return 0.0
