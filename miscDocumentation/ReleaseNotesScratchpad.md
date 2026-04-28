@@ -27,5 +27,6 @@ This is so that we can quickly disable visibility of ProjMag or BiPack or both. 
 ## Changed:
 ### Added PM to the headers of the exposure sheet to clarify which columns are responsible for the Projection Mag.
 ### rearranged things to fit better in the exposure sheet
+
 ## Fixes: 
 ## Removed:

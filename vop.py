@@ -136,10 +136,15 @@ def count_source_frames(directory):
     return len([f for f in os.listdir(directory) if f.lower().endswith(valid_exts)])
 
 
-def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
+def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit", screen_width=1920, screen_height=1080):
     """
-    Calculates the required scaling factor to fit an image of arbitrary aspect ratio
-    within the frustum bounds at a specific Z-depth.
+    Calculates the required scaling factor to size an image of arbitrary aspect ratio
+    against the frustum bounds at a specific Z-depth.
+    
+    mode="fit"  - returns the smaller scale, fitting the entire image inside the 
+                  frustum (letterbox/pillarbox behavior, no cropping).
+    mode="fill" - returns the larger scale, filling the frustum entirely with the 
+                  image (image overflow on the shorter axis is intentional).
     """
     # Prevent division by zero
     z_dist = abs(float(ref_z))
@@ -156,7 +161,9 @@ def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen
     scale_for_width = frustum_w / (2.0 * img_aspect)
     scale_for_height = frustum_h / 2.0
     
-    # Return the minimum constraint to ensure the image fits entirely (letterbox/pillarbox behavior)
+    # Pick min for fit (image inside frustum) or max for fill (frustum inside image)
+    if mode == "fill":
+        return max(scale_for_width, scale_for_height)
     return min(scale_for_width, scale_for_height)
 
 def dispatch_engine(task_type, payload):
@@ -424,15 +431,18 @@ def get_img_aspect():
 
 @app.route('/calculate_fit', methods=['POST'])
 def calculate_fit():
-    # Route for the UI 'Fit Image' button logic
+    # Route for the UI Fit FOV / Fill FOV buttons. The 'mode' field on the 
+    # request body decides which behavior the math uses; defaults to fit for 
+    # backward compatibility with any old clients.
     print("[VOP SERVER] ACTION: CALCULATE FIT FOV")
     data = request.json
     try:
         fov = float(data.get('fov', 45.0))
         ref_z = float(data.get('ref_z', 1.0))
         aspect = float(data.get('aspect_ratio', 1.777))
+        mode = data.get('mode', 'fit')      # 'fit' or 'fill'
         
-        req_scale = calculate_static_fit_scale(fov, ref_z, aspect)
+        req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode)
         return jsonify({"status": "ok", "scale": req_scale})
     except Exception as e:
         print(f"[VOP SERVER] Fit Calc Error: {e}")

@@ -175,7 +175,9 @@ async function triggerLabInvert() {
     }
 }
 
-async function calcFitScale(scaleId, fitZId, magType) {
+async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
+    // mode: "fit"  = entire image visible inside frustum (letterbox/pillarbox)
+    //       "fill" = frustum entirely covered by image (image overflows on short axis)
     const fov = parseFloat(document.getElementById('fov').value);
     const zDist = Math.abs(parseFloat(document.getElementById(fitZId).value)) || 1.0;
 
@@ -189,13 +191,13 @@ async function calcFitScale(scaleId, fitZId, magType) {
         const fitReq = await fetch('/calculate_fit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect })
+            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect, mode: mode })
         });
         const fitData = await fitReq.json();
 
         if (fitData.status === 'ok') {
             document.getElementById(scaleId).value = fitData.scale.toFixed(4);
-            console.log(`[VOP UI] ${magType.toUpperCase()} Scale Fit to: ${fitData.scale.toFixed(4)}`);
+            console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)}`);
             await triggerSync();
         } else {
             console.error("Fit Calc Error:", fitData.message);
