@@ -1,4 +1,4 @@
-"""
+""" 
 VOP Module:     engine.py
 Description:    Multiplicative Dual-World Engine.
                 Forces GLES 3.0 profile prior to display initialization.
@@ -246,7 +246,20 @@ def run_persistent_engine():
 
                 tex_mag, asp_mag = tex_mgr.load(ph_pm, is_bipack=False)
                 tex_bp,  asp_bp  = tex_mgr.load(ph_bp, is_bipack=True)
-
+                
+                # Layer visibility toggles (the "eye" icons next to the upload fields).
+                # When a layer is hidden, swap its texture for the all-white texture.
+                # The existing white_tex check below handles this cleanly: the layer
+                # is rendered as pure pass-through, no geometry transform, no masking
+                # contribution. With both layers hidden, the user sees the bare bulb 
+                # (still tintable via PG / CG).
+                # Defaults to True (visible) so missing keys don't accidentally hide
+                # layers in jobs created before this feature existed.
+                if not job_data.get('pm_visible', True):
+                    tex_mag = tex_mgr.white_tex
+                if not job_data.get('bp_visible', True):
+                    tex_bp = tex_mgr.white_tex
+                    
                 bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
                 
                 # PASS 1: RENDER BIPACK INTO OFF-SCREEN FBO

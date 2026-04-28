@@ -21,6 +21,9 @@ This forces valued in the Noise Crusher to be 0.0 - 1.0 and if they are outside.
 Mostly to speed simplify development and testing.
 Regular users are probably better off using the normal
 run_vop.sh
+### Added a marker in index.html both in title and header to show that this one is in the nightly and unstable branch
+### Added layer visibility toggle
+This is so that we can quickly disable visibility of ProjMag or BiPack or both. When off, they go white. Which makes them effectively invisible when merging together with multiply. If both are off, we get a pure white image. This can be tinted with PG to do image-wide color addition. 
 ## Changed:
 - Added PM to the headers of the exposure sheet to clarify which columns are responsible for the Projection Mag.
 ## Fixes: 

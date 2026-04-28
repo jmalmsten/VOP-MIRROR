@@ -379,7 +379,66 @@ body {
     color: #fff;
 }
 
+/* ---------------------------------------------------------------
+   Layer Visibility Eye Toggles
+   ---------------------------------------------------------------
+   Per-layer on/off control next to ProjMag/BiPack Active fields.
+   Open eye (checked)   = layer renders normally
+   Closed eye (unchecked) = layer is pass-through white, as if the
+   film strip has been removed from that magazine. With both eyes
+   closed, the bare projector bulb shines through unfiltered (still
+   tintable via PG).
+*/
 
+.layer-vis-box {
+    /* Vertical layout so the label sits above the eye+text row */
+    display: flex;
+    flex-direction: column;
+}
+
+.layer-vis-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.layer-vis-row input[type="text"] {
+    /* Let the text field take the rest of the width */
+    flex: 1;
+}
+
+.layer-eye {
+    /* Hide the native checkbox and replace with an emoji glyph */
+    appearance: none;
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    font-size: 18px;
+    line-height: 22px;
+    text-align: center;
+    /* Glyph rendered via ::before pseudo-element so we can swap it on :checked */
+    position: relative;
+}
+
+.layer-eye::before {
+    /* Default (unchecked) state: closed eye */
+    content: "🙈";
+    opacity: 0.5;
+}
+
+.layer-eye:checked::before {
+    /* Checked = layer visible */
+    content: "👁";
+    opacity: 1.0;
+}
+
+.layer-eye:hover::before {
+    opacity: 0.8;
+}
 
 .upload-cluster {
     display: flex;
