@@ -499,6 +499,14 @@ body {
     display:            inline;
 }
 
+/* Stack the FIT FOV / FILL FOV buttons vertically with a small gap so 
+ * they don't visually fuse together when they wrap. */
+.fit-fill-stack {
+    display:            flex;
+    flex-direction:     column;
+    gap:                4px;
+}
+
 /* ################ SHEET HEADER & MODE SELECTOR ############### */
 
 .sheet-header {
