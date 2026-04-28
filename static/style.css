@@ -613,13 +613,21 @@ body {
     grid-row:           4;
     align-self:         start;
     
-    /* Allow the sheet to extend beyond the controls grid's column width
-     * when long video-mode rows demand more horizontal real estate. */
-    width:              calc(100vw - 40px);            /* viewport minus body padding */
-    max-width:          calc(100vw - 40px);
-    margin-left:        calc(-50vw + 50%);             /* recenter against viewport, not container */
-    padding:            0 20px;
+    /* Let the sheet break out of the controls grid's 1fr column width when 
+     * video-mode rows demand more horizontal real estate. The width is the 
+     * viewport, minus body padding (20px each side), minus the 420px right 
+     * controls column, minus the 20px container gap. The negative margin 
+     * pulls the sheet leftward only as far as the container's start. */
+    width:              calc(100vw - 40px - 420px - 20px);
+    max-width:          calc(100vw - 40px - 420px - 20px);
+    margin-left:        0;
     box-sizing:         border-box;
+    
+    /* When the viewport is narrow enough that the calc above would produce 
+     * a value smaller than the original grid column allows, fall back to 
+     * filling the grid column normally. min() handles that automatically: 
+     * the sheet stays inside whichever is smaller, the calculated width 
+     * or the natural grid-column width. */
 }
 
 /* TODO: The .mds-add-btn uses --color-sss-accent for its border, which is 
