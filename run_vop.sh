@@ -27,7 +27,8 @@
 #
 ###########################################################################
 
-
+# 0. Clear the terminal of junk
+clear
 
 # 1. Determine the absolute path of the directory containing this script.
 # This prevents path errors if you run the script from your home folder or root.
