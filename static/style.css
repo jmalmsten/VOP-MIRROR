@@ -415,6 +415,17 @@ body {
     border:         1px solid #f55; 
 }
 
+/* Validation warnings shown next to inputs that got force-corrected.
+ * Red so it's unmissable, italic so it reads as a system message
+ * rather than a label or value. */
+ .validation-warning {
+    color:          #ff4040;
+    font-style:     italic;
+    font-size:      0.9em;
+    margin-left:    8px;
+    display:        inline;
+ }
+
 /* ################ SHEET HEADER & MODE SELECTOR ############### */
 
 .sheet-header {

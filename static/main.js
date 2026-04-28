@@ -645,6 +645,40 @@ async function triggerMeasurement() {
     }, 1000);
 }
 
+/* Polls the server for any validation warnings the engine emitted during 
+ * the last exposure. If found, displays it in red next to the offending 
+ * input and force-updates the input value to match what the engine actually 
+ * used. The server consumes the warning on read, so this only fires once 
+ * per actual problem.
+ */
+async function checkValidationWarnings() {
+    try {
+        const r = await fetch('/check_validation_warning');
+        const data = await r.json();
+        if (data.warning) {
+            const w = data.warning;
+            const warnEl = document.getElementById(`${w.field}_warning`);
+            const inputEl = document.getElementById(w.field);
+            
+            if (warnEl) {
+                warnEl.innerText = `⚠ ${w.message}`;
+                // Auto-clear after 15s so it doesn't linger forever
+                setTimeout(() => { warnEl.innerText = ''; }, 15000);
+            }
+            
+            if (inputEl && w.forced_value !== undefined) {
+                inputEl.value = w.forced_value;
+                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    } catch (e) {
+        console.error("Validation check failed:", e);
+    }
+}
+
+// Poll every 2 seconds — cheap, and only acts when there's actually a warning.
+setInterval(checkValidationWarnings, 2000);
+
 async function triggerHotPixelMap() {
     // 1. The reality check prompt!
     if (!confirm("IMPORTANT: Please put the lens cap on the camera!\n\nThis will take a dark frame matching your current Probe Frame's exposuresetting to map defective pixels.\n\nClick OK when the lens cap is fully seated.")){

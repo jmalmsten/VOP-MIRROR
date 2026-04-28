@@ -75,25 +75,46 @@ def validate_black_clip(raw_clip):
     Coerces and sanity-checks the noise crusher input.
 
     Returns a float in the range [0.0-1.0]. Anything <=0 disables the crusher.
-    Values >= 1.0 would crush the entire 16-bit range to black, so we refusee
+    Values >= 1.0 would crush the entire 16-bit range to black, so we refuse
     them and warn loudly. This is a guardrail against the classic "missing
-    decimal point"  pasted-value mistake (e.g. typing 003704 instead of 0.003704
+    decimal point" pasted-value mistake (e.g. typing 003704 instead of 0.003704
     yields 3704.0 which silently nukes every captured photo to pure black)
+    
+    Also writes a flag file the GUI polls, so the warning becomes visible 
+    in the browser, not just the terminal.
     """
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    warn_file = os.path.join(base_path, "static", "validation_warning.json")
+    
+    def emit_warning(message):
+        log_audit(message)
+        try:
+            with open(warn_file, "w") as f:
+                json.dump({"field": "black_clip", "message": message, "forced_value": 0.0, "ts": time.time()}, f)
+        except Exception as e:
+            log_audit(f"WARNING: could not write validation flag file: {e}")
+    
     try:
         val = float(raw_clip) if raw_clip != "" else 0.0
     except (TypeError, ValueError):
-        log_audit(f"WARNING: black_clip value '{raw_clip}' is not a number. Ignoring (treating as 0.0).")
+        emit_warning(f"Noise Crusher value '{raw_clip}' is not a number. Forcing to 0.0.")
         return 0.0
     
     if val >= 1.0:
-        log_audit(f"WARNING: Noise Crusher value {val} is unreasonable (must be 0.0 - 1.0). "
-                  f"Did you mayhaps forget the leading decimal? Disabling crusher for this exposure.")
+        emit_warning(f"Noise Crusher value {val} is unreasonable (must be 0.0-1.0). Did you forget the leading decimal? Forcing to 0.0.")
         return 0.0
     
     if val < 0.0:
-        log_audit(f"WARNING: Noise Crusher value {val} is negative. Treating as 0.0.")
+        emit_warning(f"Noise Crusher value {val} is negative. Forcing to 0.0.")
         return 0.0
+    
+    # Valid input: clear any stale warning file so the GUI doesn't keep showing 
+    # a previous warning for a now-corrected value.
+    if os.path.exists(warn_file):
+        try:
+            os.remove(warn_file)
+        except Exception:
+            pass
     
     return val
 

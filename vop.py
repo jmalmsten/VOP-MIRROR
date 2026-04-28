@@ -334,6 +334,20 @@ def prores_status():
     else:
         return jsonify({"status": "error", "code": code})
 
+@app.route('/check_validation_warning', methods=['GET'])
+def check_validation_warning():
+    """Returns any pending validation warning written by the engine, then deletes it."""
+    warn_file = os.path.join(BASE_DIR, "static", "validation_warning.json")
+    if not os.path.exists(warn_file):
+        return jsonify({"warning": None})
+    try:
+        with open(warn_file) as f:
+            data = json.load(f)
+        os.remove(warn_file)  # Consume on read so it's only shown once
+        return jsonify({"warning": data})
+    except Exception as e:
+        return jsonify({"warning": None, "error": str(e)})
+
 @app.route('/prores/<filename>')
 def serve_prores(filename):
     """ Serves the rendered ProRes file for browser download. """
