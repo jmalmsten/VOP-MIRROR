@@ -1,3 +1,10 @@
+# VOP runtime dependencies — pinned to the versions verified working on
+# Raspberry Pi 4B with Python 3.13 (Bookworm). Bump these intentionally.
+#
+# Note: pygame must be installed with --no-binary on the Pi to compile
+# against the system's KMSDRM/SDL stack rather than using the prebuilt
+# wheel. See run_vop.sh for the actual install command.
+
 Flask==3.1.3
 moderngl==5.12.0
 numpy==2.4.4
