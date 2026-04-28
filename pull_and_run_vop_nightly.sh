@@ -28,6 +28,8 @@
 #
 ###########################################################################
 
+# 0. clear the screen
+clear
 
 # 1. Fetch from git to make sure the local copy knows of any changes.
 git fetch --all
@@ -35,8 +37,5 @@ git fetch --all
 # 2. Pull the latest nightly commit
 git pull origin nightly
 
-# 3. clear the screen
-clear
-
-# 4. Run the VOP
+# 3. Run the VOP
 ./run_vop.sh
