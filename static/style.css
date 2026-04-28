@@ -391,21 +391,26 @@ body {
 */
 
 .layer-vis-box {
-    /* Vertical layout so the label sits above the eye+text row */
+    /* Match the original .c-box layout — label + control side by side.
+     * No flex-direction override; .c-box already handles its internal layout. */
     display: flex;
-    flex-direction: column;
+    align-items: center;
 }
 
 .layer-vis-row {
+    /* Holds the eye checkbox and the readonly text field side by side.
+     * flex:1 + min-width:0 lets the row consume the remaining horizontal
+     * space inside .c-box without overflowing the parent flex container. */
     display: flex;
     align-items: center;
     gap: 6px;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
 }
 
 .layer-vis-row input[type="text"] {
-    /* Let the text field take the rest of the width */
     flex: 1;
+    min-width: 0;
 }
 
 .layer-eye {
