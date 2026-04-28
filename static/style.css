@@ -38,70 +38,72 @@ Description:        Stylings for the whole GUI
     
     /* >>> Global Brand & Accent Colors <<< */
 
-    --color-accent:         #0ad;   /* Used for text, borders, buttons, and BiPack Highlights */
-    --color-danger:         #500;   /* Panic Buttons */
-    --color-danger-text:    #f44;   /* Nuke Buttons */
-    --color-warning:        #fa0;   /* Nuke confirmation */
+    --color-accent:         #0ad;       /* Used for text, borders, buttons, and BiPack Highlights */
+    --color-danger:         #500;       /* Panic Buttons */
+    --color-danger-text:    #f44;       /* Nuke Buttons */
+    --color-warning:        #fa0;       /* Nuke confirmation */
+    --color-sss-accent:     #f44;       /* SSS sheet highlights and add-row tagging */
+    --color-success:        #080;       /* Execute Sequence button background */
+    --color-panic:          #800;       /* Hardware Panic button */
 
-    /* ---------Just to see of defining it breaks stuff */
-    /* --color-input:          #fff; */
-    --color-sss-accent:     #f44;
-    --border-light:         #fff;
-    --bg-input:             #000;          /* Inputs, Progress bar track */
+    /* >>> Background & Panels <<< */
 
-    /* >>> Background & Panels */
-
-    --bg-body:  #0b0b0b;     /* Background for the whole thing */
-    --bg-panel: #1a1a1a;    /* Control deck, preview area */
-    --bg-group: #151515;    /* Group Boxes */
-    
+    --bg-body:              #0b0b0b;    /* Background for the whole thing */
+    --bg-panel:             #1a1a1a;    /* Control deck, preview area, status panels */
+    --bg-group:             #151515;    /* Group Boxes */
+    --bg-input:             #000;       /* Inputs, progress bar track */
+    --bg-button-muted:      #222;       /* Nuke buttons, upload-btn, cam_preview */
 
     /* >>> Text Colors <<< */
 
-    --text-primary:     #ddd;   /* Body text */
-    --text-secondary:   #888;   /* Labels, cheat sheet text, group titles */
-    --text-muted:       #666;
-    --text-dark:        #000;   /* Text inside bright buttons */
+    --text-primary:         #ddd;       /* Body text */
+    --text-secondary:       #888;       /* Labels, cheat sheet text, group titles */
+    --text-muted:           #666;
+    --text-dark:            #000;       /* Text inside bright buttons */
 
     /* >>> Borders <<< */
     
-    --border-color:     #333;
-    --radius-standard:  4px; /* For most boxes and panels */
-    --radius-small:     3px; /* For buttons and cheat sheet items */
+    --border-color:         #333;
+    --border-mid:           #444;       /* Slightly brighter borders on muted buttons */
+    --radius-standard:      4px;        /* For most boxes and panels */
+    --radius-small:         3px;        /* For buttons and cheat sheet items */
 
-    /* >>> Exposure Sheet Tags << */
+    /* >>> Exposure Sheet Tags <<< */
 
-    --tag-master-bg: #123;
-    --tag-master-text: #0cf;
-    --tag-smear-bg: #210;
-    --tag-smear-text: #f80;
-    --tag-bipack-border: #057;
+    --tag-master-bg:        #123;
+    --tag-master-text:      #0cf;
+    --tag-smear-bg:         #210;
+    --tag-smear-text:       #f80;
+    --tag-bipack-border:    #057;
+    --bg-sss-tag:           #331122;    /* Background for the SSS add-row button */
 }
 
-/* Custom Instant Tooltips - Targets the attribute directly! */
+/* ############### Custom Instant Tooltips ############### */
+/* Targets the data-title attribute directly so any element can carry one. 
+ * Used heavily by the exposure sheet headers. */
 [data-title] {
-    position: relative;
-    cursor: help;
+    position:           relative;
+    cursor:             help;
 }
 
-/* The invisible box */
+/* The invisible tooltip box itself */
 [data-title]::after {
-    content:    attr(data-title);
-    position:   absolute;
-    bottom:     120%; 
-    left:       50%;
-    transform:  translateX(-50%) translateY(5px); 
+    content:            attr(data-title);
+    position:           absolute;
+    bottom:             120%; 
+    left:               50%;
+    transform:          translateX(-50%) translateY(5px); 
     
-    background:     var(--bg-group, #151515);
-    color:          var(--color-accent, #0cf);
-    padding:        6px 10px;
-    border:         1px solid var(--border-color, #333);
-    border-radius:  var(--radius-small, 3px);
+    background:         var(--bg-group, #151515);
+    color:              var(--color-accent, #0cf);
+    padding:            6px 10px;
+    border:             1px solid var(--border-color, #333);
+    border-radius:      var(--radius-small, 3px);
 
-    font-size:      0.85em;
-    font-weight:    bold;
-    font-family:    sans-serif;
-    white-space:    nowrap;
+    font-size:          0.85em;
+    font-weight:        bold;
+    font-family:        sans-serif;
+    white-space:        nowrap;
     
     /* Make it invisible by default */
     opacity:            0;
@@ -111,46 +113,47 @@ Description:        Stylings for the whole GUI
     box-shadow:         0px 4px 12px rgba(0,0,0,0.8);
     
     /* Smooth fade and slide animation */
-    transition:     opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+    transition:         opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
 }
 
 /* Trigger the animation on hover */
 [data-title]:hover::after {
-    opacity:    1;
-    visibility: visible;
-    transform:  translateX(-50%) translateY(0); 
+    opacity:            1;
+    visibility:         visible;
+    transform:          translateX(-50%) translateY(0); 
 }
 
 
-/* Universal Button Polish */
+/* ############### Universal Button Polish ############### */
+/* Applied to every button class in the UI for consistent feel. */
 .action-btn, .nuke-btn, .panic-btn, .add-btn, .del-btn, .upload-btn, .mini-btn {
-    transition:     filter 0.2s ease, transform 0.1s ease;
+    transition:         filter 0.2s ease, transform 0.1s ease;
 }
 
 /* Make them 30% brighter when the mouse touches them */
 .action-btn:hover, .nuke-btn:hover, .panic-btn:hover, .add-btn:hover, .del-btn:hover, .upload-btn:hover, .mini-btn:hover {
-    filter:         brightness(1.3);
+    filter:             brightness(1.3);
 }
 
 /* Give them a tiny "click" depression effect when pressed */
 .action-btn:active, .nuke-btn:active, .panic-btn:active, .add-btn:active, .del-btn:active, .upload-btn:active, .mini-btn:active {
-    transform:      scale(0.96);
+    transform:          scale(0.96);
 }
 
 body { 
-    background:     var(--bg-body); 
-    color:          var(--text-primary); 
-    font-family:    sans-serif; 
-    margin:         0; 
-    padding:        20px; 
+    background:         var(--bg-body); 
+    color:              var(--text-primary); 
+    font-family:        sans-serif; 
+    margin:             0; 
+    padding:            20px; 
 }
 
 .container { 
-    max-width:              1350px; 
-    margin:                 0 auto; 
-    display:                grid; 
-    grid-template-columns:  1fr 420px; 
-    gap:                    20px; 
+    max-width:                  1350px; 
+    margin:                     0 auto; 
+    display:                    grid; 
+    grid-template-columns:      1fr 420px; 
+    gap:                        20px; 
 }
 
 .vop-header { 
@@ -166,102 +169,102 @@ body {
 /* ###################### HEADER AND STATUS ############################ */
 /* Force flex parent to full width to enable right-justification */
 .status-meta { 
-    display:        flex; 
-    align-items:    center; 
-    gap:            12px; 
-    margin-bottom:  0; 
-    width:          100%; /* Forces the flex row to span the entire control-deck */
-    box-sizing:     border-box;
+    display:            flex; 
+    align-items:        center; 
+    gap:                12px; 
+    margin-bottom:      0; 
+    width:              100%;          /* Forces the flex row to span the entire control-deck */
+    box-sizing:         border-box;
 }
 
 #st_eta {
-    font-size: 0.7em;
-    color: var(--text-secondary);
-    white-space: nowrap;
+    font-size:          0.7em;
+    color:              var(--text-secondary);
+    white-space:        nowrap;
 }
 
 .workprint-zone {
-    text-align: left;
-    padding-left: 2px;
+    text-align:         left;
+    padding-left:       2px;
 }
 
 .status-text { 
-    font-family:    monospace; 
-    color:          var(--color-accent); 
-    font-weight:    bold; 
-    min-width:      100px; 
+    font-family:        monospace; 
+    color:              var(--color-accent); 
+    font-weight:        bold; 
+    min-width:          100px; 
 }
 
 /* Ensure the bar always acts as the flexible spacer */
 .status-bar-progress { 
-    flex-grow:      1; 
-    height:         10px; 
-    background:     var(--bg-input); 
-    border-radius:  5px; 
-    overflow:       hidden; 
-    min-width:      50px; /* Prevents the bar from disappearing entirely if text is long */
+    flex-grow:          1; 
+    height:             10px; 
+    background:         var(--bg-input); 
+    border-radius:      5px; 
+    overflow:           hidden; 
+    min-width:          50px;          /* Prevents the bar from disappearing entirely if text is long */
 }
 
 .progress-bar { 
-    width:      0%; 
-    height:     100%; 
-    background: var(--color-accent); 
-    transition: width 0.3s; 
+    width:              0%; 
+    height:             100%; 
+    background:         var(--color-accent); 
+    transition:         width 0.3s; 
 }
 
 .panic-btn { 
-    background:     #800; 
-    color:          #fff; 
-    padding:        5px 15px; 
-    font-weight:    bold; 
-    font-size:      0.75em; 
-    border:         none; 
-    cursor:         pointer; 
+    background:         var(--color-panic); 
+    color:              #fff; 
+    padding:            5px 15px; 
+    font-weight:        bold; 
+    font-size:          0.75em; 
+    border:             none; 
+    cursor:             pointer; 
 }
 
 .nuke-btn { 
-    background:     #222; 
-    color:          var(--color-danger-text); 
-    padding:        5px 12px; 
-    border:         1px solid #444; 
-    font-size:      0.75em; 
-    cursor:         pointer; 
+    background:         var(--bg-button-muted); 
+    color:              var(--color-danger-text); 
+    padding:            5px 12px; 
+    border:             1px solid var(--border-mid); 
+    font-size:          0.75em; 
+    cursor:             pointer; 
 }
 
 .nuke-btn[onclick="nukeJob()"] { 
-    color:  var(--color-warning); 
+    color:              var(--color-warning); 
 }
 
 /* ################ PROBE / PREVIEW / EXECUTE ################### */
 
 .control-deck { 
-    grid-column:    1 / -1; 
-    background:     #1a1a1a; 
-    padding:        12px 15px; 
-    border-radius:  var(--radius-standard); 
-    border:         1px solid var(--border-color); 
-    margin-bottom:  20px; 
+    grid-column:        1 / -1; 
+    background:         var(--bg-panel); 
+    padding:            12px 15px; 
+    border-radius:      var(--radius-standard); 
+    border:             1px solid var(--border-color); 
+    margin-bottom:      20px; 
 }
 
 .probe-input {
-    width: 100%;
-    background: var(--bg-input);
-    color: var(--color-accent);
-    border: var(--border-light);
-    padding: 5px;
-    box-sizing: border-box;
+    width:              100%;
+    background:         var(--bg-input);
+    color:              var(--color-accent);
+    border:             1px solid var(--border-color);    /* Was 'var(--border-light)' alone, which was a bare color and produced an invalid border declaration. Fixed to a complete border. */
+    padding:            5px;
+    box-sizing:         border-box;
 }
 
 .group-box { 
-    background:     #151515; 
-    border:         1px solid var(--border-color); 
-    border-radius:  var(--radius-standard); 
-    padding:        12px; 
-    margin-bottom:  10px; 
+    background:         var(--bg-group); 
+    border:             1px solid var(--border-color); 
+    border-radius:      var(--radius-standard); 
+    padding:            12px; 
+    margin-bottom:      10px; 
 }
 
 .group-box.bipack {
-    border-left: 3px solid var(--color-accent);
+    border-left:        3px solid var(--color-accent);
 }
 
 .group-title { 
@@ -274,60 +277,58 @@ body {
 }
 
 .constants-zone { 
-    display:                grid; 
-    grid-template-columns:  repeat(4, 1fr); 
-    gap:                    8px; 
+    display:                    grid; 
+    grid-template-columns:      repeat(4, 1fr); 
+    gap:                        8px; 
 }
 
 .const-group label { 
-    display:        block; 
-    font-size:      0.6em; 
-    color:          var(--text-secondary); 
-    margin-bottom:  2px; 
+    display:            block; 
+    font-size:          0.6em; 
+    color:              var(--text-secondary); 
+    margin-bottom:      2px; 
 }
 
 .const-group input, .const-group select { 
-    width: 100%; 
-    /* background:     var(--color-input); */
-    border:         1px solid var(--border-color); 
-    color:          #000; 
-    padding:        4px; 
-    font-size:      0.8em; 
-    box-sizing:     border-box; 
+    width:              100%; 
+    border:             1px solid var(--border-color); 
+    color:              #000; 
+    padding:            4px; 
+    font-size:          0.8em; 
+    box-sizing:         border-box; 
 }
 
 .awb-group {
-    display:    flex;
-    gap:        2px;
+    display:            flex;
+    gap:                2px;
 }
 
 .input-row { 
-    display:    flex; 
-    gap:        10px; 
+    display:            flex; 
+    gap:                10px; 
 }
 
 .c-box { 
-    flex: 1; 
+    flex:               1; 
 }
 
 .c-box label { 
-    display:    block;
-    font-size:  0.6em;
-    color:      var(--text-secondary); 
+    display:            block;
+    font-size:          0.6em;
+    color:              var(--text-secondary); 
 }
 
 .c-box input { 
-    width:          100%; 
-    /* background:     var(--color-input); */
-    border:         1px solid var(--border-color); 
-    color:          #000; 
-    padding:        4px; 
-    font-size:      0.8em; 
-    box-sizing:     border-box; 
+    width:              100%; 
+    border:             1px solid var(--border-color); 
+    color:              #000; 
+    padding:            4px; 
+    font-size:          0.8em; 
+    box-sizing:         border-box; 
 }
 
 .preview-area { 
-    background:         #1a1a1a; 
+    background:         var(--bg-panel); 
     border:             1px solid var(--border-color); 
     min-width:          300px; 
     max-width:          70vh; 
@@ -344,14 +345,19 @@ body {
 }
 
 #probe_img { 
-    max-width:      100%; 
-    max-height:     100%; 
-    object-fit:     contain; 
+    max-width:          100%; 
+    max-height:         100%; 
+    object-fit:         contain; 
 }
 
-.action-btn { 
+/* ############### Action & Mini Buttons ############### */
+/* .action-btn and .mini-btn share nearly all their styling. The shared 
+ * declaration here covers everything common; the individual class rules
+ * below only override what differs (just the width). 
+ * Both .action-btn.danger and .mini-btn.danger were previously identical 
+ * byte-for-byte, so they share a unified .danger modifier as well. */
+.action-btn, .mini-btn {
     background:         var(--color-accent); 
-    /* color:              var(--color-input); */
     border:             none; 
     padding:            8px; 
     border-radius:      var(--radius-small); 
@@ -359,31 +365,38 @@ body {
     font-weight:        bold; 
     text-transform:     uppercase; 
     font-size:          0.8em; 
-    width:              100%; 
+}
+
+.action-btn { 
+    width:              100%;          /* Action buttons fill their container */
+}
+
+.mini-btn {
+    width:              auto;          /* Mini buttons size to their content */
+}
+
+/* Shared danger styling for both action and mini variants. */
+.action-btn.danger, .mini-btn.danger { 
+    background:         var(--color-danger); 
+    color:              #faa; 
+    border:             1px solid #f55; 
 }
 
 .action-btn.cam_preview { 
-    background:     #333; 
-    color:          #ccc; 
-}
-
-.action-btn.danger { 
-    background:     var(--color-danger); 
-    color:          #faa; 
-    border:         1px solid #f55; 
+    background:         #333; 
+    color:              #ccc; 
 }
 
 .action-btn.execute {
-    /*grid-column: 1 / 3; */
-    background: #080; /* Success green, could be a --color-success var */
-    color: #fff;
+    background:         var(--color-success); 
+    color:              #fff;
 }
 
 /* ---------------------------------------------------------------
    Layer Visibility Eye Toggles
    ---------------------------------------------------------------
    Per-layer on/off control next to ProjMag/BiPack Active fields.
-   Open eye (checked)   = layer renders normally
+   Open eye (checked)     = layer renders normally
    Closed eye (unchecked) = layer is pass-through white, as if the
    film strip has been removed from that magazine. With both eyes
    closed, the bare projector bulb shines through unfiltered (still
@@ -393,243 +406,214 @@ body {
 .layer-vis-box {
     /* Match the original .c-box layout — label + control side by side.
      * No flex-direction override; .c-box already handles its internal layout. */
-    display: flex;
-    align-items: center;
+    display:            flex;
+    align-items:        center;
 }
 
 .layer-vis-row {
     /* Holds the eye checkbox and the readonly text field side by side.
      * flex:1 + min-width:0 lets the row consume the remaining horizontal
      * space inside .c-box without overflowing the parent flex container. */
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1;
-    min-width: 0;
+    display:            flex;
+    align-items:        center;
+    gap:                6px;
+    flex:               1;
+    min-width:          0;
 }
 
 .layer-vis-row input[type="text"] {
-    flex: 1;
-    min-width: 0;
+    flex:               1;
+    min-width:          0;
 }
 
+/* Selector includes .c-box to outweigh the universal '.c-box input' 
+ * width:100% rule that would otherwise stretch this checkbox. */
 .c-box input.layer-eye {
-    /* Hide the native checkbox and replace with an inline SVG icon.
-     * Selector includes .c-box to outweigh the universal '.c-box input' 
-     * width:100% rule that would otherwise stretch this checkbox. */
-    appearance: none;
-    -webkit-appearance: none;
-    width: 22px;
-    height: 22px;
-    cursor: pointer;
-    background-color: transparent;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 20px 20px;
-    border: none;
-    padding: 0;
-    flex: 0 0 22px;
-    position: relative;
-    /* Closed-eye SVG (default state). Stroke is set to a light grey so it 
-     * reads on the dark UI background. Both eye lid and the diagonal slash 
-     * are drawn. */
+    appearance:                 none;
+    -webkit-appearance:         none;
+    width:                      22px;
+    height:                     22px;
+    cursor:                     pointer;
+    background-color:           transparent;
+    background-repeat:          no-repeat;
+    background-position:        center;
+    background-size:            20px 20px;
+    border:                     none;
+    padding:                    0;
+    flex:                       0 0 22px;
+    position:                   relative;
+    /* Closed-eye SVG (default state). Stroke is muted grey so it reads 
+     * on the dark UI background while staying obviously "off". */
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24'/><line x1='1' y1='1' x2='23' y2='23'/></svg>");
 }
 
 .c-box input.layer-eye:checked {
-    /* Open-eye SVG. Stroke is set to a brighter accent colour so the 
-     * "active" state stands out against the panel background. */
+    /* Open-eye SVG. Stroke uses a brighter accent cyan so the "active" 
+     * state stands out against the panel background. */
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300d4ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/><circle cx='12' cy='12' r='3'/></svg>");
 }
 
 .c-box input.layer-eye:hover {
     /* Subtle brighten on hover to confirm the element is interactive. */
-    filter: brightness(1.2);
+    filter:             brightness(1.2);
 }
 
 .upload-cluster {
-    display: flex;
-    gap: 5px;
-    align-items: flex-end;
+    display:            flex;
+    gap:                5px;
+    align-items:        flex-end;
 }
 
 .upload-btn { 
-    background:     #222; 
-    color:          var(--color-accent); 
-    border:         1px solid var(--color-accent); 
-    padding:        4px 8px; 
-    cursor:         pointer; 
-    font-size:      0.7em; 
-}
-
-.mini-btn {
-    background:         var(--color-accent); 
-    /* color:              var(--color-input); */
-    border:             none; 
-    padding:            8px; 
-    border-radius:      var(--radius-small); 
+    background:         var(--bg-button-muted); 
+    color:              var(--color-accent); 
+    border:             1px solid var(--color-accent); 
+    padding:            4px 8px; 
     cursor:             pointer; 
-    font-weight:        bold; 
-    text-transform:     uppercase; 
-    font-size:          0.8em; 
-    width:              auto; 
-}
-
-.mini-btn.danger { 
-    background:     var(--color-danger); 
-    color:          #faa; 
-    border:         1px solid #f55; 
+    font-size:          0.7em; 
 }
 
 /* Validation warnings shown next to inputs that got force-corrected.
  * Red so it's unmissable, italic so it reads as a system message
  * rather than a label or value. */
- .validation-warning {
-    color:          #ff4040;
-    font-style:     italic;
-    font-size:      0.9em;
-    margin-left:    8px;
-    display:        inline;
- }
+.validation-warning {
+    color:              #ff4040;
+    font-style:         italic;
+    font-size:          0.9em;
+    margin-left:        8px;
+    display:            inline;
+}
 
 /* ################ SHEET HEADER & MODE SELECTOR ############### */
 
 .sheet-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 15px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
+    display:            flex;
+    justify-content:    space-between;
+    align-items:        flex-end;
+    margin-bottom:      15px;
+    padding-bottom:     10px;
+    border-bottom:      1px solid var(--border-color);
 }
 
 .sheet-title {
-    margin: 0;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    font-size: 0.9em;
-    letter-spacing: 1px;
+    margin:             0;
+    color:              var(--text-secondary);
+    text-transform:     uppercase;
+    font-size:          0.9em;
+    letter-spacing:     1px;
 }
 
 .mode-control {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    display:            flex;
+    align-items:        center;
+    gap:                10px;
 }
 
 .mode-control label {
-    color: var(--color-accent);
-    font-size: 0.7em;
-    font-weight: bold;
-    text-transform: uppercase;
+    color:              var(--color-accent);
+    font-size:          0.7em;
+    font-weight:        bold;
+    text-transform:     uppercase;
 }
 
 .mode-control select {
-    background: var(--bg-input);
-    border: 1px solid var(--color-accent); /* Make it pop so it's obvious */
-    color: var(--color-accent);
-    padding: 4px 10px;
-    border-radius: var(--radius-small);
-    font-weight: bold;
-    cursor: pointer;
+    background:         var(--bg-input);
+    border:             1px solid var(--color-accent);    /* Make it pop so it's obvious */
+    color:              var(--color-accent);
+    padding:            4px 10px;
+    border-radius:      var(--radius-small);
+    font-weight:        bold;
+    cursor:             pointer;
 }
 
 /* ################ EXPOSURE SHEET ############### */
 
 
 .sheet-row { 
-    display:        grid; 
-    gap:            4px; 
-    align-items:    center; 
-    margin-bottom:  2px; 
+    display:            grid; 
+    gap:                4px; 
+    align-items:        center; 
+    margin-bottom:      2px; 
 }
 
-.mds-header, .mds-master-row, .mds-smear-row { 
-    grid-template-columns:  25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px; 
-}
-
-.sss-header, .sss-master-row {
-    display: grid;
-    grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
-    gap: 5px;
-    align-items: center;
-    margin-bottom: 5px;
-}
-
+/* SSS header colors - the grid-template-columns for SSS and MDS now live 
+ * in the JK Optical Printer block below, since column counts are dynamic. */
 .sss-header {
-    font-size: 0.8em;
-    text-align: center;
-    color: var(--color-sss-accent);
+    font-size:          0.8em;
+    text-align:         center;
+    color:              var(--color-sss-accent);
 }
 
 .sheet-row input {
-    /* background:     var(--color-input); */
-    border:         1px solid var(--border-color); 
-    color:          #900; 
-    padding:        3px; 
-    font-size:      0.7em; 
-    text-align:     center; 
-    width:          100%; 
-    box-sizing:     border-box; 
+    border:             1px solid var(--border-color); 
+    color:              #900; 
+    padding:            3px; 
+    font-size:          0.7em; 
+    text-align:         center; 
+    width:              100%; 
+    box-sizing:         border-box; 
 }
 
 .bp-header-text {
-    color:  var(--color-accent);
+    color:              var(--color-accent);
 }
 
 .bp-input { 
-    border-color:   var(--tag-bipack-border) !important; 
-    color:          var(--color-accent) !important; 
+    border-color:       var(--tag-bipack-border) !important; 
+    color:              var(--color-accent) !important; 
 }
 
 .sheet-color-input {
-    width: 100%;
-    height: 26px;
-    padding: 0;
+    width:              100%;
+    height:             26px;
+    padding:            0;
 }
 
 .node-tag { 
-    font-size: 0.6em; 
-    font-weight: bold; 
-    text-align: center; 
-    padding: 2px; 
-    border-radius: 2px; 
+    font-size:          0.6em; 
+    font-weight:        bold; 
+    text-align:         center; 
+    padding:            2px; 
+    border-radius:      2px; 
 }
 
 .master { 
-    background:     var(--tag-master-bg); 
-    color:          var(--tag-master-text); 
+    background:         var(--tag-master-bg); 
+    color:              var(--tag-master-text); 
 }
 
 .smear { 
-    background:     var(--tag-smear-bg); 
-    color:          var(--tag-smear-text); 
+    background:         var(--tag-smear-bg); 
+    color:              var(--tag-smear-text); 
 }
 
 .controls-area {
-    grid-column:    2;
-    grid-row:       3 / span 2;
+    grid-column:        2;
+    grid-row:           3 / span 2;
 }
 
 .sheets-area {
-    grid-column:    1;
-    grid-row:       4;
-    align-self:     start;
+    grid-column:        1;
+    grid-row:           4;
+    align-self:         start;
 }
 
+/* TODO: The .mds-add-btn uses --color-sss-accent for its border, which is 
+ * cross-wired across modes. Preserved as-is to avoid visual changes during 
+ * cleanup, but worth deciding whether this is intentional or a stale 
+ * copy-paste from the SSS variant. */
 .mds-add-btn {
-    background: var(--tag-master-bg);
-    color:      var(--color-accent);
-    border:     1px solid var(--color-sss-accent); 
-    cursor:     pointer; 
+    background:         var(--tag-master-bg);
+    color:              var(--color-accent);
+    border:             1px solid var(--color-sss-accent); 
+    cursor:             pointer; 
 }
-/* style="background: #331122; color: #f0c; border: 1px solid #f0c;" */
 
 .sss-add-btn {
-    background: #331122; /* Maybe add to vars: --bg-sss-tag */
-    color:      var(--color-sss-accent);
-    border:     1px solid var(--color-sss-accent);
-    cursor:     pointer; 
+    background:         var(--bg-sss-tag);
+    color:              var(--color-sss-accent);
+    border:             1px solid var(--color-sss-accent);
+    cursor:             pointer; 
 }
 
 /* ============================================================
@@ -639,21 +623,24 @@ body {
    on which optical layers hold video sequences:
 
         neither:    no JK columns visible (column count: base)
-        PM only:     3 JK columns (PM-GATE, PM-CAM, PM-STP)
-        BP only:     3 JK columns (BP-GATE, BP-CAM, BP-STP)
-        both:        6 JK columns
+        PM only:    3 JK columns (PM-GATE, PM-CAM, PM-STP)
+        BP only:    3 JK columns (BP-GATE, BP-CAM, BP-STP)
+        both:       6 JK columns
     
-   The JK cells themselves are hidden via display:noneeeee when their
+   The JK cells themselves are hidden via display:none when their
    layer doesn't have video. The grid template is then sized to match 
-   the actual visible colun count.
+   the actual visible column count.
    ============================================================ */
 
-/* --- SSS Sheet grid templated --- */
-
+/* --- SSS Sheet grid templates --- */
 
 /* Default: neither layer holds video. No JK columns. */
 .sss-header, .sss-master-row {
-    grid-template-columns: 30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    display:                    grid;
+    grid-template-columns:      30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    gap:                        5px;
+    align-items:                center;
+    margin-bottom:              5px;
 }
 
 /* Exactly one layer holds video (3 JK columns visible). */
@@ -661,19 +648,19 @@ body {
 .sss-sheet.has-pm-video:not(.has-bp-video) .sss-master-row,
 .sss-sheet.has-bp-video:not(.has-pm-video) .sss-header,
 .sss-sheet.has-bp-video:not(.has-pm-video) .sss-master-row {
-    grid-template-columns: 30px 60px 50px 30px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    grid-template-columns:      30px 60px 50px 30px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
 }
 
 /* Both layers hold video (all 6 JK columns visible). */
 .sss-sheet.has-pm-video.has-bp-video .sss-header,
 .sss-sheet.has-pm-video.has-bp-video .sss-master-row {
-    grid-template-columns: 30px 60px 50px 30px 45px 40px 40px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    grid-template-columns:      30px 60px 50px 30px 45px 40px 40px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
 }
 
 /* --- MDS Sheet grid templates --- */
 /* Same logic as SSS but with the existing MDS pixel widths and the TYPE column. */
 .mds-header, .mds-master-row, .mds-smear-row {
-    grid-template-columns: 25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+    grid-template-columns:      25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
 }
 
 .mds-sheet.has-pm-video:not(.has-bp-video) .mds-header,
@@ -682,13 +669,13 @@ body {
 .mds-sheet.has-bp-video:not(.has-pm-video) .mds-header,
 .mds-sheet.has-bp-video:not(.has-pm-video) .mds-master-row,
 .mds-sheet.has-bp-video:not(.has-pm-video) .mds-smear-row {
-    grid-template-columns: 25px 90px 40px 25px 70px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+    grid-template-columns:      25px 90px 40px 25px 70px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
 }
 
 .mds-sheet.has-pm-video.has-bp-video .mds-header,
 .mds-sheet.has-pm-video.has-bp-video .mds-master-row,
 .mds-sheet.has-pm-video.has-bp-video .mds-smear-row {
-    grid-template-columns: 25px 90px 40px 25px 70px 45px 40px 40px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+    grid-template-columns:      25px 90px 40px 25px 70px 45px 40px 40px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
 }
 
 /* --- Cell visibility --- */
@@ -697,11 +684,11 @@ body {
    in lockstep with the master row's actual inputs. */
 .sss-sheet:not(.has-pm-video) .pm-jk-cell,
 .mds-sheet:not(.has-pm-video) .pm-jk-cell {
-    display: none;
+    display:            none;
 }
 .sss-sheet:not(.has-bp-video) .bp-jk-cell,
 .mds-sheet:not(.has-bp-video) .bp-jk-cell {
-    display: none;
+    display:            none;
 }
 
 /* --- JK input styling --- */
@@ -710,104 +697,104 @@ body {
    (border + text), inherited from the existing .bp-input rule earlier in
    this file. Nothing extra to do for color coding. */
 .jk-input {
-    font-variant-numeric: tabular-nums;  /* keep digits aligned across rows */
+    font-variant-numeric:   tabular-nums;          /* keep digits aligned across rows */
 }
 
 /* --- Replaces the inline 'margin-top: 10px' that used to live on the
        SSS add-row div. Per project styling rule, no inline styles. --- */
 .sss-add-row {
-    margin-top: 10px;
+    margin-top:         10px;
 }
 
 /* ##################### The Cheat Sheet Styling ##################### */
 
-.cs-grid{
+.cs-grid {
     /* Making a responsive grid of columns having a minimum set width */
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 12px; /* Space between grid cells */
-    margin-top: 10px;
+    display:                    grid;
+    grid-template-columns:      repeat(auto-fit, minmax(250px, 1fr));
+    gap:                        12px;              /* Space between grid cells */
+    margin-top:                 10px;
 }
 
 .cs-item {
-    background:     rgba(255, 255, 255, 0.03); /* Subtle cell highlight */
-    padding:        8px 12px;
-    border:         1px solid var(--border-color); /* matching section border */
-    border-radius:  var(--radius-small);
-    line-height:    1.4;
+    background:         rgba(255, 255, 255, 0.03); /* Subtle cell highlight */
+    padding:            8px 12px;
+    border:             1px solid var(--border-color); /* matching section border */
+    border-radius:      var(--radius-small);
+    line-height:        1.4;
 }
 
-.cs-item strong {       /* highlighting acronyms */
-    color: var(--color-accent);
-    display: inline-block;
-    min-width: 65px; /* keeps the acronyms aligned nicely if they wrap */
+.cs-item strong {                                  /* highlighting acronyms */
+    color:              var(--color-accent);
+    display:            inline-block;
+    min-width:          65px;                      /* keeps the acronyms aligned nicely if they wrap */
 }
 
 /* --- Noise Floor Measurement UI --- */
 
 /* --- Elegant Grid Divider --- */
 hr.section-divider {
-    grid-column:    1 / -1;                         /* Forces the element to span from the first column to the very last */
-    border:         0;                              /* Strips out the ugly default 3D browser borders */
-    border-top:     1px solid var(--border-color);  /* Draws a single, subtle, dark-gray line */
-    margin:         8px 0;                          /* Adds a little vertical breathing room above and below */
-    width:          100%;                           /* Ensures it fills the space completely */
+    grid-column:        1 / -1;                    /* Forces the element to span from the first column to the very last */
+    border:             0;                         /* Strips out the ugly default 3D browser borders */
+    border-top:         1px solid var(--border-color); /* Draws a single, subtle, dark-gray line */
+    margin:             8px 0;                     /* Adds a little vertical breathing room above and below */
+    width:              100%;                      /* Ensures it fills the space completely */
 }
 
 /* Style the output text to look like a digital readout */
 #noise_result_txt, #hp_result_txt {
-    font-family:    monospace;              /* Monospaced font aligns the decimal points cleanly */
-    font-weight:    bold;                   /* Makes the readout pop against the dark UI*/
-    color:          var(--color-accent);    /* Matching standard VOP accent color */
-    margin-left:    8px;                    /* Provides breathing room from the MEASURE button */
-    min-width:      80px;                   /* Reserves fixed space so the UI doesn't jump when switching from "WAIT..." to numbers */
-    display:        inline-block;           /* Allows the span to respect the min-width and margin properties */
+    font-family:        monospace;                 /* Monospaced font aligns the decimal points cleanly */
+    font-weight:        bold;                      /* Makes the readout pop against the dark UI */
+    color:              var(--color-accent);       /* Matching standard VOP accent color */
+    margin-left:        8px;                       /* Provides breathing room from the MEASURE button */
+    min-width:          80px;                      /* Reserves fixed space so the UI doesn't jump when switching from "WAIT..." to numbers */
+    display:            inline-block;              /* Allows the span to respect the min-width and margin properties */
 }
 
 /* Click-to-apply for the measured noise value.
  * Visually hints that the number is interactive without making it look
  * like a hyperlink that would navigate somewhere. */
- .noise-clickable {
-    cursor:                 pointer;
-    text-decoration:        underline;
-    text-decoration-style:  dotted;
- }
- .noise-clickable:hover {
-    color: var(--color-accent);
- }
+.noise-clickable {
+    cursor:                     pointer;
+    text-decoration:            underline;
+    text-decoration-style:      dotted;
+}
+.noise-clickable:hover {
+    color:              var(--color-accent);
+}
 
 /* Shrink the number input field to comfortably fit the button and readout on the same line */
 #black_clip {
-    width:  75px;
+    width:              75px;
 }
 
 /* Ensure the parent container groups them tightly in a row */
 .const-group:has(#black_clip) {
-    display:        flex;       /* Activates flexbox layout */
-    align-items:    center;     /* Vertically centers the label, input button, and text */
-    gap:            5px;        /* Sets consistent spacing between the elements */
+    display:            flex;                      /* Activates flexbox layout */
+    align-items:        center;                    /* Vertically centers the label, input button, and text */
+    gap:                5px;                       /* Sets consistent spacing between the elements */
 }
 
 .crush-group {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    grid-column: span 2; /* Forces this cell to span across two columns to fit the contents */
+    display:            flex;
+    align-items:        center;
+    gap:                5px;
+    grid-column:        span 2;                    /* Forces this cell to span across two columns to fit the contents */
 }
 
 .io-btn {
-    background:     #111;
-    color:          var(--color-accent);
-    border:         1px solid var(--color-accent);
-    padding:        5px 10px;
-    cursor:         pointer;
-    font-family:    monospace;
-    font-size:      0.9em;
+    background:         #111;
+    color:              var(--color-accent);
+    border:             1px solid var(--color-accent);
+    padding:            5px 10px;
+    cursor:             pointer;
+    font-family:        monospace;
+    font-size:          0.9em;
 }
 
 .io-btn:hover {
-    background: var(--color-accent);
-    color: #000;
+    background:         var(--color-accent);
+    color:              #000;
 }
 
 /* Status Bar Action Buttons Container */
