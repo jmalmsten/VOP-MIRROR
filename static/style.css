@@ -324,7 +324,7 @@ body {
     width:              100%; 
     background:         var(--bg-input-field);
     border:             1px solid var(--border-color); 
-    color:              var(text-primary); 
+    color:              var(--text-primary); 
     padding:            4px; 
     font-size:          0.8em; 
     box-sizing:         border-box; 
@@ -612,6 +612,14 @@ body {
     grid-column:        1;
     grid-row:           4;
     align-self:         start;
+    
+    /* Allow the sheet to extend beyond the controls grid's column width
+     * when long video-mode rows demand more horizontal real estate. */
+    width:              calc(100vw - 40px);            /* viewport minus body padding */
+    max-width:          calc(100vw - 40px);
+    margin-left:        calc(-50vw + 50%);             /* recenter against viewport, not container */
+    padding:            0 20px;
+    box-sizing:         border-box;
 }
 
 /* TODO: The .mds-add-btn uses --color-sss-accent for its border, which is 
