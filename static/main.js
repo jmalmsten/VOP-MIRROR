@@ -67,18 +67,35 @@ function toggleSheetVisibility() {
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
 }
 
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+
 async function uploadFile(inputId, textId, endpoint) {
     const file = document.getElementById(inputId).files[0];
     if(!file) return;
+
+    const ext = '.' + file.name.split('.').pop().toLowerCase();
+    const isVideo = VIDEO_EXTS.has(ext);
+    const textEl = document.getElementById(textId);
+
+    if (isVideo) {
+        textEl.value = 'EXTRACTING FRAMES - PLEASE WAIT...';
+    }
+
     const formData = new FormData();
     formData.append('file', file);
+
     try {
-        const resp = await fetch(endpoint, {method: 'POST', body: formData});
+        const resp = await fetch(endpoint, { method: 'POST', body: formData });
         const data = await resp.json();
-        document.getElementById(textId).value = data.filename;
-        await triggerSync(); 
-    } catch(e) { console.error("Upload failed", e); }
-}
+        // Show the original filename so the user knows what was loaded
+        textEl.value = data.filename;
+        await triggerSync();
+    } catch(e) {
+        console.error("Upload failed", e);
+        textEl.value = 'UPLOAD FAILED';
+    }
+}    
+    
 
 async function triggerSync() {
     local_sync_ts = Date.now();
@@ -158,7 +175,9 @@ async function triggerLabInvert() {
     }
 }
 
-async function calcFitScale(scaleId, fitZId, magType) {
+async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
+    // mode: "fit"  = entire image visible inside frustum (letterbox/pillarbox)
+    //       "fill" = frustum entirely covered by image (image overflows on short axis)
     const fov = parseFloat(document.getElementById('fov').value);
     const zDist = Math.abs(parseFloat(document.getElementById(fitZId).value)) || 1.0;
 
@@ -172,13 +191,13 @@ async function calcFitScale(scaleId, fitZId, magType) {
         const fitReq = await fetch('/calculate_fit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect })
+            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect, mode: mode })
         });
         const fitData = await fitReq.json();
 
         if (fitData.status === 'ok') {
             document.getElementById(scaleId).value = fitData.scale.toFixed(4);
-            console.log(`[VOP UI] ${magType.toUpperCase()} Scale Fit to: ${fitData.scale.toFixed(4)}`);
+            console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)}`);
             await triggerSync();
         } else {
             console.error("Fit Calc Error:", fitData.message);
@@ -199,6 +218,9 @@ function addMDSKeyframe() {
     let vals = {
         m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
         c: "#ffffff", cg: "#ffffff", exp: "1.0", f: 1,
+        // JK Printer defaults: empty gate (no anchor, just continue), 1:1 playback rate
+        pm_gate: "", pm_cam: "1", pm_stp: "1",
+        bp_gate: "", bp_cam: "1", bp_stp: "1",
         sp: "0,0,0", sr: "0,0,0", sbp_p: "0,0,0", sbp_r: "0,0,0", sc: "#ffffff", scg: "#ffffff",
         ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
     };
@@ -235,7 +257,18 @@ function addMDSKeyframe() {
             ebp_p: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_p"]'),
             ebp_r: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_r"]'),
             ec: getV('.mds-smear-row:nth-child(3) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
-            ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]')
+            ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]'),
+            // JK Printer scrape from previous row.
+            // GATE: always blank on a NEW keyframe, even if the previous row anchored.
+            //       Anchoring on every keyframe would prevent the playhead from
+            //       accumulating the user's intended CAM:STP advancement between them.
+            // CAM/STP: copy from the previous row so the chosen rate continues by default.
+            pm_gate: "",
+            pm_cam: getV('.mds-master-row input[id^="mds_pm_cam"]') || "1",
+            pm_stp: getV('.mds-master-row input[id^="mds_pm_stp"]') || "1",
+            bp_gate: "",
+            bp_cam: getV('.mds-master-row input[id^="mds_bp_cam"]') || "1",
+            bp_stp: getV('.mds-master-row input[id^="mds_bp_stp"]') || "1"
         };
     }
 
@@ -249,6 +282,13 @@ function addMDSKeyframe() {
             <select id="mds_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
             <input type="checkbox" id="mds_crn${idx}" ${vals.crn?'checked':''}>
             <div class="node-tag master">MST</div>
+            <!-- JK printer inputs: insert AFTER the MST node-tag, BEFORE the PM POS input. -->
+            <input type="number" step="1"           id="mds_pm_gate${idx}" value="${vals.pm_gate}" class="pm-jk-cell jk-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_pm_cam${idx}"  value="${vals.pm_cam}"  class="pm-jk-cell jk-input">
+            <input type="number" step="1"           id="mds_pm_stp${idx}"  value="${vals.pm_stp}"  class="pm-jk-cell jk-input">
+            <input type="number" step="1"           id="mds_bp_gate${idx}" value="${vals.bp_gate}" class="bp-jk-cell jk-input bp-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_bp_cam${idx}"  value="${vals.bp_cam}"  class="bp-jk-cell jk-input bp-input">
+            <input type="number" step="1"           id="mds_bp_stp${idx}"  value="${vals.bp_stp}"  class="bp-jk-cell jk-input bp-input">
             <input id="mds_p${idx}" value="${vals.p}">
             <input id="mds_r${idx}" value="${vals.r}">
             <input id="mds_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
@@ -263,6 +303,12 @@ function addMDSKeyframe() {
         <div class="sheet-row mds-smear-row">
             <div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STRT</div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
             <input id="mds_start_p${idx}" value="${vals.sp}">
             <input id="mds_start_r${idx}" value="${vals.sr}">
             <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
@@ -271,16 +317,24 @@ function addMDSKeyframe() {
             <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
             <div></div>
             <div></div>
+            <div></div>
         </div>
         <div class="sheet-row mds-smear-row">
             <div></div><div></div><div></div><div></div>
             <div class="node-tag smear">STOP</div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="pm-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
+            <div class="bp-jk-cell"></div>
             <input id="mds_stop_p${idx}" value="${vals.ep}">
             <input id="mds_stop_r${idx}" value="${vals.er}">
             <input id="mds_stop_bp_p${idx}" value="${vals.ebp_p}" class="bp-input">
             <input id="mds_stop_bp_r${idx}" value="${vals.ebp_r}" class="bp-input">
             <input type="color" id="mds_stop_c${idx}" value="${vals.ec}" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
             <input type="hidden" id="mds_stop_c${idx}_hex" value="${vals.ec}">
+            <div></div>
             <div></div>
             <div></div>
         </div>`;
@@ -303,8 +357,11 @@ function addSSSKeyframe() {
 
     // SSS Base Defaults (Includes SD and PH)
     let vals = {
-        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
-        c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1
+        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0", 
+        c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1,
+        // JK Printer defaults: empty gate (no anchor, just continue), 1:1 playback rate
+        pm_gate: "", pm_cam: "1", pm_stp: "1",
+        bp_gate: "", bp_cam: "1", bp_stp: "1"
     };
 
     if (lastRow) {
@@ -323,7 +380,18 @@ function addSSSKeyframe() {
             exp: getV('input[id^="sss_exp"]'),
             sd: getV('input[id^="sss_sd"]'),
             ph: getV('input[id^="sss_ph"]'),
-            f: parseInt(getV('input[id^="sss_f"]')) + 1
+            f: parseInt(getV('input[id^="sss_f"]')) + 1,
+            // JK Printer scrape from previous row.
+            // GATE: always blank on a NEW keyframe, even if the previous row anchored.
+            //       Anchoring on every keyframe would prevent the playhead from
+            //       accumulating the user's intended CAM:STP advancement between them.
+            // CAM/STP: copy from the previous row so the chosen rate continues by default.
+            pm_gate: "",
+            pm_cam: getV('input[id^="sss_pm_cam"]') || "1",
+            pm_stp: getV('input[id^="sss_pm_stp"]') || "1",
+            bp_gate: "",
+            bp_cam: getV('input[id^="sss_bp_cam"]') || "1",
+            bp_stp: getV('input[id^="sss_bp_stp"]') || "1"
         };
     }
 
@@ -337,6 +405,12 @@ function addSSSKeyframe() {
         <input type="number" id="sss_f${idx}" value="${vals.f}">
         <select id="sss_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
         <input type="checkbox" id="sss_crn${idx}" ${vals.crn?'checked':''}>
+        <input type="number" step="1"           id="sss_pm_gate${idx}" value="${vals.pm_gate}" class="pm-jk-cell jk-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_pm_cam${idx}"  value="${vals.pm_cam}"  class="pm-jk-cell jk-input">
+        <input type="number" step="1"           id="sss_pm_stp${idx}"  value="${vals.pm_stp}"  class="pm-jk-cell jk-input">
+        <input type="number" step="1"           id="sss_bp_gate${idx}" value="${vals.bp_gate}" class="bp-jk-cell jk-input bp-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_bp_cam${idx}"  value="${vals.bp_cam}"  class="bp-jk-cell jk-input bp-input">
+        <input type="number" step="1"           id="sss_bp_stp${idx}"  value="${vals.bp_stp}"  class="bp-jk-cell jk-input bp-input">
         <input id="sss_p${idx}" value="${vals.p}">
         <input id="sss_r${idx}" value="${vals.r}">
         <input id="sss_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
@@ -352,6 +426,22 @@ function addSSSKeyframe() {
     `;
     body.appendChild(row);
     reindexSSS();
+}
+
+// Toggle .has-pm-video / .has-bp-video classes on the SSS and MDS sheet
+// wrappers based on /status frame counts. CSS rules in style.css use these
+// classes to expand the grid template (revealing JK columns) and unhide the 
+// individual JK input cells.
+//
+// >1 frame is the threshold: a single TIFF (still image) doesn't benefit from
+// JK printer controls since GATE clamps to frame 0 anyway, so we keep the
+// columns hidden for stills to reduce sheet clutter.
+function applyVideoVisibility(pmFrames, bpFrames) {
+    const sheets = document.querySelectorAll('.sss-sheet, .mds-sheet');
+    sheets.forEach(sheet => {
+        sheet.classList.toggle('has-pm-video', pmFrames > 1);
+        sheet.classList.toggle('has-bp-video', bpFrames > 1);
+    });
 }
 
 function reindexSSS() {
@@ -447,6 +537,8 @@ setInterval(async () => {
             bar.style.width = "0%";
             if (etaEl) etaEl.innerText = ""; 
         }
+        // Drive JK printer column visibility from server-reported source frame counts.
+        applyVideoVisibility(st.pm_frames || 0, st.bp_frames || 0);
     } catch(e) { console.error("Poll Error:", e); }
 }, 1000);
 
@@ -527,7 +619,23 @@ async function triggerMeasurement() {
                     const nRes = await fetch('/static/noise_data.json?t=' + Date.now());
                     if (nRes.ok) {
                         const data = await nRes.json();
-                        resTxt.innerText = data.measured_noise.toFixed(6); 
+                        const measured = data.measured_noise.toFixed(6);
+
+                        // Render as a clickable element. We use a span with a class
+                        // rather than a <a> tag so it stays inline with the rest of 
+                        // the result text and doesn't get default link styling that
+                        // would clash with the rest of the UI
+                        resTxt.innerHTML = `<span class="noise-clickable" title="Click to copy into Noise Crusher">${measured}</span>`;
+
+                        // Wire up the click. We attach the listener AFTER setting innerHTML
+                        // because the span doesn't exist until innerHTML has been parsed.
+                        resTxt.querySelector('.noise-clickable').addEventListener('click', () => {
+                            const target = document.getElementById('black_clip');
+                            target.value = measured;
+                            // Dispatch a change event so any sync logic listening to the
+                            // input (like the auto-save / job-state tracker) picks it up
+                            target.dispatchEvent(new Event('chagne', { bubbles: true}));
+                        });
                     } else {
                         resTxt.innerText = "ERR";
                     }
@@ -538,6 +646,40 @@ async function triggerMeasurement() {
         }
     }, 1000);
 }
+
+/* Polls the server for any validation warnings the engine emitted during 
+ * the last exposure. If found, displays it in red next to the offending 
+ * input and force-updates the input value to match what the engine actually 
+ * used. The server consumes the warning on read, so this only fires once 
+ * per actual problem.
+ */
+async function checkValidationWarnings() {
+    try {
+        const r = await fetch('/check_validation_warning');
+        const data = await r.json();
+        if (data.warning) {
+            const w = data.warning;
+            const warnEl = document.getElementById(`${w.field}_warning`);
+            const inputEl = document.getElementById(w.field);
+            
+            if (warnEl) {
+                warnEl.innerText = `⚠ ${w.message}`;
+                // Auto-clear after 15s so it doesn't linger forever
+                setTimeout(() => { warnEl.innerText = ''; }, 15000);
+            }
+            
+            if (inputEl && w.forced_value !== undefined) {
+                inputEl.value = w.forced_value;
+                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    } catch (e) {
+        console.error("Validation check failed:", e);
+    }
+}
+
+// Poll every 2 seconds — cheap, and only acts when there's actually a warning.
+setInterval(checkValidationWarnings, 2000);
 
 async function triggerHotPixelMap() {
     // 1. The reality check prompt!

@@ -38,6 +38,7 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 > - **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens
 >- **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
 > - **HDMI Monitor** - Preferably an OLED (although the [black crush system](https://codeberg.org/jmalmsten-com/VOP/wiki/NoiseCrush) introduced in v0.6.3 helps a lot here for cheaper screens)
+> - **Device for control** - the VOP is mostly controlled with a web interface, pretty much any web browser works as long as it's on the same network. But as the exposure sheet has quite a few columns. I recommend having the browser on a a screen at at least 1920x1080.
 > 
 > ## Installation and use
 > Check the Wiki for current instructions that should work. At least, it has worked for me. 

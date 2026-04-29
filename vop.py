@@ -94,10 +94,9 @@ def process_video_ingestion(filepath, target_dir):
     If so, extracts all frames to zero-padded TIFFs matching the engine's
     playhead expectations (0000.tif, 0001.tif) and deletes the original video.
     
-    Extra thought. If future me needs, that could maybe be increased to 5 digits.
-    that would increase the incoming video's max length from 6 min 56 sec 16 frames to 
-    69 min 26 sec 16 frames (if my math is correct). But let's keep it at 4 digits for 
-    a max length "reel" of just under 7 minutes. It seems oddly realistic to real life systems
+    Forces 8-bit RGB output (-pix_fmt rgb24) because higher bit-depth source 
+    codecs like ProRes 422 HQ would otherwise produce 16-bit TIFFs that the 
+    moderngl texture pipeline (which expects 8-bit RGB) cannot consume.
     """
     ext = os.path.splitext(filepath)[1].lower()
     video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
@@ -107,26 +106,45 @@ def process_video_ingestion(filepath, target_dir):
 
         output_pattern = os.path.join(target_dir, "%04d.tif")
 
-        # ffmpeg flags: -y (overwrite), -i (input), -start_number 0 (force index 0)
         cmd = [
             "ffmpeg", "-y", "-i", filepath,
+            "-pix_fmt", "rgb24",          # ← force 8-bit RGB output
             "-start_number", "0",
             output_pattern
         ]
 
         try:
-            # Execute ffmpeg blocking call. Redirect stdout/stderr to DEVNULL to prevent terminal spam
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("[VOP SERVER] Frame extraction complete.")
-            os.remove(filepath) # Delete the source video to conserve storage
+            os.remove(filepath)
         
         except subprocess.CalledProcessError as e:
             print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
-            
-def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen_height=1080):
+
+def count_source_frames(directory):
     """
-    Calculates the required scaling factor to fit an image of arbitrary aspect ratio
-    within the frustum bounds at a specific Z-depth.
+    Counts image frames in a media directory (PROJ_MAG_DIR or PROJ_BIPACK_DIR).
+
+    Used by /status to tell the web UI whether a layer holds a still image
+    (1 frame or a video sequence (>1 frame)). The UI uses this to show or hide
+    the JK Optical Printer (GATE/CAM/STP) inputs in the exposure sheets,
+    since those columns are only meaningful when there's a sequence to traverse.
+    """
+    if not os.path.exists(directory):
+        return 0
+    valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+    return len([f for f in os.listdir(directory) if f.lower().endswith(valid_exts)])
+
+
+def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit", screen_width=1920, screen_height=1080):
+    """
+    Calculates the required scaling factor to size an image of arbitrary aspect ratio
+    against the frustum bounds at a specific Z-depth.
+    
+    mode="fit"  - returns the smaller scale, fitting the entire image inside the 
+                  frustum (letterbox/pillarbox behavior, no cropping).
+    mode="fill" - returns the larger scale, filling the frustum entirely with the 
+                  image (image overflow on the shorter axis is intentional).
     """
     # Prevent division by zero
     z_dist = abs(float(ref_z))
@@ -143,7 +161,9 @@ def calculate_static_fit_scale(fov, ref_z, img_aspect, screen_width=1920, screen
     scale_for_width = frustum_w / (2.0 * img_aspect)
     scale_for_height = frustum_h / 2.0
     
-    # Return the minimum constraint to ensure the image fits entirely (letterbox/pillarbox behavior)
+    # Pick min for fit (image inside frustum) or max for fill (frustum inside image)
+    if mode == "fill":
+        return max(scale_for_width, scale_for_height)
     return min(scale_for_width, scale_for_height)
 
 def dispatch_engine(task_type, payload):
@@ -234,7 +254,15 @@ def status():
             # Read telemetry written by engine.py for UI progress bars
             with open("/tmp/vop_heartbeat", "r") as f:
                 hb = json.load(f)
-                return jsonify({"status": "rendering", "heartbeat": hb, "params": params, "latest_wp": latest_wp})
+                return jsonify({
+                    "status": "rendering", 
+                    "heartbeat": hb, 
+                    "params": params, 
+                    "latest_wp": latest_wp,
+                    # JK printer column visibility hints for the web UI
+                    "pm_frames": count_source_frames(PROJ_MAG_DIR),
+                    "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
+                })
         except:
             pass
 
@@ -242,7 +270,10 @@ def status():
         "status": status_state, 
         "params": params, 
         "latest_wp": latest_wp, 
-        "workprint": f"/workprints/{latest_wp}" if latest_wp else None
+        "workprint": f"/workprints/{latest_wp}" if latest_wp else None,
+        # JK printer column visibility hints for the web UI
+        "pm_frames": count_source_frames(PROJ_MAG_DIR),
+        "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
     })
 
 @app.route('/render_prores', methods=['POST'])
@@ -310,6 +341,20 @@ def prores_status():
     else:
         return jsonify({"status": "error", "code": code})
 
+@app.route('/check_validation_warning', methods=['GET'])
+def check_validation_warning():
+    """Returns any pending validation warning written by the engine, then deletes it."""
+    warn_file = os.path.join(BASE_DIR, "static", "validation_warning.json")
+    if not os.path.exists(warn_file):
+        return jsonify({"warning": None})
+    try:
+        with open(warn_file) as f:
+            data = json.load(f)
+        os.remove(warn_file)  # Consume on read so it's only shown once
+        return jsonify({"warning": data})
+    except Exception as e:
+        return jsonify({"warning": None, "error": str(e)})
+
 @app.route('/prores/<filename>')
 def serve_prores(filename):
     """ Serves the rendered ProRes file for browser download. """
@@ -344,7 +389,9 @@ def upload_proj_bipack():
     print("[VOP SERVER] UPLOADING: ProjBiPack Mask")
     file = request.files['file']
     for f in os.listdir(PROJ_BIPACK_DIR): os.remove(os.path.join(PROJ_BIPACK_DIR, f))
-    file.save(os.path.join(PROJ_BIPACK_DIR, file.filename))
+    filepath = os.path.join(PROJ_BIPACK_DIR, file.filename)
+    file.save(filepath)  
+    process_video_ingestion(filepath, PROJ_BIPACK_DIR)
     return jsonify({"status": "ok", "filename": file.filename})
 
 @app.route('/nuke_proj_mag', methods=['POST'])
@@ -384,15 +431,18 @@ def get_img_aspect():
 
 @app.route('/calculate_fit', methods=['POST'])
 def calculate_fit():
-    # Route for the UI 'Fit Image' button logic
+    # Route for the UI Fit FOV / Fill FOV buttons. The 'mode' field on the 
+    # request body decides which behavior the math uses; defaults to fit for 
+    # backward compatibility with any old clients.
     print("[VOP SERVER] ACTION: CALCULATE FIT FOV")
     data = request.json
     try:
         fov = float(data.get('fov', 45.0))
         ref_z = float(data.get('ref_z', 1.0))
         aspect = float(data.get('aspect_ratio', 1.777))
+        mode = data.get('mode', 'fit')      # 'fit' or 'fill'
         
-        req_scale = calculate_static_fit_scale(fov, ref_z, aspect)
+        req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode)
         return jsonify({"status": "ok", "scale": req_scale})
     except Exception as e:
         print(f"[VOP SERVER] Fit Calc Error: {e}")

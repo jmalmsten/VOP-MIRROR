@@ -31,8 +31,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>VOP v0.6</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.11">
+    <title>VOP v0.7 NIGHTLY</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.12">
 </head>
 <body>
     VOP &copy; 2026 jmalmsten. 
@@ -42,7 +42,7 @@
     <div class="container">
         
         <div class="vop-header">
-            <h2>VOP v0.6.4</h2>
+            <h2>VOP v0.7.0 - NIGHTLY</h2>
             <div id="sync_indicator">○ OFFLINE</div>
         </div>
 
@@ -71,16 +71,23 @@
             <div class="group-box">
                 <div class="group-title">Projection Mag</div>
                 <div class="upload-cluster">
-                    <div class="c-box" style="flex:1;"><label>Active Image</label><input type="text" id="image" readonly></div>
-                    <input type="file" id="file_input" style="display:none;" onchange="uploadFile('file_input', 'image', '/upload_target')">
+                    <div class="c-box layer-vis-box" style="flex:1;">
+                        <label>Active Image</label>
+                        <div class="layer-vis-row">
+                            <input type="checkbox" id="pm_visible" class="layer-eye" checked title="Layer visibility — open eye = layer renders normally, closed eye = pass-through white (bare bulb)">
+                            <input type="text" id="image" readonly>
+                        </div>
+                    </div>
+                    <input type="file" id="file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('file_input', 'image', '/upload_target')">
                     <button class="mini-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjMag()">NUKE</button>
                 </div>
                 <div class="input-row" style="margin-top: 10px;">
                     <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="coord_scale" value="1.0"></div>
-                    <div class="c-box" style="justify-content: flex-end;">
-                        <button class="mini-btn" onclick="calcFitScale('coord_scale', 'fit_z', 'proj')">FIT FOV</button>
+                    <div class="c-box fit-fill-stack" style="justify-content: flex-end;">
+                        <button class="mini-btn" onclick="calcFitScale('coord_scale', 'fit_z', 'proj', 'fit')" title="Scale image to fit entirely inside the projection frustum (letterbox/pillarbox)">FIT FOV</button>
+                        <button class="mini-btn" onclick="calcFitScale('coord_scale', 'fit_z', 'proj', 'fill')" title="Scale image to fill the entire projection frustum (overflow on shorter axis)">FILL FOV</button>
                     </div>
                 </div>
             </div>
@@ -88,16 +95,23 @@
             <div class="group-box bipack">
                 <div class="group-title">Projection BiPack</div>
                 <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
-                    <div class="c-box" style="flex:1;"><label>Active Mask</label><input type="text" id="bipack_image" readonly></div>
-                    <input type="file" id="bp_file_input" style="display:none;" onchange="uploadFile('bp_file_input', 'bipack_image', '/upload_proj_bipack')">
+                    <div class="c-box layer-vis-box" style="flex:1;">
+                        <label>Active BiPack</label>
+                        <div class="layer-vis-row">
+                            <input type="checkbox" id="bp_visible" class="layer-eye" checked title="Layer visibility — open eye = layer renders normally, closed eye = pass-through white (no masking)">
+                            <input type="text" id="bipack_image" readonly>
+                        </div>
+                    </div>
+                    <input type="file" id="bp_file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('bp_file_input', 'bipack_image', '/upload_proj_bipack')">
                     <button class="mini-btn" onclick="document.getElementById('bp_file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjBiPack()">NUKE</button>
                 </div>
                 <div class="input-row" style="margin-top: 10px;">
                     <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="bipack_fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="bipack_coord_scale" value="1.0"></div>
-                    <div class="c-box" style="justify-content: flex-end;">
-                        <button class="mini-btn" onclick="calcFitScale('bipack_coord_scale', 'bipack_fit_z', 'bipack')">FIT FOV</button>
+                    <div class="c-box fit-fill-stack" style="justify-content: flex-end;">
+                        <button class="mini-btn" onclick="calcFitScale('bipack_coord_scale', 'bipack_fit_z', 'bipack', 'fit')" title="Scale image to fit entirely inside the projection frustum (letterbox/pillarbox)">FIT FOV</button>
+                        <button class="mini-btn" onclick="calcFitScale('bipack_coord_scale', 'bipack_fit_z', 'bipack', 'fill')" title="Scale image to fill the entire projection frustum (overflow on shorter axis)">FILL FOV</button>
                     </div>
                 </div>
             </div>
@@ -119,6 +133,7 @@
                         <input type="number" step="0.0001" id="black_clip" value="0.0" style="width: 75px;">
                         <button class="mini-btn measure_noise" onclick="triggerMeasurement()">MEASURE</button>
                         <span id="noise_result_txt"></span>
+                        <span id="black_clip_warning" class="validation-warning"></span>
                     </div>
                     <hr class="section-divider">
                     <div class="const-group crush-group">
@@ -159,6 +174,6 @@
     <div>
         {% include 'sections/cheat-sheet.html' %}
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=63"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=64"></script>
 </body>
 </html>

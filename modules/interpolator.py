@@ -2,6 +2,7 @@
 VOP Module:     interpolator.py
 Description:    Timeline state evaluation.
                 Integrated independent ProjBiPack (BP) spatial tracks.
+                And added video functionality.
 """
 #
 ###########################################################################
@@ -61,10 +62,18 @@ class Timeline:
     def __init__(self, job_data):
         self.job = job_data
         
-        # Added 'm' to track Interpolation Mode (S/L)
+        #   *_gate : Optional integer. The hardcoded gate frame anchor.
+        #            None means "inherit from earlier anchor / continue accumulating".
+        #   *_cam  : Positive integer >= 1. Number of camera (timeline) frames to
+        #            HOLD each gate frame before advancing. The "x" in CAM:STP.
+        #   *_stp  : Signed integer. Number of gate frames to ADVANCE after each hold.
+        #            Can be negative (reverse) or 0 (pause). The "y" in CAM:STP.
         self.tracks = {
             'm': [], 'pos': [], 'rot': [], 'bp_pos': [], 'bp_rot': [], 'pg': [], 'cg': [], 
-            'exp': [], 'sd': [], 'ph': [], 'src': [], 'stp': [],
+            'exp': [], 'sd': [], 'ph': [],
+            # JK Optical Printer playhead inputs (per-layer: PM=ProjMag, BP=BiPack)
+            'pm_gate': [], 'pm_cam': [], 'pm_stp': [],
+            'bp_gate': [], 'bp_cam': [], 'bp_stp': [],
             'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
             'start_bp_p': [], 'stop_bp_p': [], 'start_bp_r': [], 'stop_bp_r': [],
             'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
@@ -78,6 +87,77 @@ class Timeline:
             if k.startswith(prefix + "f"):
                 idx = k.replace(prefix + "f", "")
                 if idx.isdigit(): row_ids.add(idx)
+        
+        def parse_optional_int(key):
+            """
+            GATE parser. Returns int or None.
+            
+            Empty input or missing key => None (meaning "no anchor at this keyframe;
+            inherit from the most recent earlier anchor and keep accumulating).
+
+            Any integer value (including 0 and negatives) => int (a hardcoded anchor).
+
+            This is how the user signals 'don't reset the playhead here' vs
+            'snap the gate to this exact frame number'.
+            """
+            if key not in job_data:
+                return None
+            raw = job_data.get(key)
+            if raw == "" or raw is None:
+                return None
+            try:
+                return int(raw)
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"Input '{key}' contains invalid data: '{raw}'. "
+                    f"GATE must be an integer or empty (empty = inherit)."
+                )
+
+        def parse_cam(key, default=1):
+            """
+            CAM parser of CAM:STP. Must be a positive integer >= 1.
+
+            CAM=0 would be a divide-by-zero ('advance every 0 frames').
+            Empty/missing falls back to the default of 1 (normal 1:1 playback). 
+            """                
+            if key not in job_data:
+                return default
+            raw = job_data.get(key)
+            if raw == "" or raw is None:
+                return default
+            try:
+                val = int(raw)
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"Input '{key}' contains invalid data: '{raw}'. CAM must be an integer."
+                )
+            if val < 1:
+                raise ValueError(
+                    f"Input '{key}' is {val}. CAM must be 1 or greater. "
+                    f"CAM is the camera-frame divisor and zero or negative values "
+                    f"have no physical meaning in JK Optical Printer logic."
+                )
+            return val
+
+        def parse_stp(key, default=1):
+            """
+            STP parser in CAM:STP. Signed integer. Can be:
+                positive => forward gate advance
+                negative => reverse gate advance
+                zero (0) => pause/hold
+            Empty/missing falls back to the default of 1 (normal 1:1 playback).
+            """
+            if key not in job_data:
+                return default
+            raw = job_data.get(key)
+            if raw == "" or raw is None:
+                return default
+            try:
+                return int(raw)
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"Input '{key}' contains invalid data: '{raw}'. STP must be an integer."
+                )
 
         def require_float(key, fallback_if_unsubmitted=None):
             """
@@ -122,9 +202,14 @@ class Timeline:
             self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
             self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
             
-            # src and stp use the fallback arguments since they aren't always present in the standard UI
-            self.tracks['src'].append({'f': f_val, 'val': require_float(f"{prefix}src{idx}", -1.0)})
-            self.tracks['stp'].append({'f': f_val, 'val': require_float(f"{prefix}stp{idx}", 1.0)})
+            # JK Optical Printer playhead tracks - parsed per-layer.
+            # These keys come from the UI as e.g. "sss_pm_gate3" or "mds_bp_cam7".
+            self.tracks['pm_gate'].append({'f': f_val, 'val': parse_optional_int(f"{prefix}pm_gate{idx}")})
+            self.tracks['pm_cam'].append({'f': f_val, 'val': parse_cam(f"{prefix}pm_cam{idx}")})
+            self.tracks['pm_stp'].append({'f': f_val, 'val': parse_stp(f"{prefix}pm_stp{idx}")})
+            self.tracks['bp_gate'].append({'f': f_val, 'val': parse_optional_int(f"{prefix}bp_gate{idx}")})
+            self.tracks['bp_cam'].append({'f': f_val, 'val': parse_cam(f"{prefix}bp_cam{idx}")})
+            self.tracks['bp_stp'].append({'f': f_val, 'val': parse_stp(f"{prefix}bp_stp{idx}")})
 
             # MDS Start/Stop offsets (Ignored during SSS execution)
             self.tracks['start_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"))})
@@ -276,15 +361,103 @@ class Timeline:
             'exp': 1.0, 'sd': 1.0, 'ph': 0.5
         }
 
-    def calculate_playhead_at(self, target_frame):
-        src_track = self.tracks.get('src', [])
-        if not src_track: return 0.0
-        anchor_val, anchor_frame = 0.0, 1
-        for k in reversed(src_track):
-            if k['f'] <= target_frame and k['val'] >= 0:
-                anchor_val, anchor_frame = k['val'], k['f']
+    def _get_step_held(self, key, t, default=None):
+        """
+        Step-hold (no interpolation) lookup. returns the value of the most recent
+        keyframe at or before t. Used for discrete inputs like CAM and STP that 
+        should HOLD their value between keyframes rather than smoothly transition.
+
+        Why not _get_val? _get_val does linear/cosine interpolation between
+        keyframes - correct for spatial values like position and rotation, but 
+        wrong for integer rate controls. If the user sets CAM:STP to 3:2 at
+        keyframe 1 and 1:1 at keyframe 5 we want a hard switch at frame 5,
+        not a gradual ease from 3:2 to 1:1
+        """
+        track = self.tracks.get(key, [])
+        if not track:
+            return default
+        
+        # Walk forward; the last keyframe whose frame <= t wins.
+        val = track[0]['val'] if track[0]['val'] is not None else default
+        for k in track:
+            if k['f'] <= t:
+                if k['val'] is not None:
+                    val = k['val']
+            else:
                 break
-        if target_frame > anchor_frame:
-            for f in range(int(anchor_frame), int(target_frame)):
-                anchor_val += self._get_val('stp', f)
-        return anchor_val
+        return val
+
+    def calculate_playhead_at(self, target_frame, layer='pm'):
+        """
+        JK Optical Printer playhead resolution for the specified layer.
+
+        Returns:
+            Integer gate frame index that the texture manager should load for this
+            layer at this timeline frame.
+        
+        Algorithm (mirrors mechanical JK Optical Printer behavior):
+
+        1. Walk BACKWARD through the gate track to find the most recent keyframe
+           with a hardcoded Gate value (val is not None). That becomes our anchor.
+           If no anchor exists anywhere, default to gate=0 at frame=1.
+
+        2. If target_frame is at or before the anchor frame, return the anchor
+           value directly. This is the 'hard cut' behavior: when a keyframe
+           declares a hardcoded gate, the playhead snaps to it without smoothing.
+
+        3. Otherwise, walk FORWARD from anchor to target one camera frame at a
+           time. At each camera frame, look up the current CAM:STP rate (which
+           may have changed mid-stream due to other keyframes) and increment a
+           hold_counter. When hold_counter reaches CAM, advance the gate by STP
+           and reset the counter.
+
+           This produces the staccato judder of a real JK printer:
+           3:2 yields gate values 1,1,1,3,3,3,5,5,5... rather than smoothly
+           interpolating between rates.
+        """
+        gate_key = f'{layer}_gate'
+        cam_key  = f'{layer}_cam'
+        stp_key  = f'{layer}_stp'
+
+        gate_track = self.tracks.get(gate_key, [])
+
+        # ---- Step 1: locate the anchor ----
+        # Default fallback: if no keyframe ever sets a hardcoded gate, start from
+        # gate frame 0 at timeline frame 1. this gives sensible behavior for jobs
+        # that just want plain 1:1 playback without explicitly anchoring.
+        anchor_gate = 0
+        anchor_frame = 1
+        for k in reversed(gate_track):
+            if k['f'] <= target_frame and k['val'] is not None:
+                anchor_gate = int(k['val'])
+                anchor_frame = int(k['f'])
+                break
+        
+        # ---- Step 2: hard cut at or before anchor ----
+        if target_frame <= anchor_frame:
+            return anchor_gate
+        
+        # ---- Step 3: walk forward with staccato hold logic ----
+        gate = anchor_gate
+        hold_counter = 0
+
+        for f in range (int(anchor_frame), int(target_frame)):
+            # Look up CAM:STP at this specific camera frame. The values come from
+            # the most recent keyframe at or before f (step-hold semantics, no
+            # interpolation), so a mid-stream rate change kicks in cleanly.
+            cam = self._get_step_held(cam_key, f, default=1)
+            stp = self._get_step_held(stp_key, f, default=1)
+
+            # Defensive clamp: parser already enforces cam>=1, but if the track is
+            # somehow empty or returns None, fall back to 1 to avoid an infinite hold.
+            if cam is None or cam < 1:
+                cam = 1
+            if stp is None:
+                stp = 1
+            
+            hold_counter += 1
+            if hold_counter >= cam:
+                gate += stp
+                hold_counter = 0
+        
+        return gate

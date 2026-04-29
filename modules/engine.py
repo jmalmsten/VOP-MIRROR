@@ -1,4 +1,4 @@
-"""
+""" 
 VOP Module:     engine.py
 Description:    Multiplicative Dual-World Engine.
                 Forces GLES 3.0 profile prior to display initialization.
@@ -69,6 +69,54 @@ signal.signal(signal.SIGTERM, handle_sigterm)
 
 def log_audit(msg): 
     print(f"[{time.strftime('%H:%M:%S')}] AUDIT (v0.2.6): {msg}", flush=True)
+
+def validate_black_clip(raw_clip):
+    """
+    Coerces and sanity-checks the noise crusher input.
+
+    Returns a float in the range [0.0-1.0]. Anything <=0 disables the crusher.
+    Values >= 1.0 would crush the entire 16-bit range to black, so we refuse
+    them and warn loudly. This is a guardrail against the classic "missing
+    decimal point" pasted-value mistake (e.g. typing 003704 instead of 0.003704
+    yields 3704.0 which silently nukes every captured photo to pure black)
+    
+    Also writes a flag file the GUI polls, so the warning becomes visible 
+    in the browser, not just the terminal.
+    """
+    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    warn_file = os.path.join(base_path, "static", "validation_warning.json")
+    
+    def emit_warning(message):
+        log_audit(message)
+        try:
+            with open(warn_file, "w") as f:
+                json.dump({"field": "black_clip", "message": message, "forced_value": 0.0, "ts": time.time()}, f)
+        except Exception as e:
+            log_audit(f"WARNING: could not write validation flag file: {e}")
+    
+    try:
+        val = float(raw_clip) if raw_clip != "" else 0.0
+    except (TypeError, ValueError):
+        emit_warning(f"Noise Crusher value '{raw_clip}' is not a number. Forcing to 0.0.")
+        return 0.0
+    
+    if val >= 1.0:
+        emit_warning(f"Noise Crusher value {val} is unreasonable (must be 0.0-1.0). Did you forget the leading decimal? Forcing to 0.0.")
+        return 0.0
+    
+    if val < 0.0:
+        emit_warning(f"Noise Crusher value {val} is negative. Forcing to 0.0.")
+        return 0.0
+    
+    # Valid input: clear any stale warning file so the GUI doesn't keep showing 
+    # a previous warning for a now-corrected value.
+    if os.path.exists(warn_file):
+        try:
+            os.remove(warn_file)
+        except Exception:
+            pass
+    
+    return val
 
 def run_persistent_engine():
     """
@@ -188,11 +236,30 @@ def run_persistent_engine():
                     t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
                     st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
 
-                ph_val = timeline.calculate_playhead_at(frame_num)
-                
-                tex_mag, asp_mag = tex_mgr.load(ph_val, is_bipack=False)
-                tex_bp, asp_bp = tex_mgr.load(ph_val, is_bipack=True)
+                # Resolve playhead positions independently for each optical layer.
+                # The ProjMag and BiPack run on separate JK printer tracks - so a job
+                # could, for example, hold the projmag still while reverse running the
+                # bipack, just like a real optical printer's two independently-clocked
+                # magazine heads.
+                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
+                ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
 
+                tex_mag, asp_mag = tex_mgr.load(ph_pm, is_bipack=False)
+                tex_bp,  asp_bp  = tex_mgr.load(ph_bp, is_bipack=True)
+                
+                # Layer visibility toggles (the "eye" icons next to the upload fields).
+                # When a layer is hidden, swap its texture for the all-white texture.
+                # The existing white_tex check below handles this cleanly: the layer
+                # is rendered as pure pass-through, no geometry transform, no masking
+                # contribution. With both layers hidden, the user sees the bare bulb 
+                # (still tintable via PG / CG).
+                # Defaults to True (visible) so missing keys don't accidentally hide
+                # layers in jobs created before this feature existed.
+                if not job_data.get('pm_visible', True):
+                    tex_mag = tex_mgr.white_tex
+                if not job_data.get('bp_visible', True):
+                    tex_bp = tex_mgr.white_tex
+                    
                 bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
                 
                 # PASS 1: RENDER BIPACK INTO OFF-SCREEN FBO
@@ -236,8 +303,7 @@ def run_persistent_engine():
                 smr_ms = float(st['exp']) * 1000.0
                 total_ms = smr_ms + 1000.0
                 
-                raw_clip = job_data.get('black_clip', 0.0)
-                black_clip = float(raw_clip) if raw_clip != "" else 0.0
+                black_clip = validate_black_clip(job_data.get('black_clip', 0.0))
 
                 buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
                 # ---------------------------------------------------------
@@ -246,9 +312,11 @@ def run_persistent_engine():
                 # before the precision hardware timing loop begins. This prevents
                 # the main thread from stalling during the first frame render.
                 # ---------------------------------------------------------
-                ph_val = timeline.calculate_playhead_at(frame_num)
-                tex_mgr.load(ph_val, is_bipack=False)
-                tex_mgr.load(ph_val, is_bipack=True)
+
+                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
+                ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
+                tex_mgr.load(ph_pm, is_bipack=False)
+                tex_mgr.load(ph_bp, is_bipack=True)
 
                 # ---------------------------------------------------------
                 # PRE-EXPOSURE BLACKOUT
