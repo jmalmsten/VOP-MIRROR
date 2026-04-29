@@ -1,4 +1,9 @@
-# V0.7.0 (YYYYMMDD)
+# V0.7.0 (20260429) Prerelease
+## Notes:
+Quite a big one here. Most notably, the **VOP**, the Video **Optical Printer** now actually accepts video. So it can do... optical printing. Like ye olde J.K. Optical Printers. 
+
+Please do remember. Prereleases like these seem to work on my end. But I have yet to do a full deployment run. 
+
 ## Added:
 ### GATE, CAM and STP to the exposure sheets. 
 These fields only become visible when the input of either ProjectionMag (PM) or Bipack (BP) is a video. When feeding any of them a still image, these fields are not needed and are therefore hidden to avoid cluttering things. 
