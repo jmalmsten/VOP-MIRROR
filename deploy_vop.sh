@@ -1,7 +1,7 @@
 #!/bin/bash
 # VOP Automated Deployment Script
-# Target: Raspberry Pi OS Lite
-# Version: 1.3.0
+# Target: Raspberry Pi OS Lite (Bookworm, 64-bit)
+# Version: 1.4.0
 #
 ###########################################################################
 #
@@ -26,7 +26,6 @@
 #     https://codeberg.org/jmalmsten-com/VOP
 #
 ###########################################################################
-
 
 #######################################################################################
 #
@@ -117,25 +116,35 @@
 #                 loops)
 #   ___________________________________________________________________________________
 #
-#   Lastly, Systemd Daemon:
+#   Fourthly, Systemd Daemon:
 #
 #   - vop.service - The script automatically generates and enables a systemd service.
 #                   This ensures the VOP starts automatically on boot and continues 
 #                   running securely in the background even if you disconnect SSH.
 #
+#   ___________________________________________________________________________________
+#
+#   Optional, HDMI Full RGB Fix:
+#
+#   Some HDMI monitors negotiate the "Limited" color range (16-235) by default,
+#   which lifts black levels and makes them look milky. The VOP needs deep blacks 
+#   so the camera doesn't accidentally pick up stray light during long exposures.
+#   The fix is a one-line systemd service that forces "Full RGB" (0-255) at every 
+#   boot. This script will offer to set it up at the end of deployment.
+#
 #######################################################################################
 
-# 1. Halt execution immediately if any command fails
+# Halt execution immediately if any command fails
 set -e
 
-# 2. Bulletproof Pathing: Resolve the exact directory where this script lives and move
-#    into it
+# Bulletproof Pathing: Resolve the exact directory where this script lives and move
+# into it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "Starting VOP Environment Deployment in $SCRIPT_DIR..."
 
-# 3. System Dependencies
+# 1. System Dependencies
 echo "Updating APT repositories..."
 sudo apt update -y
 
@@ -145,7 +154,7 @@ sudo apt install -y git python3-pip python3-venv python3-dev ffmpeg \
     libsdl2-ttf-dev libfreetype6-dev libgl1-mesa-dri libegl1 \
     libgles2 libx11-dev rpicam-apps
 
-# 4. Virtual Environment Setup
+# 2. Virtual Environment Setup
 VENV_DIR="venv"
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -155,7 +164,7 @@ else
     echo "Virtual environment already exists. Skipping creation."
 fi
 
-# 5. Python Dependencies
+# 3. Python Dependencies
 echo "Upgrading pip..."
 ./$VENV_DIR/bin/pip install --upgrade pip
 
@@ -165,7 +174,7 @@ echo "Installing standard Python modules..."
 echo "Compiling Pygame from source for KMSDRM support (this will take a few minutes)..."
 ./$VENV_DIR/bin/pip install pygame --no-binary pygame --force-reinstall --no-cache-dir
 
-# 6. Hardware Permissions
+# 4. Hardware Permissions
 echo "Applying DRM, Render, and Input permissions to user: $USER..."
 sudo usermod -a -G video,render,input "$USER"
 
@@ -174,7 +183,7 @@ if [ -f "run_vop.sh" ]; then
     chmod +x run_vop.sh
 fi
 
-# 7. Systemd Service Creation & Enabling
+# 5. Systemd Service Creation & Enabling
 echo "Configuring systemd service for automatic startup..."
 SERVICE_FILE="vop.service"
 
@@ -205,6 +214,63 @@ sudo systemctl daemon-reload
 # Tell the OS to launch this service automatically on every boot
 sudo systemctl enable vop.service
 
+# 6. Optional HDMI Full RGB Fix
+# This fix forces "Full RGB" (0-255) HDMI output. Recommended for most setups,
+# but exposed as an opt-in prompt because some monitors / TVs already negotiate
+# the correct range and forcing it could cause issues on edge-case hardware.
+echo
+echo "----------------------------------------"
+echo " Optional: HDMI Full RGB Fix"
+echo "----------------------------------------"
+echo " By default, the Raspberry Pi often outputs a 'Limited' color range"
+echo " (16-235) over HDMI, which lifts black levels and makes them look milky."
+echo " For the VOP, deep blacks matter — they keep the camera from picking up"
+echo " stray light during long exposures. The fix is a small systemd oneshot"
+echo " service that forces 'Full RGB' (0-255) at every boot."
+echo
+echo " If your monitor already shows true blacks, skip this. If you're unsure,"
+echo " saying yes is the safer default for VOP use."
+echo "----------------------------------------"
+read -r -p "Set up the HDMI Full RGB fix now? (y/N): " RGB_PROMPT
+if [[ "$RGB_PROMPT" =~ ^[Yy]$ ]]; then
+    RGB_FIX_SCRIPT="$SCRIPT_DIR/CaliTools/FullRGBFix/force_full_rgb.sh"
+    RGB_SERVICE_FILE="vop-rgb-fix.service"
+    
+    if [ ! -f "$RGB_FIX_SCRIPT" ]; then
+        echo "WARNING: $RGB_FIX_SCRIPT not found. Skipping RGB fix setup."
+        echo "         (Did the git clone include the CaliTools/ subdirectory?)"
+    else
+        echo "Setting up HDMI Full RGB fix..."
+        chmod +x "$RGB_FIX_SCRIPT"
+        
+        # Generate the service file. We add 'Before=vop.service' so the RGB 
+        # fix fires before the engine grabs the framebuffer -- otherwise the 
+        # engine might see the wrong range during its first render.
+        cat <<EOF > "$RGB_SERVICE_FILE"
+[Unit]
+Description=VOP Monitor Full RGB Calibration
+Before=vop.service
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=$RGB_FIX_SCRIPT
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        sudo mv "$RGB_SERVICE_FILE" /etc/systemd/system/
+        sudo systemctl daemon-reload
+        sudo systemctl enable vop-rgb-fix.service
+        echo "HDMI Full RGB fix installed and enabled."
+    fi
+else
+    echo "Skipping HDMI Full RGB fix. You can run it later by re-running this"
+    echo "script, or by manually executing CaliTools/FullRGBFix/deploy_rgb_fix.sh"
+fi
+
+echo
 echo "========================================"
 echo "Deployment Complete."
 echo "Permissions modified and systemd service installed."
@@ -216,12 +282,12 @@ echo " To view live terminal logs at any time, run:"
 echo " sudo journalctl -u vop.service -f"
 echo "========================================"
 
-# 8. Reboot Prompt
+# 7. Reboot Prompt
 read -r -p "Reboot the system now? (y/N): " REBOOT_PROMPT
 if [[ "$REBOOT_PROMPT" =~ ^[Yy]$ ]]; then
     echo "Rebooting..."
     sudo reboot now
 else
     echo "Exiting. Run 'sudo reboot now' before starting the VOP."
-    echo 
+    echo
 fi
