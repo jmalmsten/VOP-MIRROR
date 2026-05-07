@@ -1,7 +1,7 @@
 #!/bin/bash
 # VOP Automated Deployment Script
 # Target: Raspberry Pi OS Lite (Bookworm, 64-bit)
-# Version: 1.4.0
+# Version: 1.5.0
 #
 ###########################################################################
 #
@@ -132,6 +132,17 @@
 #   The fix is a one-line systemd service that forces "Full RGB" (0-255) at every 
 #   boot. This script will offer to set it up at the end of deployment.
 #
+#   ___________________________________________________________________________________
+#
+#   Changelog:
+#   v1.5.0 - Removed 'After=multi-user.target' from the optional vop-rgb-fix 
+#            service. That line combined with vop.service being WantedBy the 
+#            same target created an ordering cycle in systemd's dependency 
+#            graph, causing systemd to silently delete vop.service from the 
+#            boot transaction. With the line removed, both services start 
+#            cleanly at boot, with rgb-fix correctly preceding vop.
+#   v1.4.0 - Added optional HDMI Full RGB Fix prompt at end of deployment.
+#
 #######################################################################################
 
 # Halt execution immediately if any command fails
@@ -246,11 +257,17 @@ if [[ "$RGB_PROMPT" =~ ^[Yy]$ ]]; then
         # Generate the service file. We add 'Before=vop.service' so the RGB 
         # fix fires before the engine grabs the framebuffer -- otherwise the 
         # engine might see the wrong range during its first render.
+        # 
+        # Note: There is intentionally NO 'After=multi-user.target' here.
+        # Adding that line creates an ordering cycle (multi-user wants vop, 
+        # vop is After=rgb-fix, rgb-fix is After=multi-user) which causes 
+        # systemd to silently drop vop.service from the boot transaction.
+        # The Before=vop.service alone is enough to enforce the correct
+        # ordering between the two services.
         cat <<EOF > "$RGB_SERVICE_FILE"
 [Unit]
 Description=VOP Monitor Full RGB Calibration
 Before=vop.service
-After=multi-user.target
 
 [Service]
 Type=oneshot
