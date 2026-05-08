@@ -30,6 +30,9 @@ Description:    Centralized matrix projection logic.
 #
 ###########################################################################
 
+import numpy as np
+from pyrr import Matrix44
+
 
 def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_rot, local_pos, local_rot, width, height, par_x=1.0, par_y=1.0):
     # 1. Perspective Projection Matrix
