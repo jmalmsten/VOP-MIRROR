@@ -1,3 +1,12 @@
+# V0.7.1 (YYYMMDD)
+## Notes:
+## Added: 
+### Anamorphic / Non-square Pixel Aspect Ratio (PAR)
+Added the ability to use non-square pixel aspect ratio. This is to maximize the resolution for aspect ratios that are not the same as the HDMI monitor.
+#### How to use:
+See wiki at [https://codeberg.org/jmalmsten-com/VOP/wiki/PAR-Anamorphic](https://codeberg.org/jmalmsten-com/VOP/wiki/PAR-Anamorphic)
+
+
 # V0.7.0 (20260429) Prerelease
 ## Notes:
 Quite a big one here. Most notably, the **VOP**, the Video **Optical Printer** now actually accepts video. So it can do... optical printing. Like ye olde J.K. Optical Printers. 

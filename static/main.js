@@ -763,11 +763,19 @@ async function renderProRes() {
     if (btn) { btn.innerText = 'RENDERING...'; btn.disabled = true; }
 
     try {
-        // 1. Start the background render, passing current fps from the UI
+        // 1. Start the background render, passing current fps + PAR from the UI.
+        // PAR fields are read from the new anamorphic section and forwarded so
+        // ffmpeg can write the 'pasp' atom into the MOV. Without these, the
+        // editor would have to manually punch the PAR in on import.
+        const cp = collectParams();
         const startResp = await fetch('/render_prores', {
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fps: collectParams().fps || 24 })
+            body: JSON.stringify({ 
+                fps: cp.fps || 24,
+                par_x: cp.par_x || 1.0,
+                par_y: cp.par_y || 1.0
+            })
         });
         const startData = await startResp.json();
 

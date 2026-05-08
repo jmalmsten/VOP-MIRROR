@@ -295,6 +295,21 @@ def render_prores():
     
     try:
         fps = request.json.get('fps', 24) if request.json else 24
+
+        # ANAMORPHIC PAR METADATA
+        # The captured TIFFs are squeezed. Tagging the ProRes stream's sample
+        # aspect ratio as PAR_X:PAR_Y causes ffmpeg to write a 'pasp' atom into
+        # the MOV container. Resolve/Premiere/FCP read this and unsqueeze the
+        # picture on import without the editor having to remember to set PAR
+        # manually. PAR 1:1 produces 1:1 metadata which is a no-op visually.
+        par_x = float(request.json.get('par_x', 1.0) or 1.0) if request.json else 1.0
+        par_y = float(request.json.get('par_y', 1.0) or 1.0) if request.json else 1.0
+        # ffmpeg's setsar wants num/den - just pass the raw floats; ffmpeg parses
+        # them. We use floats verbatim instead of trying to integerize because
+        # arbitrary inputs like 1:1.24 don't reduce cleanly to small integers
+        # and ffmpeg handles the decimal form fine.
+        sar_filter = f"setsar={par_x}/{par_y}"
+
         ts = int(time.time())
         out_mov = os.path.join(PRORES_DIR, f"vop_prores_{ts}.mov")
 
@@ -306,6 +321,9 @@ def render_prores():
             "-c:v", "prores_ks",
             "-profile:v", "4444",
             "-pix_fmt", "yuv444p10le",
+            # Bake PAR into the stream as the QuickTime 'pasp' atom so editors
+            # auto-unsqueeze the footage on import.
+            "-vf", sar_filter,
             # Tag as linear light, Rec.709 primaries - no gamma baked in.
             # Resolve/Fusion reads these flags and handles the transform in the projects
             # color management pipeline. Set Input Color Space to "Linear" in Resolve.
@@ -315,11 +333,10 @@ def render_prores():
             out_mov
         ]
 
-        print(f"[VOP SERVER] ACTION: RENDER PRORES -> {os.path.basename(out_mov)}")
+        print(f"[VOP SERVER] ACTION: RENDER PRORES -> {os.path.basename(out_mov)} | PAR={par_x}:{par_y}")
         prores_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr= subprocess.DEVNULL)
 
         return jsonify({"status": "started", "filename": os.path.basename(out_mov)})
-
     except Exception as e:
         print(f"[VOP SERVER] ProRes render error: {e}")
         return jsonify({"error": str(e)}), 500

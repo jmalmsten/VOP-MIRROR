@@ -31,13 +31,34 @@ Description:    Centralized matrix projection logic.
 ###########################################################################
 
 
-import numpy as np
-from pyrr import Matrix44
-
-def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_rot, local_pos, local_rot, width, height):
+def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_rot, local_pos, local_rot, width, height, par_x=1.0, par_y=1.0):
     # 1. Perspective Projection Matrix
     # Defines the viewing volume based on the active FOV.
     proj = Matrix44.perspective_projection(float(fov), width/height, 0.1, 1000.0)
+    
+    # 1b. ANAMORPHIC SQUEEZE
+    # Apply a non-uniform scale in clip space (post-multiplied onto the projection
+    # matrix) so the rendered geometry is pre-distorted on the HDMI screen. The
+    # camera then captures the squeezed image, and the NLE unsqueezes it in post
+    # using the same PAR metadata we write to the ProRes container.
+    #
+    # The convention is: PAR = pixel_width : pixel_height. So:
+    #   PAR > 1 (wide pixels, e.g. 4:3 -> 1.333):
+    #       NLE will stretch X horizontally in post -> we squeeze X here by 1/PAR.
+    #   PAR < 1 (tall pixels, e.g. 1:1.24):
+    #       NLE will stretch Y vertically in post -> we squeeze Y here by PAR.
+    #
+    # We always clamp to <=1.0 so the squeezed image stays inside the existing
+    # 1920x1080 frame (we never grow past the edges). The unsqueezed-axis stays
+    # at 1.0, leaving black bars on the screen that the NLE will discard via
+    # the unsqueeze. PAR == 1 collapses cleanly to identity (no-op).
+    px = float(par_x) if float(par_x) > 0 else 1.0
+    py = float(par_y) if float(par_y) > 0 else 1.0
+    par = px / py
+    sx_anam = min(1.0, 1.0 / par)   # <=1.0 always
+    sy_anam = min(1.0, par)         # <=1.0 always
+    anam_scale = Matrix44.from_scale([sx_anam, sy_anam, 1.0])
+    proj = anam_scale * proj  # bake the squeeze into the projection
     
     # 2. Physical Geometry Scale
     # Base geometry is 1.0 units high. Width is defined by the image aspect ratio.

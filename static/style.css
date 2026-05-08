@@ -507,6 +507,39 @@ body {
     gap:                4px;
 }
 
+/* ANAMORPHIC PAR section
+ * Mirrors the Noise Crusher row: a label, two compact number inputs separated
+ * by a colon, then an inline checkbox. The constraints on .const-group input
+ * default to 100% width which would break the row layout, so we shrink the
+ * PAR fields explicitly (similar to the #black_clip override above). */
+#par_x, #par_y {
+    width:              60px;
+}
+.par-colon {
+    color:              var(--text-secondary);
+    font-weight:        bold;
+    /* Slight horizontal padding so the colon doesn't kiss the input borders */
+    padding:            0 2px;
+}
+.par-preview-toggle {
+    display:            flex;
+    align-items:        center;
+    gap:                4px;
+    /* Override the .const-group label rule that would otherwise force a block
+     * layout above the field. Inside this row we want the label inline. */
+    font-size:          0.7em;
+    color:              var(--text-secondary);
+    margin-left:        8px;
+    /* Reset the margin-bottom from the default .const-group label rule */
+    margin-bottom:      0;
+}
+.par-preview-toggle input[type=checkbox] {
+    /* The .const-group input default of 100% width would expand the checkbox
+     * and shove everything off-screen. Lock it to native size. */
+    width:              auto;
+    margin:             0;
+}
+
 /* ################ SHEET HEADER & MODE SELECTOR ############### */
 
 .sheet-header {

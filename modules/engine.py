@@ -218,6 +218,17 @@ def run_persistent_engine():
             mag_scale = float(job_data.get('coord_scale', 1.0))
             bp_scale = float(job_data.get('bipack_coord_scale', 1.0))
 
+            # ---------------------------------------------------------
+            # ANAMORPHIC PAR (Pixel Aspect Ratio) RESOLUTION
+            # Read once per task to avoid redundant dict lookups during the
+            # per-frame render loop. The preview-unsqueeze toggle is consumed
+            # only by the Proj Probe path below; cam_preview unsqueezing is
+            # done downstream in color_utils when we resample the JPG.
+            # ---------------------------------------------------------
+            par_x = float(job_data.get('par_x', 1.0) or 1.0)
+            par_y = float(job_data.get('par_y', 1.0) or 1.0)
+            preview_unsqueeze = bool(job_data.get('preview_unsqueeze', False))
+
             # Announce rendering state to the UI via the heartbeat file
             with open("/tmp/vop_heartbeat", "w") as hbf:
                 json.dump({"status": "rendering", "msg": f"Starting {task}...", "current": 0, "total": 1, "eta": 0, "est_mb": 0.0}, hbf)
@@ -235,6 +246,16 @@ def run_persistent_engine():
                     t_start = frame_num - (st_base['sd'] * st_base['ph'])
                     t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
                     st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
+
+                # ANAMORPHIC PAR FOR THIS RENDER
+                # The preview path can opt into a 1:1 render via the GUI checkbox
+                # so the user sees the un-squeezed result (matching what their NLE
+                # will produce in post). Real exposures always honor the actual PAR
+                # so the latent images on file are correctly squeezed.
+                if is_preview and preview_unsqueeze:
+                    render_par_x, render_par_y = 1.0, 1.0
+                else:
+                    render_par_x, render_par_y = par_x, par_y
 
                 # Resolve playhead positions independently for each optical layer.
                 # The ProjMag and BiPack run on separate JK printer tracks - so a job
@@ -269,7 +290,8 @@ def run_persistent_engine():
                 else:
                     bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
                     mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
-                                                        st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+                                                        st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT,
+                                                        par_x=render_par_x, par_y=render_par_y)
                     prog['mvp'].write(mvp_bp)
                     prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
                     tex_bp.use(0)
@@ -282,7 +304,8 @@ def run_persistent_engine():
                     mvp_mag = np.eye(4, dtype='f4').tobytes()
                 else:
                     mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, mag_scale,
-                                                        st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
+                                                        st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT,
+                                                        par_x=render_par_x, par_y=render_par_y)
                 
                 prog['mvp'].write(mvp_mag)
                 prog['filter_color'].write(st['pg'].astype('f4'))
@@ -390,7 +413,13 @@ def run_persistent_engine():
                 cam_proc.wait()
                 
                 if is_preview:
-                    cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip)
+                    # cam_preview path: forward the PAR + unsqueeze flag so the
+                    # captured JPG can be optionally resampled for the preview
+                    # window. The original DNG and the disk-bound latent TIFFs
+                    # are NOT touched - those must remain squeezed so downstream
+                    # NLE work has clean PAR-driven unsqueeze in post.
+                    cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip,
+                                                  par_x=par_x, par_y=par_y, preview_unsqueeze=preview_unsqueeze)
                 else:
                     tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
                     out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")

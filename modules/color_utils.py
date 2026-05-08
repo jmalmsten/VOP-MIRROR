@@ -49,7 +49,8 @@ def apply_pedestal(img_16bit, clip_val):
     img_f = np.clip(img_f - int_threshold, 0, 65535)
     return img_f.astype(np.uint16)
 
-def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, black_clip=0.0):
+def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, black_clip=0.0,
+                            par_x=1.0, par_y=1.0, preview_unsqueeze=False):
     if not os.path.exists(buffer_file): return False
 
     try:
@@ -75,6 +76,33 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
 
         gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
         img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
+
+        # ANAMORPHIC PREVIEW UNSQUEEZE
+        # Cam View has captured the squeezed HDMI screen. If the user has asked
+        # for a preview that matches what their NLE would produce, we apply the
+        # inverse of the squeeze here as a JPG-level resample. PAR > 1 means the
+        # original logical X was compressed into a smaller pixel-X span, so we
+        # stretch X back out by PAR. PAR < 1 means we stretch Y back out by 1/PAR.
+        # The latent TIFFs on disk are NOT processed here - they stay squeezed
+        # so the NLE can do the real PAR-driven unsqueeze in post production.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        # Wide-pixel case: stretch X horizontally
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        # Tall-pixel case: stretch Y vertically
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] Preview unsqueeze failed (falling back to squeezed): {e}")
+
         cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
     
     except Exception as e:
@@ -87,7 +115,6 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
         if os.path.exists(dummy): os.remove(dummy)
         
     return True
-
 def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
     if not os.path.exists(buffer_file): return False
 
