@@ -346,29 +346,25 @@ body {
     background:         var(--bg-panel);
     border:             1px solid var(--border-color);
 
-    /* Sizing strategy:
-     *   - Width: stretch to fill the col-1 grid cell, with a floor of
-     *     300px (so it doesn't crush on narrow windows) and a ceiling
-     *     of 100% (the cell width). The previous 70vh ceiling capped
-     *     the preview to a square-ish box that left a lot of empty
-     *     horizontal space inside the column.
-     *   - Height: capped at 65vh (was 50vh) so the preview occupies
-     *     a more useful portion of the viewport. The exposure sheet
-     *     sits in the next grid row directly below, so a taller
-     *     preview pushes the sheet a bit lower - that's the trade,
-     *     and it's worth it because the preview is the primary thing
-     *     the user looks at while lining up shots.
-     *   - min-height bumped from 200px to 320px so on smaller windows
-     *     the preview stays usable rather than collapsing.
+    /* Sizing strategy (revised after the first attempt overshot):
+     *   - Width: stretch to fill the col-1 grid cell, BUT capped at 1000px
+     *     absolute so on wide monitors the panel doesn't run away. The
+     *     min(1000px, 100%) idiom means "100% of the cell, but never more
+     *     than 1000px" - on narrow windows it falls back to cell width.
+     *   - Height: 55vh max (was 65vh). With #probe_img now correctly using
+     *     object-fit:contain (see its rule below) the image letterboxes
+     *     inside the panel rather than getting clipped, so the panel can
+     *     be a bit smaller and still show the full image cleanly.
+     *   - min-height stays at 320px so small windows still get a usable
+     *     preview rather than a sliver.
      *
-     * justify-self: stretch (was center) is the key change for the
-     * "less empty space around the preview" outcome - the bordered
-     * panel now fills its grid cell width, and the image inside
-     * letterboxes against object-fit:contain on #probe_img. */
+     * justify-self: stretch keeps the panel filling its cell horizontally
+     * up to the max-width ceiling, so the preview occupies a useful chunk
+     * of the column instead of being centered with empty sides. */
     min-width:          300px;
-    max-width:          100%;
+    max-width:          min(1000px, 100%);
     min-height:         320px;
-    max-height:         65vh;
+    max-height:         55vh;
 
     display:            flex;
     align-items:        center;
@@ -380,10 +376,18 @@ body {
     align-self:         start;
 }
 
-#probe_img { 
-    max-width:          100%; 
-    max-height:         100%; 
-    object-fit:         contain; 
+#probe_img {
+    /* width and height (not just max-*) are necessary for object-fit:contain
+     * to actually work. With only max-* set, the <img> takes its natural
+     * size, max-width clamps width, and height is proportional to that -
+     * which can exceed max-height and get clipped by .preview-area's
+     * overflow:hidden. Setting width/height to 100% gives the image a
+     * proper sizing rectangle (the full panel), and object-fit:contain
+     * then scales the image proportionally inside that rectangle,
+     * letterboxing instead of cropping. */
+    width:              100%;
+    height:             100%;
+    object-fit:         contain;
 }
 
 /* ############### Action & Mini Buttons ############### */
