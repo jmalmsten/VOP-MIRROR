@@ -122,7 +122,9 @@ function collectParams() {
 
 async function runTask(type) {
     await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
-    if (type === 'preview' || type === 'cam_preview') {
+    // comp_preview writes to the same /static/probe_live.jpg as the
+    // other two preview types, so it gets the same image-reload treatment.
+    if (type === 'preview' || type === 'cam_preview' || type === 'comp_preview') {
         document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
     }
 }

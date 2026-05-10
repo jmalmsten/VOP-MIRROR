@@ -321,7 +321,12 @@ def run_persistent_engine():
                 vao.render(moderngl.TRIANGLE_STRIP)
                 ctx.disable(moderngl.BLEND)
 
-            def execute_exposure(frame_num, is_preview=False):
+            def execute_exposure(frame_num, is_preview=False, is_comp_preview=False):
+                # is_preview         -> Cam Preview: capture + JPG, no commit, no composite
+                # is_comp_preview    -> Comp Preview: capture + composite-in-memory + JPG, no commit
+                # neither            -> Real exposure: capture + composite + commit to TIFF
+                # is_comp_preview takes precedence over is_preview when both are True
+                # (defensive - the caller should only set one).
                 st = timeline.get_state(frame_num)
                 smr_ms = float(st['exp']) * 1000.0
                 total_ms = smr_ms + 1000.0
@@ -412,7 +417,19 @@ def run_persistent_engine():
                 log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | HDMI sequence complete. Waiting for camera file IO.")
                 cam_proc.wait()
                 
-                if is_preview:
+                # Branch on which post-capture pipeline to run. Order matters:
+                # comp_preview is checked first so a caller that accidentally sets
+                # both flags still gets the safer (non-committing) comp behavior.
+                if is_comp_preview:
+                    # Comp Preview: in-memory composite onto any existing latent
+                    # TIFF for this frame, write JPG, do NOT commit anything to
+                    # the CamMag. PAR and unsqueeze flag forwarded for the same
+                    # reasons cam_preview forwards them.
+                    cutil.generate_comp_preview(buf_f, static_dir, cam_mag_dir,
+                                                frame_num, st['cg'], mono_active,
+                                                black_clip, par_x=par_x, par_y=par_y,
+                                                preview_unsqueeze=preview_unsqueeze)
+                elif is_preview:
                     # cam_preview path: forward the PAR + unsqueeze flag so the
                     # captured JPG can be optionally resampled for the preview
                     # window. The original DNG and the disk-bound latent TIFFs
@@ -442,6 +459,15 @@ def run_persistent_engine():
                     
                 elif task == 'cam_preview':
                     execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
+
+                elif task == 'comp_preview':
+                    # Identical hardware path to cam_preview - smear-render the
+                    # dual world while the camera captures - but route the
+                    # captured DNG through the Comp Preview pipeline so the
+                    # resulting JPG shows the new exposure additively
+                    # composited on top of any existing latent for this frame.
+                    # Nothing on disk in CamMag is altered.
+                    execute_exposure(float(job_data.get('probe_frame', 1)), is_comp_preview=True)
                 
                 elif task == 'measure_noise':
                     probe_f = float(job_data.get('probe_frame', 1))

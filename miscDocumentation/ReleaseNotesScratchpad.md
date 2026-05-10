@@ -5,6 +5,8 @@
 Added the ability to use non-square pixel aspect ratio. This is to maximize the resolution for aspect ratios that are not the same as the HDMI monitor.
 #### How to use:
 See wiki at [https://codeberg.org/jmalmsten-com/VOP/wiki/PAR-Anamorphic](https://codeberg.org/jmalmsten-com/VOP/wiki/PAR-Anamorphic)
+### Comp View button (issue #175)
+Sits next to Cam View. Behaves like Cam View — same smear-render-plus-camera-capture path — but the resulting preview JPG is the new exposure additively composited on top of whatever latent TIFF already exists in the CamMag for that frame. The latent on disk is NOT modified; this is preview-only. Use it as a viewfinder for lining up multi-pass exposures so you can verify ProjMag / BiPack / CamMag positions all land where you intended before committing with Execute Sequence.
 
 
 # V0.7.0 (20260429) Prerelease

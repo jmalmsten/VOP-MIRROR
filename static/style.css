@@ -402,6 +402,17 @@ body {
     color:              #ccc; 
 }
 
+/* Comp View button — sibling to cam_preview, slightly lighter shade
+ * so the two preview buttons read as a pair while still being
+ * distinguishable at a glance. The functional difference (Comp View
+ * does an in-memory additive composite onto the existing latent TIFF
+ * before producing the preview JPG) is the actual semantic
+ * justification for giving it its own class. */
+.action-btn.comp_preview {
+    background:         #3a3a3a;
+    color:              #ccc;
+}
+
 .action-btn.execute {
     background:         var(--color-success); 
     color:              #fff;

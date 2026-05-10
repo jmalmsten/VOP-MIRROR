@@ -115,6 +115,119 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
         if os.path.exists(dummy): os.remove(dummy)
         
     return True
+
+def generate_comp_preview(buffer_file, static_dir, cam_mag_dir, frame_num,
+                          cam_gel_rgb, mono_forced, black_clip=0.0,
+                          par_x=1.0, par_y=1.0, preview_unsqueeze=False):
+    """
+    COMP PREVIEW (issue #175)
+    Hybrid of generate_sensor_preview and process_and_stack_latent_image:
+    process the freshly captured DNG identically to a real exposure (16-bit
+    workspace, hot pixels, pedestal, mono, CG gel) AND additively composite
+    against any existing latent TIFF for this frame, THEN downscale to 8-bit
+    and write the preview JPG.
+
+    This produces a viewfinder image showing what the exposure would look
+    like if the user committed it via Execute Sequence - useful for lining
+    up multi-pass shots (ProjMag, BiPack, CamMag positions) before exposing.
+
+    CRITICAL: The existing latent TIFF in cam_mag_dir is read but NEVER
+    written back. Calling Comp Preview must be safe to spam without altering
+    a single bit of the actual latent on disk.
+
+    Why the math is done in 16-bit before downscaling to 8-bit JPG:
+    a real exposure's stack happens in 16-bit; downscaling first and then
+    adding would crush highlights and misrepresent clipping. We mirror the
+    exact path of process_and_stack_latent_image up through the cv2.add(),
+    then diverge into the JPG-write path of generate_sensor_preview.
+    """
+    if not os.path.exists(buffer_file): return False
+
+    try:
+        # --- Demosaic the raw DNG into 16-bit linear RGB ---
+        # Same call as both sibling functions, so the preview math sees the
+        # same raw data the real exposure would.
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+
+        # --- Patch defective pixels immediately (16-bit) ---
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+
+        # --- Pedestal subtraction (Noise Crusher) in 16-bit ---
+        rgb = apply_pedestal(rgb, black_clip)
+
+        # --- RGB -> BGR for OpenCV ---
+        img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+        # --- Mono Mode handled in 8-or-16 bit safe range ---
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # --- CG (Cam Gel) tint, applied in 16-bit float, clipped to uint16 ---
+        # Note: this branch matches process_and_stack_latent_image's clip
+        # range (0..65535) so the additive math below operates in the same
+        # 16-bit integer space as a real execute would.
+        gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # --- THE ACTUAL COMPOSITE (in-memory, in 16-bit) ---
+        # Look up the existing latent TIFF for THIS frame using the exact
+        # path format execute_exposure writes. If it exists, additively
+        # composite (saturated cv2.add) just like a real exposure run does.
+        # If it does not exist, the preview just shows the new exposure
+        # alone, identical to Cam Preview.
+        # We DO NOT write img back to existing_latent_file. Ever.
+        existing_latent_file = os.path.join(
+            cam_mag_dir, f"latent_{str(int(frame_num)).zfill(4)}.tif"
+        )
+        if os.path.exists(existing_latent_file):
+            existing = cv2.imread(existing_latent_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                # cv2.add saturates at the dtype max (65535 for uint16),
+                # which is the same behavior a real execute uses.
+                img = cv2.add(img, existing.astype(np.uint16))
+
+        # --- Now downscale to 8-bit for the JPG preview window ---
+        # From here onward this matches generate_sensor_preview's tail.
+        img = (img / 256.0).astype(np.uint8)
+
+        # --- Optional anamorphic preview unsqueeze (JPG-level only) ---
+        # Same logic as generate_sensor_preview - so the Comp Preview JPG
+        # respects the same Preview Unsqueeze toggle that Cam Preview does.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] Comp preview unsqueeze failed (falling back to squeezed): {e}")
+
+        # --- Write to the SAME static JPG that Cam Preview uses ---
+        # The front end reloads /static/probe_live.jpg for both preview
+        # types, so we deliberately overwrite the same file.
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+
+    except Exception as e:
+        print(f"[VOP WARNING] Comp Preview Processing Error: {e}")
+
+    finally:
+        # Clean up the DNG buffer just like the sibling functions do,
+        # so /tmp does not slowly fill with comp_preview leftovers.
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+
+    return True
+
 def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
     if not os.path.exists(buffer_file): return False
 

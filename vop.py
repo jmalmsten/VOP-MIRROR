@@ -203,6 +203,13 @@ def dispatch_engine(task_type, payload):
                 print(f"[VOP SERVER] Task {task_type} timed out.")
                 break
             time.sleep(0.1)
+        # HTTP Blocking logic for specific synchronous tasks.
+        # Forces the Flask thread to wait until engine.py processes and deletes COMMAND_FILE.
+        # comp_preview is included here for the same reason cam_preview is:
+        # the front end reloads probe_live.jpg right after the POST returns,
+        # so we must not return until the engine has actually written the JPG.
+        if task_type in ['preview', 'cam_preview', 'comp_preview']:
+            timeout = 45.0
 
 # --- FLASK ROUTES ---
 
@@ -475,6 +482,17 @@ def preview():
 def cam_preview():
     # Dispatches the hardware camera preview
     dispatch_engine('cam_preview', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/comp_preview', methods=['POST'])
+def comp_preview():
+    # Dispatches a Comp Preview: same as cam_preview (smear render +
+    # camera capture + JPG to probe_live.jpg) but in color_utils we
+    # additively composite the new exposure on top of any existing
+    # CamMag latent TIFF for this frame BEFORE writing the JPG.
+    # The existing TIFF on disk is NEVER modified - this is purely a
+    # viewfinder for lining up multi-pass exposures.
+    dispatch_engine('comp_preview', request.json)
     return jsonify({"status": "started"})
 
 @app.route('/execute', methods=['POST'])

@@ -62,6 +62,13 @@
                 <div class="probe-controls" style="margin-top:10px;">
                     <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
                     <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
+                    <!-- Comp View: like Cam View, but the JPG it shows is the new
+                    exposure ADDITIVELY COMPOSITED on top of whatever latent TIFF
+                    already exists for this frame in CamMag. The existing latent
+                    TIFF on disk is NEVER modified - this is preview-only.
+                    Use case: lining up a multi-pass shot where you want to see
+                    where the new exposure will land relative to the existing one. -->
+                    <button class="action-btn comp_preview" onclick="runTask('comp_preview')" title="Like Cam View, but composited on top of the existing latent for this frame. Does not commit.">Comp View</button>
                     <hr class="section-divider">
                     <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
                     <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
