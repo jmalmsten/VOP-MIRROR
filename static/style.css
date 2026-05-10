@@ -342,21 +342,42 @@ body {
     border-color:   var(--color-accent);
 }
 
-.preview-area { 
-    background:         var(--bg-panel); 
-    border:             1px solid var(--border-color); 
-    min-width:          300px; 
-    max-width:          70vh; 
-    min-height:         200px; 
-    max-height:         50vh; 
-    display:            flex; 
-    align-items:        center; 
-    justify-content:    center; 
-    overflow:           hidden; 
-    grid-column:        1; 
-    grid-row:           3; 
-    justify-self:       center; 
-    align-self:         start; 
+.preview-area {
+    background:         var(--bg-panel);
+    border:             1px solid var(--border-color);
+
+    /* Sizing strategy:
+     *   - Width: stretch to fill the col-1 grid cell, with a floor of
+     *     300px (so it doesn't crush on narrow windows) and a ceiling
+     *     of 100% (the cell width). The previous 70vh ceiling capped
+     *     the preview to a square-ish box that left a lot of empty
+     *     horizontal space inside the column.
+     *   - Height: capped at 65vh (was 50vh) so the preview occupies
+     *     a more useful portion of the viewport. The exposure sheet
+     *     sits in the next grid row directly below, so a taller
+     *     preview pushes the sheet a bit lower - that's the trade,
+     *     and it's worth it because the preview is the primary thing
+     *     the user looks at while lining up shots.
+     *   - min-height bumped from 200px to 320px so on smaller windows
+     *     the preview stays usable rather than collapsing.
+     *
+     * justify-self: stretch (was center) is the key change for the
+     * "less empty space around the preview" outcome - the bordered
+     * panel now fills its grid cell width, and the image inside
+     * letterboxes against object-fit:contain on #probe_img. */
+    min-width:          300px;
+    max-width:          100%;
+    min-height:         320px;
+    max-height:         65vh;
+
+    display:            flex;
+    align-items:        center;
+    justify-content:    center;
+    overflow:           hidden;
+    grid-column:        1;
+    grid-row:           3;
+    justify-self:       stretch;
+    align-self:         start;
 }
 
 #probe_img { 
