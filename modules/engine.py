@@ -248,14 +248,25 @@ def run_persistent_engine():
                     st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
 
                 # ANAMORPHIC PAR FOR THIS RENDER
-                # The preview path can opt into a 1:1 render via the GUI checkbox
-                # so the user sees the un-squeezed result (matching what their NLE
-                # will produce in post). Real exposures always honor the actual PAR
-                # so the latent images on file are correctly squeezed.
-                if is_preview and preview_unsqueeze:
-                    render_par_x, render_par_y = 1.0, 1.0
-                else:
-                    render_par_x, render_par_y = par_x, par_y
+                #
+                # Always use the real job PAR, even for previews. We used to
+                # force PAR=1.0 here when (is_preview and preview_unsqueeze)
+                # so the 1920x1080 screen-grab would already look unsqueezed.
+                # The trade-off was that at non-square PARs the rendered
+                # geometry would overflow the screen edges, silently cropping
+                # the preview - dishonest about what the eventual exposure
+                # would look like.
+                #
+                # The Proj Probe path now does its own JPG-level unsqueeze
+                # (via color_utils.unsqueeze_preview_jpg) followed by a
+                # letterbox into a camera-shaped frame, mirroring the
+                # post-processing pipeline of Cam View / Comp View / Cam
+                # Probe. So we no longer need - or want - the render-time
+                # override here.
+                #
+                # is_preview is still meaningful below: it controls the gray
+                # frustum-bounds background color in the live HDMI render.
+                render_par_x, render_par_y = par_x, par_y
 
                 # Resolve playhead positions independently for each optical layer.
                 # The ProjMag and BiPack run on separate JK printer tracks - so a job
@@ -447,12 +458,68 @@ def run_persistent_engine():
             # ---------------------------------------------------------
             try:
                 if task == 'preview':
+                    # PROJ PROBE
+                    # 1. Render the dual-world to the HDMI screen at real PAR
+                    #    (the override that used to force 1.0/1.0 here was
+                    #    removed in render_dual_world above).
+                    # 2. Read the 1920x1080 screen-grab.
+                    # 3. Apply the JPG-level unsqueeze (same helper Cam Probe
+                    #    uses, same math Cam View / Comp View have inline).
+                    # 4. Letterbox the result into a camera-shaped canvas so
+                    #    the Proj Probe JPG has the same outer shape as the
+                    #    other three preview buttons under matching settings.
+                    #
+                    # End result: the preview window shape is consistent
+                    # across all four preview buttons, and Proj Probe shows
+                    # the FULL logical frame even at non-square PARs - no
+                    # silent cropping at the screen edges.
                     render_dual_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
                     ctx.finish()
                     raw_bytes = ctx.screen.read(components=4)
                     img_data = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((HEIGHT, WIDTH, 4))
                     img_data = cv2.flip(img_data, 0)
                     img_data = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
+
+                    # Step 3: JPG-level unsqueeze. Forwards the same PAR and
+                    # toggle values that were used to render. With
+                    # preview_unsqueeze off this is a no-op pass-through.
+                    img_data = cutil.unsqueeze_preview_jpg(img_data, par_x, par_y, preview_unsqueeze)
+
+                    # Step 4: letterbox into a Cam-View-shaped canvas.
+                    # Compute target dims from cam_res and PAR using the
+                    # same formula generate_sensor_preview applies when it
+                    # builds Cam View's output. Defaults to '2028x1520' to
+                    # match the rest of the engine when cam_res is unset.
+                    cam_res_str = job_data.get('cam_res', '2028x1520')
+                    try:
+                        cw_str, ch_str = cam_res_str.lower().split('x')
+                        cam_w, cam_h = int(cw_str), int(ch_str)
+                    except (ValueError, AttributeError):
+                        # Defensive fallback - never let a malformed cam_res
+                        # crash a preview. Matches the default elsewhere.
+                        cam_w, cam_h = 2028, 1520
+
+                    # Target shape mirrors what Cam View produces under the
+                    # same PAR + unsqueeze inputs:
+                    #   - unsqueeze off  -> camera native
+                    #   - PAR > 1, on    -> wider than camera (cam_w * PAR)
+                    #   - PAR < 1, on    -> taller than camera (cam_h / PAR)
+                    target_w, target_h = cam_w, cam_h
+                    if preview_unsqueeze:
+                        try:
+                            px = float(par_x) if float(par_x) > 0 else 1.0
+                            py = float(par_y) if float(par_y) > 0 else 1.0
+                            par = px / py
+                            if abs(par - 1.0) > 1e-6:
+                                if par > 1.0:
+                                    target_w = int(round(cam_w * par))
+                                else:
+                                    target_h = int(round(cam_h / par))
+                        except Exception as e:
+                            log_audit(f"Proj Probe target-shape calc failed: {e}")
+
+                    img_data = cutil.letterbox_into(img_data, target_w, target_h)
+
                     out_file = os.path.join(static_dir, "probe_live.jpg")
                     cv2.imwrite(out_file, img_data)
                     pygame.display.flip()

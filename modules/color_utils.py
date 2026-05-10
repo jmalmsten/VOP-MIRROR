@@ -49,6 +49,97 @@ def apply_pedestal(img_16bit, clip_val):
     img_f = np.clip(img_f - int_threshold, 0, 65535)
     return img_f.astype(np.uint16)
 
+def unsqueeze_preview_jpg(img, par_x, par_y, preview_unsqueeze):
+    """
+    Apply the anamorphic preview unsqueeze to a JPG-bound image.
+
+    Used by the post-processing step of any preview pipeline that needs
+    to honor the user's Preview Unsqueeze toggle. Identical math to the
+    inline blocks in generate_sensor_preview, generate_comp_preview, and
+    vop.py's /cam_probe route - this function exists so a third copy
+    isn't added to engine.py for Proj Probe.
+
+    Behavior:
+      - If preview_unsqueeze is False, returns img unchanged.
+      - If PAR is effectively 1:1 (within 1e-6), returns img unchanged.
+      - If PAR > 1.0 (wide pixels), stretches X horizontally by PAR.
+      - If PAR < 1.0 (tall pixels), stretches Y vertically by 1/PAR.
+      - On any unexpected error, returns img unchanged with a warning
+        printed - matches the defensive fallback in the inline copies.
+
+    Why no in-place mutation: cv2.resize allocates a new array anyway,
+    and returning a value is friendlier to the call sites that may
+    chain post-processing steps.
+    """
+    if not preview_unsqueeze:
+        return img
+    try:
+        # Defensive coercion: identical to what the inline copies do,
+        # so behavior remains 1:1 if/when those callers are migrated.
+        px = float(par_x) if float(par_x) > 0 else 1.0
+        py = float(par_y) if float(par_y) > 0 else 1.0
+        par = px / py
+        if abs(par - 1.0) <= 1e-6:
+            return img  # square pixels - nothing to do
+        h, w = img.shape[:2]
+        if par > 1.0:
+            # Wide-pixel case: stretch X horizontally.
+            new_w = int(round(w * par))
+            return cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+        else:
+            # Tall-pixel case: stretch Y vertically.
+            new_h = int(round(h / par))
+            return cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+    except Exception as e:
+        print(f"[VOP WARNING] unsqueeze_preview_jpg failed (falling back to squeezed): {e}")
+        return img
+
+def letterbox_into(img, target_w, target_h, fill_bgr=(26, 26, 26)):
+    """
+    Scale `img` proportionally to fit inside a `target_w` x `target_h`
+    canvas, then center it on that canvas with letterbox/pillarbox bars.
+    Never crops; always preserves the entire source image.
+
+    Used by Proj Probe to reframe the HDMI screen-grab so its outer shape
+    matches what the camera-side previews produce - giving the user a
+    consistent preview window shape across all four probe/preview buttons.
+
+    `fill_bgr` defaults to (26, 26, 26) which matches --bg-panel from
+    style.css and the no-latent placeholder background. Pure black risks
+    visually merging with dark images; near-black gives a faint frame
+    edge so the preview boundary is always discernible.
+
+    Returns a uint8 BGR image of exactly (target_h, target_w, 3).
+    """
+    src_h, src_w = img.shape[:2]
+    if src_w <= 0 or src_h <= 0 or target_w <= 0 or target_h <= 0:
+        # Defensive: malformed inputs return the source unchanged rather
+        # than producing a zero-size canvas downstream.
+        return img
+
+    # Aspect-fit: pick the scale that fits both dimensions inside target.
+    scale = min(target_w / src_w, target_h / src_h)
+    new_w = max(1, int(round(src_w * scale)))
+    new_h = max(1, int(round(src_h * scale)))
+
+    # INTER_AREA gives sharper downscales; INTER_CUBIC is the right choice
+    # for upscale. Pick based on whether we're shrinking or growing.
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+    scaled = cv2.resize(img, (new_w, new_h), interpolation=interp)
+
+    # Build the canvas. np.full with a 3-tuple fill replicates the BGR
+    # color across all pixels in one allocation.
+    canvas = np.full((target_h, target_w, 3), 0, dtype=np.uint8)
+    canvas[:, :] = fill_bgr  # broadcast fill across H,W
+
+    # Center the scaled image on the canvas. Integer division is fine
+    # here - any 1-pixel asymmetry from rounding is invisible in practice.
+    off_y = (target_h - new_h) // 2
+    off_x = (target_w - new_w) // 2
+    canvas[off_y:off_y + new_h, off_x:off_x + new_w] = scaled
+
+    return canvas
+
 def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, black_clip=0.0,
                             par_x=1.0, par_y=1.0, preview_unsqueeze=False):
     if not os.path.exists(buffer_file): return False
