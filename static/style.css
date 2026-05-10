@@ -346,33 +346,27 @@ body {
     background:         var(--bg-panel);
     border:             1px solid var(--border-color);
 
-    /* Sizing strategy (revised after the first attempt overshot):
-     *   - Width: stretch to fill the col-1 grid cell, BUT capped at 1000px
-     *     absolute so on wide monitors the panel doesn't run away. The
-     *     min(1000px, 100%) idiom means "100% of the cell, but never more
-     *     than 1000px" - on narrow windows it falls back to cell width.
-     *   - Height: 55vh max (was 65vh). With #probe_img now correctly using
-     *     object-fit:contain (see its rule below) the image letterboxes
-     *     inside the panel rather than getting clipped, so the panel can
-     *     be a bit smaller and still show the full image cleanly.
-     *   - min-height stays at 320px so small windows still get a usable
-     *     preview rather than a sliver.
-     *
-     * justify-self: stretch keeps the panel filling its cell horizontally
-     * up to the max-width ceiling, so the preview occupies a useful chunk
-     * of the column instead of being centered with empty sides. */
+    /* Sizing strategy:
+     *   - Width: auto, capped at 70vh. The panel sizes to its content
+     *     (the image, which has aspect ratio governed by camera/PAR).
+     *     The 70vh cap (using vh deliberately, not vw) gives a width
+     *     ceiling that scales with screen size and produces a roughly
+     *     1.4:1 maximum panel - comfortable for the camera's ~4:3
+     *     aspect and most anamorphic ratios.
+     *   - Height: a RESOLVED height, not max-height. This is the
+     *     critical bit: #probe_img's height:100% only computes
+     *     correctly if the parent has a resolved height. With just
+     *     max-height, the panel sized itself to the image's natural
+     *     height, clamped, and overflow:hidden cropped the rest.
+     *     Using `height: 50vh` keeps the panel at a definite size
+     *     regardless of the image inside, so object-fit:contain on
+     *     the image works as expected and letterboxes instead of
+     *     cropping.
+     *   - min-* values are safety floors for short/narrow viewports. */
     min-width:          300px;
-    max-width:          min(1000px, 100%);
+    max-width:          70vh;
     min-height:         320px;
-    /* height (not max-height) so the panel has a RESOLVED size that
-     * #probe_img's height:100% can actually compute against. With only
-     * a max-height, the flex container would size to its content (the
-     * image's natural height), clamp at max-height, and overflow:hidden
-     * would crop the part that didn't fit - which is the bug we kept
-     * hitting. Definitive height -> object-fit:contain works as expected
-     * and the image letterboxes inside the panel instead of being
-     * cropped. min-height stays as a safety floor for short viewports. */
-    height:             55vh;
+    height:             50vh;
 
     display:            flex;
     align-items:        center;
@@ -380,7 +374,7 @@ body {
     overflow:           hidden;
     grid-column:        1;
     grid-row:           3;
-    justify-self:       stretch;
+    justify-self:       center;
     align-self:         start;
 }
 
