@@ -132,36 +132,23 @@ async function runTask(type) {
 /* Cam Probe: read the existing latent TIFF for the current probe frame
  * from CamMag, convert to JPG, and show it in the preview window.
  *
- * Unlike runTask(), Cam Probe can legitimately get a "no such latent"
- * response when the frame hasn't been exposed yet. In that case we
- * deliberately do NOT reload probe_live.jpg - leaving the previous
- * preview on screen is less jarring than blanking it. We just log the
- * outcome so it's visible from the browser console.
+ * If no latent exists for this frame, the backend writes a clearly-marked
+ * placeholder JPG to probe_live.jpg instead - so from the frontend's
+ * perspective Cam Probe always succeeds and always produces a fresh JPG.
+ * That keeps this handler trivially shaped: post, then cache-bust.
  *
  * Cam Probe runs as a plain Flask request (no engine dispatch) so it's
  * fast and works even while the engine is busy with a long Execute job.
  */
 async function runCamProbe() {
-    const response = await fetch('/cam_probe', {
+    await fetch('/cam_probe', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(collectParams())
     });
-
-    if (response.ok) {
-        // Cache-bust the preview image so the browser fetches the freshly
-        // written JPG instead of serving the stale one.
-        document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
-    } else if (response.status === 404) {
-        // 404 = no latent exists for this frame yet. Leave the existing
-        // preview alone, but surface a clear console message so it's
-        // obvious why nothing visible changed.
-        const body = await response.json().catch(() => ({}));
-        console.log(`[VOP UI] Cam Probe: no latent at frame ${body.frame ?? '?'} (frame not yet exposed)`);
-    } else {
-        // Any other status is unexpected - log it for debugging.
-        console.warn(`[VOP UI] Cam Probe unexpected status: ${response.status}`);
-    }
+    // Cache-bust the preview image so the browser fetches the freshly
+    // written JPG instead of serving the stale one.
+    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
 }
 
 function panic() { 

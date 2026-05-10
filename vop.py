@@ -532,13 +532,91 @@ def cam_probe():
     static_dir = os.path.join(BASE_DIR, "static")
     out_jpg = os.path.join(static_dir, "probe_live.jpg")
 
-    # If there's no latent for this frame yet, return a clear status so the
-    # UI can decide what to do. We deliberately do NOT touch probe_live.jpg
-    # in this case - leaving the previous preview visible is friendlier
-    # than blanking the window or showing a placeholder.
+    # No latent for this frame - write a placeholder JPG so the user gets
+    # an unambiguous visual answer rather than a stale preview from a
+    # previous click.
+    #
+    # Why we write a JPG here instead of returning 404 and letting the
+    # frontend handle it: keeping ALL preview state in probe_live.jpg
+    # means the frontend pipeline is uniform (post -> reload JPG) for
+    # every preview button. The user also gets the frame number baked
+    # into the placeholder so there's zero ambiguity about which frame
+    # they're being told is empty.
+    #
+    # Generated on the fly rather than served as a static asset because
+    # we want the frame number IN the image. A pre-rendered "NO LATENT"
+    # PNG couldn't communicate that.
     if not os.path.exists(latent_file):
-        print(f"[VOP SERVER] CAM PROBE: no latent at frame {frame_num}")
-        return jsonify({"status": "no_latent", "frame": frame_num}), 404
+        print(f"[VOP SERVER] CAM PROBE: no latent at frame {frame_num} - writing placeholder")
+        try:
+            # Match Proj Probe's dimensions (1920x1080) so the placeholder
+            # scales identically in the preview panel. The probe_img CSS
+            # uses object-fit:contain so source dimensions don't really
+            # affect display size, but matching keeps things tidy.
+            ph_w, ph_h = 1920, 1080
+
+            # Background: very dark gray (BGR), close to --bg-panel from
+            # style.css. Pure black would be visually indistinguishable
+            # from a real latent that's mostly underexposed; the slight
+            # gray makes "this is a system message, not your data" read.
+            placeholder = np.full((ph_h, ph_w, 3), 26, dtype=np.uint8)  # 26,26,26 BGR
+
+            # Headline: "NO LATENT" in a muted red/orange. We use the
+            # cv2 built-in Hershey font so we don't need to introduce a
+            # PIL/Pillow dependency just for this placeholder.
+            headline = "NO LATENT"
+            sub = f"Frame {frame_num}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+
+            # Sizing chosen so both lines read clearly when the 1920x1080
+            # placeholder is scaled down to fit the preview panel. Tuned
+            # by eye - bump these if the panel is small on your display.
+            head_scale, head_thick = 5.0, 12
+            sub_scale,  sub_thick  = 3.0, 6
+
+            # Measure text so we can center it horizontally. cv2.getTextSize
+            # returns ((width, height), baseline).
+            (hw, hh), _ = cv2.getTextSize(headline, font, head_scale, head_thick)
+            (sw, sh), _ = cv2.getTextSize(sub,      font, sub_scale,  sub_thick)
+
+            # Vertical layout: stack the two lines around the vertical
+            # center with a comfortable gap. cv2.putText anchors text by
+            # its baseline (bottom-left), which is why the y values look
+            # like they're below center - they account for text height.
+            gap = 80
+            total_h = hh + gap + sh
+            head_y = (ph_h - total_h) // 2 + hh
+            sub_y  = head_y + gap + sh
+
+            head_x = (ph_w - hw) // 2
+            sub_x  = (ph_w - sw) // 2
+
+            # Headline color: muted red/orange (BGR). Picks up the same
+            # warning-feel as --color-warning in style.css without being
+            # alarming-emergency-red. The color also can't naturally
+            # appear in a latent (which would be tinted by CG gel from
+            # the user's job, not a system-chosen accent).
+            cv2.putText(placeholder, headline, (head_x, head_y),
+                        font, head_scale, (60, 110, 230), head_thick, cv2.LINE_AA)
+
+            # Sub-line: lighter gray, informational. Carries the frame
+            # number so the user knows exactly which frame is empty -
+            # critical when probe_frame may have changed since last click.
+            cv2.putText(placeholder, sub, (sub_x, sub_y),
+                        font, sub_scale, (170, 170, 170), sub_thick, cv2.LINE_AA)
+
+            # Write to the same JPG every other preview type uses, so
+            # the frontend's image-reload handler picks it up unchanged.
+            cv2.imwrite(out_jpg, placeholder)
+
+            # Return 200 + a placeholder marker. The marker isn't used
+            # by the current frontend (it just reloads the JPG either
+            # way) but is here as a hook for future features.
+            return jsonify({"status": "ok", "frame": frame_num, "placeholder": True})
+
+        except Exception as e:
+            print(f"[VOP SERVER] CAM PROBE placeholder error: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     try:
         # Read the 16-bit linear BGR latent off disk untouched.
