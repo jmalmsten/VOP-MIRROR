@@ -31,11 +31,17 @@
 # 0. clear the screen
 clear
 
-# 1. Fetch from git to make sure the local copy knows of any changes.
+# 1. Stop the current VOP if it's running.
+sudo systemctl stop vop
+
+# 2. Fetch from git to make sure the local copy knows of any changes.
 git fetch --all
 
 # 2. Pull the latest nightly commit
 git pull origin nightly
 
-# 3. Run the VOP
-./run_vop.sh
+# 3. run the VOP as a service daemon
+sudo systemctl start vop
+
+# 4. Show the logs
+journalctl -u vop -f
