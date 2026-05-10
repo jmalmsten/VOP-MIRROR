@@ -364,7 +364,15 @@ body {
     min-width:          300px;
     max-width:          min(1000px, 100%);
     min-height:         320px;
-    max-height:         55vh;
+    /* height (not max-height) so the panel has a RESOLVED size that
+     * #probe_img's height:100% can actually compute against. With only
+     * a max-height, the flex container would size to its content (the
+     * image's natural height), clamp at max-height, and overflow:hidden
+     * would crop the part that didn't fit - which is the bug we kept
+     * hitting. Definitive height -> object-fit:contain works as expected
+     * and the image letterboxes inside the panel instead of being
+     * cropped. min-height stays as a safety floor for short viewports. */
+    height:             55vh;
 
     display:            flex;
     align-items:        center;
