@@ -515,15 +515,68 @@ def cam_probe():
     """
     print("[VOP SERVER] ACTION: CAM PROBE")
 
-    # Pull the probe frame number from the posted body, same shape the other
+   # Pull the probe frame number from the posted body, same shape the other
     # preview routes receive. Default to 1 if missing/garbled.
+    #
+    # Also pull PAR (par_x, par_y) and the preview_unsqueeze toggle so Cam
+    # Probe can mirror the anamorphic-aware behavior of Cam View / Comp View.
+    # Without these, toggling between the preview buttons would cause the
+    # preview window to alternate between unsqueezed (looks right) and
+    # squeezed (looks ovally), which defeats the whole point of having a
+    # PAR system in the first place.
     try:
         data = request.json or {}
-        # The collectParams() shipping side may send this as a string -
-        # int() coerces both numeric and string inputs cleanly.
+        # The collectParams() shipping side may send numbers as strings -
+        # int(float(...)) coerces both numeric and string inputs cleanly.
         frame_num = int(float(data.get('probe_frame', 1)))
     except (TypeError, ValueError):
         frame_num = 1
+
+    # PAR + unsqueeze - parsed defensively. If anything is malformed we
+    # silently fall back to 1.0 / False, which is identical to non-anamorphic
+    # behavior. We never want a malformed PAR field to blow up Cam Probe.
+    try:
+        par_x = float(data.get('par_x', 1.0) or 1.0)
+        par_y = float(data.get('par_y', 1.0) or 1.0)
+    except (TypeError, ValueError):
+        par_x, par_y = 1.0, 1.0
+    preview_unsqueeze = bool(data.get('preview_unsqueeze', False))
+
+    # ANAMORPHIC PREVIEW UNSQUEEZE - inline helper.
+    # Mirrors the unsqueeze logic in color_utils.generate_sensor_preview and
+    # generate_comp_preview verbatim, so Cam Probe produces the same JPG
+    # dimensions those functions would for the same PAR settings. The visual
+    # consistency between the four preview buttons depends on this matching.
+    #
+    # NOTE: this is duplicated from color_utils. A future cleanup could
+    # extract a single helper (perhaps color_utils.unsqueeze_preview_jpg)
+    # and have all three callers use it. Not doing it now to keep the
+    # blast radius of this Cam Probe fix small and avoid touching the two
+    # working preview functions on the brink of a release.
+    def _maybe_unsqueeze(img):
+        if not preview_unsqueeze:
+            return img
+        try:
+            px = par_x if par_x > 0 else 1.0
+            py = par_y if par_y > 0 else 1.0
+            par = px / py
+            if abs(par - 1.0) <= 1e-6:
+                return img  # square pixels - nothing to do
+            h, w = img.shape[:2]
+            if par > 1.0:
+                # Wide-pixel case: stretch X horizontally.
+                new_w = int(round(w * par))
+                return cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+            else:
+                # Tall-pixel case: stretch Y vertically.
+                new_h = int(round(h / par))
+                return cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+        except Exception as e:
+            # Fall back to the squeezed image rather than failing the
+            # whole probe - matches the same defensive behavior in
+            # color_utils.generate_sensor_preview.
+            print(f"[VOP SERVER] Cam Probe unsqueeze failed (falling back to squeezed): {e}")
+            return img
 
     # Build the path using the SAME filename format execute_exposure writes
     # ("latent_NNNN.tif" with 4-digit zero-padding). If we drift from that
@@ -605,8 +658,13 @@ def cam_probe():
             cv2.putText(placeholder, sub, (sub_x, sub_y),
                         font, sub_scale, (170, 170, 170), sub_thick, cv2.LINE_AA)
 
-            # Write to the same JPG every other preview type uses, so
-            # the frontend's image-reload handler picks it up unchanged.
+            # Unsqueeze the placeholder too, so the preview panel
+            # dimensions stay stable as the user cycles between frames
+            # with and without latents. Without this, landing on a
+            # no-latent frame would visually "jump" the panel back to
+            # the squeezed aspect ratio - the exact unsteady cue the
+            # Preview Unsqueeze toggle is supposed to eliminate.
+            placeholder = _maybe_unsqueeze(placeholder)
             cv2.imwrite(out_jpg, placeholder)
 
             # Return 200 + a placeholder marker. The marker isn't used
@@ -637,9 +695,10 @@ def cam_probe():
             # (legacy job, hand-edited TIFF, etc), just pass it through.
             img8 = img
 
-        # Write to the same JPG the rest of the preview pipeline uses.
-        # The front end's image-reload handler is unchanged - it just
-        # busts the cache on probe_live.jpg.
+        # Apply preview unsqueeze BEFORE writing the JPG, so the final
+        # file on disk is what the user sees. This matches the order of
+        # operations in color_utils.generate_sensor_preview.
+        img8 = _maybe_unsqueeze(img8)
         cv2.imwrite(out_jpg, img8)
 
         return jsonify({"status": "ok", "frame": frame_num})
