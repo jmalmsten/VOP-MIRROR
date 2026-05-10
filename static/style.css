@@ -413,6 +413,36 @@ body {
     color:              #ccc;
 }
 
+/* Probe / Preview button cluster - 2x2 grid.
+ * Sits inside .probe-controls alongside the (non-grid) section divider
+ * and the Execute Sequence button, so the grid is scoped to its own
+ * wrapper div rather than applied to .probe-controls itself.
+ *
+ * grid-template-columns: 1fr 1fr  -> two equal-width columns
+ * gap                               -> small breathing room between cells;
+ *                                      same value as a button's padding
+ *                                      so the visual rhythm matches.
+ *
+ * The .action-btn rule already sets width:100%, so each button cell
+ * stretches to fill its grid column without further intervention. */
+.probe-grid {
+    display:                grid;
+    grid-template-columns:  1fr 1fr;
+    gap:                    8px;
+}
+
+/* Cam Probe button - paired visually with Proj Probe.
+ * Proj Probe has no class override so it inherits the default
+ * .action-btn coloring (var(--color-accent) on var(--text-dark) - the
+ * cyan/teal). We re-state those tokens explicitly here so Cam Probe
+ * tracks the same accent color, and so a future reader doesn't have
+ * to chase the inheritance chain to understand why these two buttons
+ * match. If --color-accent is ever rebranded, both buttons follow. */
+.action-btn.cam_probe {
+    background:         var(--color-accent);
+    color:              var(--text-dark);
+}
+
 .action-btn.execute {
     background:         var(--color-success); 
     color:              #fff;

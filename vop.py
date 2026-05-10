@@ -39,6 +39,7 @@ import glob
 import math
 import socket
 import time
+import numpy as np  # for 16-bit → 8-bit reduction in /cam_probe
 from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
 
 # Append the modules directory to the system path for local imports
@@ -494,6 +495,80 @@ def comp_preview():
     # viewfinder for lining up multi-pass exposures.
     dispatch_engine('comp_preview', request.json)
     return jsonify({"status": "started"})
+
+@app.route('/cam_probe', methods=['POST'])
+def cam_probe():
+    """
+    CAM PROBE
+    Reads the existing latent TIFF for the current probe frame from CamMag,
+    converts it to an 8-bit JPG, and writes it to static/probe_live.jpg so
+    the GUI's preview window can show it.
+
+    This is a pure file-read/convert operation - no smear render, no camera
+    capture, no engine dispatch. It runs in the Flask request thread, which
+    means it's also safe to call while a long Execute job is in flight; we
+    just read whatever the latent currently looks like.
+
+    The bit-depth reduction matches the other preview paths (img / 256.0)
+    so Cam Probe and Cam Preview produce visually comparable JPGs - both
+    are 8-bit linear-light samples of the same 16-bit linear data.
+    """
+    print("[VOP SERVER] ACTION: CAM PROBE")
+
+    # Pull the probe frame number from the posted body, same shape the other
+    # preview routes receive. Default to 1 if missing/garbled.
+    try:
+        data = request.json or {}
+        # The collectParams() shipping side may send this as a string -
+        # int() coerces both numeric and string inputs cleanly.
+        frame_num = int(float(data.get('probe_frame', 1)))
+    except (TypeError, ValueError):
+        frame_num = 1
+
+    # Build the path using the SAME filename format execute_exposure writes
+    # ("latent_NNNN.tif" with 4-digit zero-padding). If we drift from that
+    # format here, Cam Probe will silently read the wrong frame or nothing.
+    latent_file = os.path.join(CAM_MAG_DIR, f"latent_{str(frame_num).zfill(4)}.tif")
+    static_dir = os.path.join(BASE_DIR, "static")
+    out_jpg = os.path.join(static_dir, "probe_live.jpg")
+
+    # If there's no latent for this frame yet, return a clear status so the
+    # UI can decide what to do. We deliberately do NOT touch probe_live.jpg
+    # in this case - leaving the previous preview visible is friendlier
+    # than blanking the window or showing a placeholder.
+    if not os.path.exists(latent_file):
+        print(f"[VOP SERVER] CAM PROBE: no latent at frame {frame_num}")
+        return jsonify({"status": "no_latent", "frame": frame_num}), 404
+
+    try:
+        # Read the 16-bit linear BGR latent off disk untouched.
+        # IMREAD_UNCHANGED preserves bit depth and channel count.
+        img = cv2.imread(latent_file, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return jsonify({"status": "read_failed", "frame": frame_num}), 500
+
+        # Downscale 16-bit -> 8-bit using the same /256.0 reduction as the
+        # sibling preview functions in color_utils.py. This intentionally
+        # leaves the data in linear light so the visual character matches
+        # the other preview JPGs (they'll all look uniformly "dark on a
+        # sRGB monitor" - that's expected and consistent across previews).
+        if img.dtype == np.uint16:
+            img8 = (img / 256.0).astype(np.uint8)
+        else:
+            # Defensive branch: if for some reason the file isn't uint16
+            # (legacy job, hand-edited TIFF, etc), just pass it through.
+            img8 = img
+
+        # Write to the same JPG the rest of the preview pipeline uses.
+        # The front end's image-reload handler is unchanged - it just
+        # busts the cache on probe_live.jpg.
+        cv2.imwrite(out_jpg, img8)
+
+        return jsonify({"status": "ok", "frame": frame_num})
+
+    except Exception as e:
+        print(f"[VOP SERVER] CAM PROBE error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/execute', methods=['POST'])
 def execute_seq():
