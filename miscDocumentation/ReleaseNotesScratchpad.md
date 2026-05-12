@@ -1,6 +1,8 @@
 # V0.7.1 (20260511)
 ## Notes:
 ## Added: 
+### Rotation Order setting (dropdown menu)
+In order to control which axis rotates before which other axis, I added a dropdown menu that allows you to choose which of the 6 permutations that are possible. This is a per job constant for now. 
 ### Anamorphic / Non-square Pixel Aspect Ratio (PAR)
 Added the ability to use non-square pixel aspect ratio. This is to maximize the resolution for aspect ratios that are not the same as the HDMI monitor.
 #### How to use:

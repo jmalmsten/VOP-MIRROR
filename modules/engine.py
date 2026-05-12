@@ -228,6 +228,13 @@ def run_persistent_engine():
             par_x = float(job_data.get('par_x', 1.0) or 1.0)
             par_y = float(job_data.get('par_y', 1.0) or 1.0)
             preview_unsqueeze = bool(job_data.get('preview_unsqueeze', False))
+            
+            # Rotation order for Euler -> matrix composition. The string
+            # is "XYZ", "ZYX", etc. — see vop_math.get_frustum_fit_matrix
+            # for the full mapping. Default "XYZ" reproduces the original
+            # hardcoded Z*Y*X behavior exactly, so jobs saved before this
+            # feature existed render identically.
+            rot_order = job_data.get('rot_order', 'XYZ')
 
             # Announce rendering state to the UI via the heartbeat file
             with open("/tmp/vop_heartbeat", "w") as hbf:
@@ -302,7 +309,8 @@ def run_persistent_engine():
                     bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
                     mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
                                                         st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT,
-                                                        par_x=render_par_x, par_y=render_par_y)
+                                                        par_x=render_par_x, par_y=render_par_y,
+                                                        rot_order=rot_order)
                     prog['mvp'].write(mvp_bp)
                     prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
                     tex_bp.use(0)
@@ -316,7 +324,8 @@ def run_persistent_engine():
                 else:
                     mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, mag_scale,
                                                         st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT,
-                                                        par_x=render_par_x, par_y=render_par_y)
+                                                        par_x=render_par_x, par_y=render_par_y,
+                                                        rot_order=rot_order)
                 
                 prog['mvp'].write(mvp_mag)
                 prog['filter_color'].write(st['pg'].astype('f4'))

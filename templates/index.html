@@ -136,7 +136,15 @@
                     <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>
                     <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
                     <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
-<div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                    <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                    <div class="const-group"><label>Rotation Order</label><select id="rot_order" onchange="triggerSync()" title="Order in which the three Euler axes are applied. Read left-to-right: leftmost axis is applied first (innermost / local-axis spin), rightmost is applied last (outermost / dominant sweep). XYZ is the conventional default and matches the previous hardcoded behavior.">
+                        <option value="XYZ" selected>XYZ (Pitch → Roll → Yaw)</option>
+                        <option value="XZY">XZY (Pitch → Yaw → Roll)</option>
+                        <option value="YXZ">YXZ (Roll → Pitch → Yaw)</option>
+                        <option value="YZX">YZX (Roll → Yaw → Pitch)</option>
+                        <option value="ZXY">ZXY (Yaw → Pitch → Roll)</option>
+                        <option value="ZYX">ZYX (Yaw → Roll → Pitch)</option>
+                    </select></div>
                     <hr class="section-divider">
 
                     <!-- ANAMORPHIC PIXEL ASPECT RATIO

@@ -34,8 +34,10 @@ import numpy as np
 from pyrr import Matrix44
 
 
-def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_rot, local_pos, local_rot, width, height, par_x=1.0, par_y=1.0):
-    # 1. Perspective Projection Matrix
+# Added rot_order parameter. Defaults to "XYZ" which reproduces the
+# previous hardcoded Z*Y*X composition exactly — so old jobs render
+# identically when rot_order is absent.
+def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_rot, local_pos, local_rot, width, height, par_x=1.0, par_y=1.0, rot_order="XYZ"):    # 1. Perspective Projection Matrix
     # Defines the viewing volume based on the active FOV.
     proj = Matrix44.perspective_projection(float(fov), width/height, 0.1, 1000.0)
     
@@ -73,18 +75,65 @@ def get_frustum_fit_matrix(fov, aspect_ratio, world_scale, master_pos, master_ro
     scale_mat = Matrix44.from_scale([s_x, s_y, s_z])
     
     # 3. Child Transform (Local Smear Space)
+    # Build per-axis rotation matrices for the local transform. The tuple
+    # local_rot is (pitch, roll, yaw) = (X, Y, Z), with 1.0 meaning a full
+    # 360° rotation around that axis.
     loc_rot_x = Matrix44.from_x_rotation(np.radians(float(local_rot[0]) * 360.0))
     loc_rot_y = Matrix44.from_y_rotation(np.radians(float(local_rot[1]) * 360.0))
     loc_rot_z = Matrix44.from_z_rotation(np.radians(float(local_rot[2]) * 360.0))
     loc_trans = Matrix44.from_translation(local_pos)
-    local_mat = loc_trans * (loc_rot_z * loc_rot_y * loc_rot_x)
     
     # 4. Parent Transform (Global Master Space)
+    # Same axis matrices, but for the master (parent) frame. Built up the
+    # same way; the only difference between local and master is which
+    # position/rotation tuple feeds them and which gets multiplied first
+    # in step 5.
     mst_rot_x = Matrix44.from_x_rotation(np.radians(float(master_rot[0]) * 360.0))
     mst_rot_y = Matrix44.from_y_rotation(np.radians(float(master_rot[1]) * 360.0))
     mst_rot_z = Matrix44.from_z_rotation(np.radians(float(master_rot[2]) * 360.0))
     mst_trans = Matrix44.from_translation(master_pos)
-    master_mat = mst_trans * (mst_rot_z * mst_rot_y * mst_rot_x)
+    
+    # 4b. Rotation Order Composition
+    # The rot_order string (e.g. "XYZ", "ZYX") is read left-to-right as
+    # "first axis applied to the vertex, then second, then third" — this
+    # is the Maya/Blender/glTF convention. In matrix math, "applied first
+    # to a vertex" means the RIGHTMOST factor in the product, because
+    # transforms compose right-to-left when multiplied onto a column
+    # vector. So "XYZ" -> Z * Y * X, "ZYX" -> X * Y * Z, etc.
+    #
+    # We sanitize the input: uppercase it, then fall back to "XYZ" if it
+    # isn't one of the six valid permutations. This means malformed or
+    # missing rot_order values cleanly reproduce the original behavior
+    # rather than crashing mid-render.
+    order = (rot_order or "XYZ").upper()
+    valid_orders = {"XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"}
+    if order not in valid_orders:
+        order = "XYZ"
+    
+    # Lookup tables keyed by the user-facing order string. The value is a
+    # function that takes the three axis matrices (x, y, z) and returns
+    # the composed rotation in the matrix-multiplication order needed to
+    # achieve that read-order. Using lambdas keeps this declarative and
+    # easy to verify against the table in the source comments above.
+    loc_compose = {
+        "XYZ": lambda x, y, z: z * y * x,  # apply X first, then Y, then Z
+        "XZY": lambda x, y, z: y * z * x,  # apply X first, then Z, then Y
+        "YXZ": lambda x, y, z: z * x * y,  # apply Y first, then X, then Z
+        "YZX": lambda x, y, z: x * z * y,  # apply Y first, then Z, then X
+        "ZXY": lambda x, y, z: y * x * z,  # apply Z first, then X, then Y
+        "ZYX": lambda x, y, z: x * y * z,  # apply Z first, then Y, then X
+    }
+    
+    # Compose the local and master rotation matrices using the same
+    # rotation order for both. The local and master frames share the
+    # rot_order setting — there is only one project-wide setting; it
+    # would be confusing if the parent and child interpreted Euler
+    # tuples differently.
+    local_rot_mat = loc_compose[order](loc_rot_x, loc_rot_y, loc_rot_z)
+    master_rot_mat = loc_compose[order](mst_rot_x, mst_rot_y, mst_rot_z)
+    
+    local_mat = loc_trans * local_rot_mat
+    master_mat = mst_trans * master_rot_mat
     
     # 5. Model Matrix Compilation & Final MVP
     model_mat = master_mat * local_mat * scale_mat
