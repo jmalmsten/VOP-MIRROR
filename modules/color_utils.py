@@ -49,7 +49,99 @@ def apply_pedestal(img_16bit, clip_val):
     img_f = np.clip(img_f - int_threshold, 0, 65535)
     return img_f.astype(np.uint16)
 
-def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, black_clip=0.0):
+def unsqueeze_preview_jpg(img, par_x, par_y, preview_unsqueeze):
+    """
+    Apply the anamorphic preview unsqueeze to a JPG-bound image.
+
+    Used by the post-processing step of any preview pipeline that needs
+    to honor the user's Preview Unsqueeze toggle. Identical math to the
+    inline blocks in generate_sensor_preview, generate_comp_preview, and
+    vop.py's /cam_probe route - this function exists so a third copy
+    isn't added to engine.py for Proj Probe.
+
+    Behavior:
+      - If preview_unsqueeze is False, returns img unchanged.
+      - If PAR is effectively 1:1 (within 1e-6), returns img unchanged.
+      - If PAR > 1.0 (wide pixels), stretches X horizontally by PAR.
+      - If PAR < 1.0 (tall pixels), stretches Y vertically by 1/PAR.
+      - On any unexpected error, returns img unchanged with a warning
+        printed - matches the defensive fallback in the inline copies.
+
+    Why no in-place mutation: cv2.resize allocates a new array anyway,
+    and returning a value is friendlier to the call sites that may
+    chain post-processing steps.
+    """
+    if not preview_unsqueeze:
+        return img
+    try:
+        # Defensive coercion: identical to what the inline copies do,
+        # so behavior remains 1:1 if/when those callers are migrated.
+        px = float(par_x) if float(par_x) > 0 else 1.0
+        py = float(par_y) if float(par_y) > 0 else 1.0
+        par = px / py
+        if abs(par - 1.0) <= 1e-6:
+            return img  # square pixels - nothing to do
+        h, w = img.shape[:2]
+        if par > 1.0:
+            # Wide-pixel case: stretch X horizontally.
+            new_w = int(round(w * par))
+            return cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+        else:
+            # Tall-pixel case: stretch Y vertically.
+            new_h = int(round(h / par))
+            return cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+    except Exception as e:
+        print(f"[VOP WARNING] unsqueeze_preview_jpg failed (falling back to squeezed): {e}")
+        return img
+
+def letterbox_into(img, target_w, target_h, fill_bgr=(26, 26, 26)):
+    """
+    Scale `img` proportionally to fit inside a `target_w` x `target_h`
+    canvas, then center it on that canvas with letterbox/pillarbox bars.
+    Never crops; always preserves the entire source image.
+
+    Used by Proj Probe to reframe the HDMI screen-grab so its outer shape
+    matches what the camera-side previews produce - giving the user a
+    consistent preview window shape across all four probe/preview buttons.
+
+    `fill_bgr` defaults to (26, 26, 26) which matches --bg-panel from
+    style.css and the no-latent placeholder background. Pure black risks
+    visually merging with dark images; near-black gives a faint frame
+    edge so the preview boundary is always discernible.
+
+    Returns a uint8 BGR image of exactly (target_h, target_w, 3).
+    """
+    src_h, src_w = img.shape[:2]
+    if src_w <= 0 or src_h <= 0 or target_w <= 0 or target_h <= 0:
+        # Defensive: malformed inputs return the source unchanged rather
+        # than producing a zero-size canvas downstream.
+        return img
+
+    # Aspect-fit: pick the scale that fits both dimensions inside target.
+    scale = min(target_w / src_w, target_h / src_h)
+    new_w = max(1, int(round(src_w * scale)))
+    new_h = max(1, int(round(src_h * scale)))
+
+    # INTER_AREA gives sharper downscales; INTER_CUBIC is the right choice
+    # for upscale. Pick based on whether we're shrinking or growing.
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+    scaled = cv2.resize(img, (new_w, new_h), interpolation=interp)
+
+    # Build the canvas. np.full with a 3-tuple fill replicates the BGR
+    # color across all pixels in one allocation.
+    canvas = np.full((target_h, target_w, 3), 0, dtype=np.uint8)
+    canvas[:, :] = fill_bgr  # broadcast fill across H,W
+
+    # Center the scaled image on the canvas. Integer division is fine
+    # here - any 1-pixel asymmetry from rounding is invisible in practice.
+    off_y = (target_h - new_h) // 2
+    off_x = (target_w - new_w) // 2
+    canvas[off_y:off_y + new_h, off_x:off_x + new_w] = scaled
+
+    return canvas
+
+def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, black_clip=0.0,
+                            par_x=1.0, par_y=1.0, preview_unsqueeze=False):
     if not os.path.exists(buffer_file): return False
 
     try:
@@ -75,6 +167,33 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
 
         gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
         img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
+
+        # ANAMORPHIC PREVIEW UNSQUEEZE
+        # Cam View has captured the squeezed HDMI screen. If the user has asked
+        # for a preview that matches what their NLE would produce, we apply the
+        # inverse of the squeeze here as a JPG-level resample. PAR > 1 means the
+        # original logical X was compressed into a smaller pixel-X span, so we
+        # stretch X back out by PAR. PAR < 1 means we stretch Y back out by 1/PAR.
+        # The latent TIFFs on disk are NOT processed here - they stay squeezed
+        # so the NLE can do the real PAR-driven unsqueeze in post production.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        # Wide-pixel case: stretch X horizontally
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        # Tall-pixel case: stretch Y vertically
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] Preview unsqueeze failed (falling back to squeezed): {e}")
+
         cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
     
     except Exception as e:
@@ -86,6 +205,118 @@ def generate_sensor_preview(buffer_file, static_dir, cam_gel_rgb, mono_forced, b
         dummy = buffer_file.replace(".dng", ".jpg")
         if os.path.exists(dummy): os.remove(dummy)
         
+    return True
+
+def generate_comp_preview(buffer_file, static_dir, cam_mag_dir, frame_num,
+                          cam_gel_rgb, mono_forced, black_clip=0.0,
+                          par_x=1.0, par_y=1.0, preview_unsqueeze=False):
+    """
+    COMP PREVIEW (issue #175)
+    Hybrid of generate_sensor_preview and process_and_stack_latent_image:
+    process the freshly captured DNG identically to a real exposure (16-bit
+    workspace, hot pixels, pedestal, mono, CG gel) AND additively composite
+    against any existing latent TIFF for this frame, THEN downscale to 8-bit
+    and write the preview JPG.
+
+    This produces a viewfinder image showing what the exposure would look
+    like if the user committed it via Execute Sequence - useful for lining
+    up multi-pass shots (ProjMag, BiPack, CamMag positions) before exposing.
+
+    CRITICAL: The existing latent TIFF in cam_mag_dir is read but NEVER
+    written back. Calling Comp Preview must be safe to spam without altering
+    a single bit of the actual latent on disk.
+
+    Why the math is done in 16-bit before downscaling to 8-bit JPG:
+    a real exposure's stack happens in 16-bit; downscaling first and then
+    adding would crush highlights and misrepresent clipping. We mirror the
+    exact path of process_and_stack_latent_image up through the cv2.add(),
+    then diverge into the JPG-write path of generate_sensor_preview.
+    """
+    if not os.path.exists(buffer_file): return False
+
+    try:
+        # --- Demosaic the raw DNG into 16-bit linear RGB ---
+        # Same call as both sibling functions, so the preview math sees the
+        # same raw data the real exposure would.
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+
+        # --- Patch defective pixels immediately (16-bit) ---
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+
+        # --- Pedestal subtraction (Noise Crusher) in 16-bit ---
+        rgb = apply_pedestal(rgb, black_clip)
+
+        # --- RGB -> BGR for OpenCV ---
+        img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+        # --- Mono Mode handled in 8-or-16 bit safe range ---
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # --- CG (Cam Gel) tint, applied in 16-bit float, clipped to uint16 ---
+        # Note: this branch matches process_and_stack_latent_image's clip
+        # range (0..65535) so the additive math below operates in the same
+        # 16-bit integer space as a real execute would.
+        gel_bgr = np.array([cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]], dtype=np.float32)
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # --- THE ACTUAL COMPOSITE (in-memory, in 16-bit) ---
+        # Look up the existing latent TIFF for THIS frame using the exact
+        # path format execute_exposure writes. If it exists, additively
+        # composite (saturated cv2.add) just like a real exposure run does.
+        # If it does not exist, the preview just shows the new exposure
+        # alone, identical to Cam Preview.
+        # We DO NOT write img back to existing_latent_file. Ever.
+        existing_latent_file = os.path.join(
+            cam_mag_dir, f"latent_{str(int(frame_num)).zfill(4)}.tif"
+        )
+        if os.path.exists(existing_latent_file):
+            existing = cv2.imread(existing_latent_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                # cv2.add saturates at the dtype max (65535 for uint16),
+                # which is the same behavior a real execute uses.
+                img = cv2.add(img, existing.astype(np.uint16))
+
+        # --- Now downscale to 8-bit for the JPG preview window ---
+        # From here onward this matches generate_sensor_preview's tail.
+        img = (img / 256.0).astype(np.uint8)
+
+        # --- Optional anamorphic preview unsqueeze (JPG-level only) ---
+        # Same logic as generate_sensor_preview - so the Comp Preview JPG
+        # respects the same Preview Unsqueeze toggle that Cam Preview does.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] Comp preview unsqueeze failed (falling back to squeezed): {e}")
+
+        # --- Write to the SAME static JPG that Cam Preview uses ---
+        # The front end reloads /static/probe_live.jpg for both preview
+        # types, so we deliberately overwrite the same file.
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+
+    except Exception as e:
+        print(f"[VOP WARNING] Comp Preview Processing Error: {e}")
+
+    finally:
+        # Clean up the DNG buffer just like the sibling functions do,
+        # so /tmp does not slowly fill with comp_preview leftovers.
+        if os.path.exists(buffer_file): os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy): os.remove(dummy)
+
     return True
 
 def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):

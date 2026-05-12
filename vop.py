@@ -39,6 +39,7 @@ import glob
 import math
 import socket
 import time
+import numpy as np  # for 16-bit → 8-bit reduction in /cam_probe
 from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
 
 # Append the modules directory to the system path for local imports
@@ -203,6 +204,13 @@ def dispatch_engine(task_type, payload):
                 print(f"[VOP SERVER] Task {task_type} timed out.")
                 break
             time.sleep(0.1)
+        # HTTP Blocking logic for specific synchronous tasks.
+        # Forces the Flask thread to wait until engine.py processes and deletes COMMAND_FILE.
+        # comp_preview is included here for the same reason cam_preview is:
+        # the front end reloads probe_live.jpg right after the POST returns,
+        # so we must not return until the engine has actually written the JPG.
+        if task_type in ['preview', 'cam_preview', 'comp_preview']:
+            timeout = 45.0
 
 # --- FLASK ROUTES ---
 
@@ -295,6 +303,21 @@ def render_prores():
     
     try:
         fps = request.json.get('fps', 24) if request.json else 24
+
+        # ANAMORPHIC PAR METADATA
+        # The captured TIFFs are squeezed. Tagging the ProRes stream's sample
+        # aspect ratio as PAR_X:PAR_Y causes ffmpeg to write a 'pasp' atom into
+        # the MOV container. Resolve/Premiere/FCP read this and unsqueeze the
+        # picture on import without the editor having to remember to set PAR
+        # manually. PAR 1:1 produces 1:1 metadata which is a no-op visually.
+        par_x = float(request.json.get('par_x', 1.0) or 1.0) if request.json else 1.0
+        par_y = float(request.json.get('par_y', 1.0) or 1.0) if request.json else 1.0
+        # ffmpeg's setsar wants num/den - just pass the raw floats; ffmpeg parses
+        # them. We use floats verbatim instead of trying to integerize because
+        # arbitrary inputs like 1:1.24 don't reduce cleanly to small integers
+        # and ffmpeg handles the decimal form fine.
+        sar_filter = f"setsar={par_x}/{par_y}"
+
         ts = int(time.time())
         out_mov = os.path.join(PRORES_DIR, f"vop_prores_{ts}.mov")
 
@@ -306,6 +329,9 @@ def render_prores():
             "-c:v", "prores_ks",
             "-profile:v", "4444",
             "-pix_fmt", "yuv444p10le",
+            # Bake PAR into the stream as the QuickTime 'pasp' atom so editors
+            # auto-unsqueeze the footage on import.
+            "-vf", sar_filter,
             # Tag as linear light, Rec.709 primaries - no gamma baked in.
             # Resolve/Fusion reads these flags and handles the transform in the projects
             # color management pipeline. Set Input Color Space to "Linear" in Resolve.
@@ -315,11 +341,10 @@ def render_prores():
             out_mov
         ]
 
-        print(f"[VOP SERVER] ACTION: RENDER PRORES -> {os.path.basename(out_mov)}")
+        print(f"[VOP SERVER] ACTION: RENDER PRORES -> {os.path.basename(out_mov)} | PAR={par_x}:{par_y}")
         prores_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr= subprocess.DEVNULL)
 
         return jsonify({"status": "started", "filename": os.path.basename(out_mov)})
-
     except Exception as e:
         print(f"[VOP SERVER] ProRes render error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -459,6 +484,228 @@ def cam_preview():
     # Dispatches the hardware camera preview
     dispatch_engine('cam_preview', request.json)
     return jsonify({"status": "started"})
+
+@app.route('/comp_preview', methods=['POST'])
+def comp_preview():
+    # Dispatches a Comp Preview: same as cam_preview (smear render +
+    # camera capture + JPG to probe_live.jpg) but in color_utils we
+    # additively composite the new exposure on top of any existing
+    # CamMag latent TIFF for this frame BEFORE writing the JPG.
+    # The existing TIFF on disk is NEVER modified - this is purely a
+    # viewfinder for lining up multi-pass exposures.
+    dispatch_engine('comp_preview', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/cam_probe', methods=['POST'])
+def cam_probe():
+    """
+    CAM PROBE
+    Reads the existing latent TIFF for the current probe frame from CamMag,
+    converts it to an 8-bit JPG, and writes it to static/probe_live.jpg so
+    the GUI's preview window can show it.
+
+    This is a pure file-read/convert operation - no smear render, no camera
+    capture, no engine dispatch. It runs in the Flask request thread, which
+    means it's also safe to call while a long Execute job is in flight; we
+    just read whatever the latent currently looks like.
+
+    The bit-depth reduction matches the other preview paths (img / 256.0)
+    so Cam Probe and Cam Preview produce visually comparable JPGs - both
+    are 8-bit linear-light samples of the same 16-bit linear data.
+    """
+    print("[VOP SERVER] ACTION: CAM PROBE")
+
+   # Pull the probe frame number from the posted body, same shape the other
+    # preview routes receive. Default to 1 if missing/garbled.
+    #
+    # Also pull PAR (par_x, par_y) and the preview_unsqueeze toggle so Cam
+    # Probe can mirror the anamorphic-aware behavior of Cam View / Comp View.
+    # Without these, toggling between the preview buttons would cause the
+    # preview window to alternate between unsqueezed (looks right) and
+    # squeezed (looks ovally), which defeats the whole point of having a
+    # PAR system in the first place.
+    try:
+        data = request.json or {}
+        # The collectParams() shipping side may send numbers as strings -
+        # int(float(...)) coerces both numeric and string inputs cleanly.
+        frame_num = int(float(data.get('probe_frame', 1)))
+    except (TypeError, ValueError):
+        frame_num = 1
+
+    # PAR + unsqueeze - parsed defensively. If anything is malformed we
+    # silently fall back to 1.0 / False, which is identical to non-anamorphic
+    # behavior. We never want a malformed PAR field to blow up Cam Probe.
+    try:
+        par_x = float(data.get('par_x', 1.0) or 1.0)
+        par_y = float(data.get('par_y', 1.0) or 1.0)
+    except (TypeError, ValueError):
+        par_x, par_y = 1.0, 1.0
+    preview_unsqueeze = bool(data.get('preview_unsqueeze', False))
+
+    # ANAMORPHIC PREVIEW UNSQUEEZE - inline helper.
+    # Mirrors the unsqueeze logic in color_utils.generate_sensor_preview and
+    # generate_comp_preview verbatim, so Cam Probe produces the same JPG
+    # dimensions those functions would for the same PAR settings. The visual
+    # consistency between the four preview buttons depends on this matching.
+    #
+    # NOTE: this is duplicated from color_utils. A future cleanup could
+    # extract a single helper (perhaps color_utils.unsqueeze_preview_jpg)
+    # and have all three callers use it. Not doing it now to keep the
+    # blast radius of this Cam Probe fix small and avoid touching the two
+    # working preview functions on the brink of a release.
+    def _maybe_unsqueeze(img):
+        if not preview_unsqueeze:
+            return img
+        try:
+            px = par_x if par_x > 0 else 1.0
+            py = par_y if par_y > 0 else 1.0
+            par = px / py
+            if abs(par - 1.0) <= 1e-6:
+                return img  # square pixels - nothing to do
+            h, w = img.shape[:2]
+            if par > 1.0:
+                # Wide-pixel case: stretch X horizontally.
+                new_w = int(round(w * par))
+                return cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+            else:
+                # Tall-pixel case: stretch Y vertically.
+                new_h = int(round(h / par))
+                return cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+        except Exception as e:
+            # Fall back to the squeezed image rather than failing the
+            # whole probe - matches the same defensive behavior in
+            # color_utils.generate_sensor_preview.
+            print(f"[VOP SERVER] Cam Probe unsqueeze failed (falling back to squeezed): {e}")
+            return img
+
+    # Build the path using the SAME filename format execute_exposure writes
+    # ("latent_NNNN.tif" with 4-digit zero-padding). If we drift from that
+    # format here, Cam Probe will silently read the wrong frame or nothing.
+    latent_file = os.path.join(CAM_MAG_DIR, f"latent_{str(frame_num).zfill(4)}.tif")
+    static_dir = os.path.join(BASE_DIR, "static")
+    out_jpg = os.path.join(static_dir, "probe_live.jpg")
+
+    # No latent for this frame - write a placeholder JPG so the user gets
+    # an unambiguous visual answer rather than a stale preview from a
+    # previous click.
+    #
+    # Why we write a JPG here instead of returning 404 and letting the
+    # frontend handle it: keeping ALL preview state in probe_live.jpg
+    # means the frontend pipeline is uniform (post -> reload JPG) for
+    # every preview button. The user also gets the frame number baked
+    # into the placeholder so there's zero ambiguity about which frame
+    # they're being told is empty.
+    #
+    # Generated on the fly rather than served as a static asset because
+    # we want the frame number IN the image. A pre-rendered "NO LATENT"
+    # PNG couldn't communicate that.
+    if not os.path.exists(latent_file):
+        print(f"[VOP SERVER] CAM PROBE: no latent at frame {frame_num} - writing placeholder")
+        try:
+            # Match Proj Probe's dimensions (1920x1080) so the placeholder
+            # scales identically in the preview panel. The probe_img CSS
+            # uses object-fit:contain so source dimensions don't really
+            # affect display size, but matching keeps things tidy.
+            ph_w, ph_h = 1920, 1080
+
+            # Background: very dark gray (BGR), close to --bg-panel from
+            # style.css. Pure black would be visually indistinguishable
+            # from a real latent that's mostly underexposed; the slight
+            # gray makes "this is a system message, not your data" read.
+            placeholder = np.full((ph_h, ph_w, 3), 26, dtype=np.uint8)  # 26,26,26 BGR
+
+            # Headline: "NO LATENT" in a muted red/orange. We use the
+            # cv2 built-in Hershey font so we don't need to introduce a
+            # PIL/Pillow dependency just for this placeholder.
+            headline = "NO LATENT"
+            sub = f"Frame {frame_num}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+
+            # Sizing chosen so both lines read clearly when the 1920x1080
+            # placeholder is scaled down to fit the preview panel. Tuned
+            # by eye - bump these if the panel is small on your display.
+            head_scale, head_thick = 5.0, 12
+            sub_scale,  sub_thick  = 3.0, 6
+
+            # Measure text so we can center it horizontally. cv2.getTextSize
+            # returns ((width, height), baseline).
+            (hw, hh), _ = cv2.getTextSize(headline, font, head_scale, head_thick)
+            (sw, sh), _ = cv2.getTextSize(sub,      font, sub_scale,  sub_thick)
+
+            # Vertical layout: stack the two lines around the vertical
+            # center with a comfortable gap. cv2.putText anchors text by
+            # its baseline (bottom-left), which is why the y values look
+            # like they're below center - they account for text height.
+            gap = 80
+            total_h = hh + gap + sh
+            head_y = (ph_h - total_h) // 2 + hh
+            sub_y  = head_y + gap + sh
+
+            head_x = (ph_w - hw) // 2
+            sub_x  = (ph_w - sw) // 2
+
+            # Headline color: muted red/orange (BGR). Picks up the same
+            # warning-feel as --color-warning in style.css without being
+            # alarming-emergency-red. The color also can't naturally
+            # appear in a latent (which would be tinted by CG gel from
+            # the user's job, not a system-chosen accent).
+            cv2.putText(placeholder, headline, (head_x, head_y),
+                        font, head_scale, (60, 110, 230), head_thick, cv2.LINE_AA)
+
+            # Sub-line: lighter gray, informational. Carries the frame
+            # number so the user knows exactly which frame is empty -
+            # critical when probe_frame may have changed since last click.
+            cv2.putText(placeholder, sub, (sub_x, sub_y),
+                        font, sub_scale, (170, 170, 170), sub_thick, cv2.LINE_AA)
+
+            # Unsqueeze the placeholder too, so the preview panel
+            # dimensions stay stable as the user cycles between frames
+            # with and without latents. Without this, landing on a
+            # no-latent frame would visually "jump" the panel back to
+            # the squeezed aspect ratio - the exact unsteady cue the
+            # Preview Unsqueeze toggle is supposed to eliminate.
+            placeholder = _maybe_unsqueeze(placeholder)
+            cv2.imwrite(out_jpg, placeholder)
+
+            # Return 200 + a placeholder marker. The marker isn't used
+            # by the current frontend (it just reloads the JPG either
+            # way) but is here as a hook for future features.
+            return jsonify({"status": "ok", "frame": frame_num, "placeholder": True})
+
+        except Exception as e:
+            print(f"[VOP SERVER] CAM PROBE placeholder error: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    try:
+        # Read the 16-bit linear BGR latent off disk untouched.
+        # IMREAD_UNCHANGED preserves bit depth and channel count.
+        img = cv2.imread(latent_file, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return jsonify({"status": "read_failed", "frame": frame_num}), 500
+
+        # Downscale 16-bit -> 8-bit using the same /256.0 reduction as the
+        # sibling preview functions in color_utils.py. This intentionally
+        # leaves the data in linear light so the visual character matches
+        # the other preview JPGs (they'll all look uniformly "dark on a
+        # sRGB monitor" - that's expected and consistent across previews).
+        if img.dtype == np.uint16:
+            img8 = (img / 256.0).astype(np.uint8)
+        else:
+            # Defensive branch: if for some reason the file isn't uint16
+            # (legacy job, hand-edited TIFF, etc), just pass it through.
+            img8 = img
+
+        # Apply preview unsqueeze BEFORE writing the JPG, so the final
+        # file on disk is what the user sees. This matches the order of
+        # operations in color_utils.generate_sensor_preview.
+        img8 = _maybe_unsqueeze(img8)
+        cv2.imwrite(out_jpg, img8)
+
+        return jsonify({"status": "ok", "frame": frame_num})
+
+    except Exception as e:
+        print(f"[VOP SERVER] CAM PROBE error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/execute', methods=['POST'])
 def execute_seq():

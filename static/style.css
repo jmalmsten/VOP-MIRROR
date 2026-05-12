@@ -342,27 +342,54 @@ body {
     border-color:   var(--color-accent);
 }
 
-.preview-area { 
-    background:         var(--bg-panel); 
-    border:             1px solid var(--border-color); 
-    min-width:          300px; 
-    max-width:          70vh; 
-    min-height:         200px; 
-    max-height:         50vh; 
-    display:            flex; 
-    align-items:        center; 
-    justify-content:    center; 
-    overflow:           hidden; 
-    grid-column:        1; 
-    grid-row:           3; 
-    justify-self:       center; 
-    align-self:         start; 
+.preview-area {
+    background:         var(--bg-panel);
+    border:             1px solid var(--border-color);
+
+    /* Sizing strategy:
+     *   - Width: auto, capped at 70vh. The panel sizes to its content
+     *     (the image, which has aspect ratio governed by camera/PAR).
+     *     The 70vh cap (using vh deliberately, not vw) gives a width
+     *     ceiling that scales with screen size and produces a roughly
+     *     1.4:1 maximum panel - comfortable for the camera's ~4:3
+     *     aspect and most anamorphic ratios.
+     *   - Height: a RESOLVED height, not max-height. This is the
+     *     critical bit: #probe_img's height:100% only computes
+     *     correctly if the parent has a resolved height. With just
+     *     max-height, the panel sized itself to the image's natural
+     *     height, clamped, and overflow:hidden cropped the rest.
+     *     Using `height: 50vh` keeps the panel at a definite size
+     *     regardless of the image inside, so object-fit:contain on
+     *     the image works as expected and letterboxes instead of
+     *     cropping.
+     *   - min-* values are safety floors for short/narrow viewports. */
+    min-width:          300px;
+    max-width:          70vh;
+    min-height:         320px;
+    height:             50vh;
+
+    display:            flex;
+    align-items:        center;
+    justify-content:    center;
+    overflow:           hidden;
+    grid-column:        1;
+    grid-row:           3;
+    justify-self:       center;
+    align-self:         start;
 }
 
-#probe_img { 
-    max-width:          100%; 
-    max-height:         100%; 
-    object-fit:         contain; 
+#probe_img {
+    /* width and height (not just max-*) are necessary for object-fit:contain
+     * to actually work. With only max-* set, the <img> takes its natural
+     * size, max-width clamps width, and height is proportional to that -
+     * which can exceed max-height and get clipped by .preview-area's
+     * overflow:hidden. Setting width/height to 100% gives the image a
+     * proper sizing rectangle (the full panel), and object-fit:contain
+     * then scales the image proportionally inside that rectangle,
+     * letterboxing instead of cropping. */
+    width:              100%;
+    height:             100%;
+    object-fit:         contain;
 }
 
 /* ############### Action & Mini Buttons ############### */
@@ -400,6 +427,47 @@ body {
 .action-btn.cam_preview { 
     background:         #333; 
     color:              #ccc; 
+}
+
+/* Comp View button — sibling to cam_preview, slightly lighter shade
+ * so the two preview buttons read as a pair while still being
+ * distinguishable at a glance. The functional difference (Comp View
+ * does an in-memory additive composite onto the existing latent TIFF
+ * before producing the preview JPG) is the actual semantic
+ * justification for giving it its own class. */
+.action-btn.comp_preview {
+    background:         #3a3a3a;
+    color:              #ccc;
+}
+
+/* Probe / Preview button cluster - 2x2 grid.
+ * Sits inside .probe-controls alongside the (non-grid) section divider
+ * and the Execute Sequence button, so the grid is scoped to its own
+ * wrapper div rather than applied to .probe-controls itself.
+ *
+ * grid-template-columns: 1fr 1fr  -> two equal-width columns
+ * gap                               -> small breathing room between cells;
+ *                                      same value as a button's padding
+ *                                      so the visual rhythm matches.
+ *
+ * The .action-btn rule already sets width:100%, so each button cell
+ * stretches to fill its grid column without further intervention. */
+.probe-grid {
+    display:                grid;
+    grid-template-columns:  1fr 1fr;
+    gap:                    8px;
+}
+
+/* Cam Probe button - paired visually with Proj Probe.
+ * Proj Probe has no class override so it inherits the default
+ * .action-btn coloring (var(--color-accent) on var(--text-dark) - the
+ * cyan/teal). We re-state those tokens explicitly here so Cam Probe
+ * tracks the same accent color, and so a future reader doesn't have
+ * to chase the inheritance chain to understand why these two buttons
+ * match. If --color-accent is ever rebranded, both buttons follow. */
+.action-btn.cam_probe {
+    background:         var(--color-accent);
+    color:              var(--text-dark);
 }
 
 .action-btn.execute {
@@ -505,6 +573,39 @@ body {
     display:            flex;
     flex-direction:     column;
     gap:                4px;
+}
+
+/* ANAMORPHIC PAR section
+ * Mirrors the Noise Crusher row: a label, two compact number inputs separated
+ * by a colon, then an inline checkbox. The constraints on .const-group input
+ * default to 100% width which would break the row layout, so we shrink the
+ * PAR fields explicitly (similar to the #black_clip override above). */
+#par_x, #par_y {
+    width:              60px;
+}
+.par-colon {
+    color:              var(--text-secondary);
+    font-weight:        bold;
+    /* Slight horizontal padding so the colon doesn't kiss the input borders */
+    padding:            0 2px;
+}
+.par-preview-toggle {
+    display:            flex;
+    align-items:        center;
+    gap:                4px;
+    /* Override the .const-group label rule that would otherwise force a block
+     * layout above the field. Inside this row we want the label inline. */
+    font-size:          0.7em;
+    color:              var(--text-secondary);
+    margin-left:        8px;
+    /* Reset the margin-bottom from the default .const-group label rule */
+    margin-bottom:      0;
+}
+.par-preview-toggle input[type=checkbox] {
+    /* The .const-group input default of 100% width would expand the checkbox
+     * and shove everything off-screen. Lock it to native size. */
+    width:              auto;
+    margin:             0;
 }
 
 /* ################ SHEET HEADER & MODE SELECTOR ############### */

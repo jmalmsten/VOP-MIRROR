@@ -32,7 +32,7 @@
 <head>
     <meta charset="UTF-8">
     <title>VOP v0.7 NIGHTLY</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.12">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.13">
 </head>
 <body>
     VOP &copy; 2026 jmalmsten. 
@@ -42,7 +42,7 @@
     <div class="container">
         
         <div class="vop-header">
-            <h2>VOP v0.7.0 - NIGHTLY</h2>
+            <h2>VOP v0.7.1 - NIGHTLY</h2>
             <div id="sync_indicator">○ OFFLINE</div>
         </div>
 
@@ -60,8 +60,18 @@
                     <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
                 </div>
                 <div class="probe-controls" style="margin-top:10px;">
-                    <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
-                    <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
+                    <!-- 2x2 grid of probe / preview buttons.
+                        Row 1: Proj Probe (HDMI screen) | Cam Probe (latent in CamMag)
+                        Row 2: Cam View   (smear only)  | Comp View (smear + composite)
+                        The wrapper div is needed because the surrounding .probe-controls
+                        also holds the <hr> and Execute button which must NOT be part of
+                        the grid. CSS for .probe-grid lives in static/style.css. -->
+                    <div class="probe-grid">
+                        <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
+                        <button class="action-btn cam_probe" onclick="runCamProbe()" title="Show the existing latent TIFF for this frame from the CamMag. Doesn't touch anything.">Cam Probe</button>
+                        <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
+                        <button class="action-btn comp_preview" onclick="runTask('comp_preview')" title="Like Cam View, but composited on top of the existing latent for this frame. Does not commit.">Comp View</button>
+                    </div>
                     <hr class="section-divider">
                     <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
                     <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
@@ -127,7 +137,38 @@
                     <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
                     <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
                     <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                    <div class="const-group"><label>Rotation Order</label><select id="rot_order" onchange="triggerSync()" title="Order in which the three Euler axes are applied. Read left-to-right: leftmost axis is applied first (innermost / local-axis spin), rightmost is applied last (outermost / dominant sweep). XYZ is the conventional default and matches the previous hardcoded behavior.">
+                        <option value="XYZ" selected>XYZ (Pitch → Roll → Yaw)</option>
+                        <option value="XZY">XZY (Pitch → Yaw → Roll)</option>
+                        <option value="YXZ">YXZ (Roll → Pitch → Yaw)</option>
+                        <option value="YZX">YZX (Roll → Yaw → Pitch)</option>
+                        <option value="ZXY">ZXY (Yaw → Pitch → Roll)</option>
+                        <option value="ZYX">ZYX (Yaw → Roll → Pitch)</option>
+                    </select></div>
                     <hr class="section-divider">
+
+                    <!-- ANAMORPHIC PIXEL ASPECT RATIO
+                         The two number inputs declare the PAR of the captured
+                         footage as pixel_width:pixel_height. The engine uses
+                         that to pre-squeeze the HDMI render so the camera
+                         captures a squeezed image, and the matching pasp atom
+                         in the ProRes export tells the NLE how to unsqueeze it
+                         in post. The checkbox toggles a preview-only unsqueeze
+                         in the probe window so the user can see what the NLE
+                         will produce, while the latent images on disk stay
+                         squeezed. -->
+                    <div class="const-group crush-group par-group">
+                        <label>PAR (anamorphics)</label>
+                        <input type="number" step="0.0001" id="par_x" value="1.0" onchange="triggerSync()" title="Pixel width component of PAR. PAR > 1 (e.g. 4:3 = 1.333) squeezes X. PAR < 1 squeezes Y.">
+                        <span class="par-colon">:</span>
+                        <input type="number" step="0.0001" id="par_y" value="1.0" onchange="triggerSync()" title="Pixel height component of PAR.">
+                        <label class="par-preview-toggle" title="Show the unsqueezed image in the preview window only. The HDMI render and the captured latent TIFFs remain squeezed.">
+                            <input type="checkbox" id="preview_unsqueeze" onchange="triggerSync()">
+                            Preview unsqueeze
+                        </label>
+                    </div>
+                    <hr class="section-divider">
+
                     <div class="const-group crush-group">
                         <label>Noise Crusher</label>
                         <input type="number" step="0.0001" id="black_clip" value="0.0" style="width: 75px;">
@@ -174,6 +215,6 @@
     <div>
         {% include 'sections/cheat-sheet.html' %}
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=64"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=65"></script>
 </body>
 </html>

@@ -218,6 +218,24 @@ def run_persistent_engine():
             mag_scale = float(job_data.get('coord_scale', 1.0))
             bp_scale = float(job_data.get('bipack_coord_scale', 1.0))
 
+            # ---------------------------------------------------------
+            # ANAMORPHIC PAR (Pixel Aspect Ratio) RESOLUTION
+            # Read once per task to avoid redundant dict lookups during the
+            # per-frame render loop. The preview-unsqueeze toggle is consumed
+            # only by the Proj Probe path below; cam_preview unsqueezing is
+            # done downstream in color_utils when we resample the JPG.
+            # ---------------------------------------------------------
+            par_x = float(job_data.get('par_x', 1.0) or 1.0)
+            par_y = float(job_data.get('par_y', 1.0) or 1.0)
+            preview_unsqueeze = bool(job_data.get('preview_unsqueeze', False))
+            
+            # Rotation order for Euler -> matrix composition. The string
+            # is "XYZ", "ZYX", etc. — see vop_math.get_frustum_fit_matrix
+            # for the full mapping. Default "XYZ" reproduces the original
+            # hardcoded Z*Y*X behavior exactly, so jobs saved before this
+            # feature existed render identically.
+            rot_order = job_data.get('rot_order', 'XYZ')
+
             # Announce rendering state to the UI via the heartbeat file
             with open("/tmp/vop_heartbeat", "w") as hbf:
                 json.dump({"status": "rendering", "msg": f"Starting {task}...", "current": 0, "total": 1, "eta": 0, "est_mb": 0.0}, hbf)
@@ -235,6 +253,27 @@ def run_persistent_engine():
                     t_start = frame_num - (st_base['sd'] * st_base['ph'])
                     t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
                     st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
+
+                # ANAMORPHIC PAR FOR THIS RENDER
+                #
+                # Always use the real job PAR, even for previews. We used to
+                # force PAR=1.0 here when (is_preview and preview_unsqueeze)
+                # so the 1920x1080 screen-grab would already look unsqueezed.
+                # The trade-off was that at non-square PARs the rendered
+                # geometry would overflow the screen edges, silently cropping
+                # the preview - dishonest about what the eventual exposure
+                # would look like.
+                #
+                # The Proj Probe path now does its own JPG-level unsqueeze
+                # (via color_utils.unsqueeze_preview_jpg) followed by a
+                # letterbox into a camera-shaped frame, mirroring the
+                # post-processing pipeline of Cam View / Comp View / Cam
+                # Probe. So we no longer need - or want - the render-time
+                # override here.
+                #
+                # is_preview is still meaningful below: it controls the gray
+                # frustum-bounds background color in the live HDMI render.
+                render_par_x, render_par_y = par_x, par_y
 
                 # Resolve playhead positions independently for each optical layer.
                 # The ProjMag and BiPack run on separate JK printer tracks - so a job
@@ -269,7 +308,9 @@ def run_persistent_engine():
                 else:
                     bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
                     mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
-                                                        st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT)
+                                                        st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT,
+                                                        par_x=render_par_x, par_y=render_par_y,
+                                                        rot_order=rot_order)
                     prog['mvp'].write(mvp_bp)
                     prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
                     tex_bp.use(0)
@@ -282,7 +323,9 @@ def run_persistent_engine():
                     mvp_mag = np.eye(4, dtype='f4').tobytes()
                 else:
                     mvp_mag = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_mag, mag_scale,
-                                                        st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT)
+                                                        st['p'], st['r'], st['lp'], st['lr'], WIDTH, HEIGHT,
+                                                        par_x=render_par_x, par_y=render_par_y,
+                                                        rot_order=rot_order)
                 
                 prog['mvp'].write(mvp_mag)
                 prog['filter_color'].write(st['pg'].astype('f4'))
@@ -298,7 +341,12 @@ def run_persistent_engine():
                 vao.render(moderngl.TRIANGLE_STRIP)
                 ctx.disable(moderngl.BLEND)
 
-            def execute_exposure(frame_num, is_preview=False):
+            def execute_exposure(frame_num, is_preview=False, is_comp_preview=False):
+                # is_preview         -> Cam Preview: capture + JPG, no commit, no composite
+                # is_comp_preview    -> Comp Preview: capture + composite-in-memory + JPG, no commit
+                # neither            -> Real exposure: capture + composite + commit to TIFF
+                # is_comp_preview takes precedence over is_preview when both are True
+                # (defensive - the caller should only set one).
                 st = timeline.get_state(frame_num)
                 smr_ms = float(st['exp']) * 1000.0
                 total_ms = smr_ms + 1000.0
@@ -389,8 +437,26 @@ def run_persistent_engine():
                 log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | HDMI sequence complete. Waiting for camera file IO.")
                 cam_proc.wait()
                 
-                if is_preview:
-                    cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip)
+                # Branch on which post-capture pipeline to run. Order matters:
+                # comp_preview is checked first so a caller that accidentally sets
+                # both flags still gets the safer (non-committing) comp behavior.
+                if is_comp_preview:
+                    # Comp Preview: in-memory composite onto any existing latent
+                    # TIFF for this frame, write JPG, do NOT commit anything to
+                    # the CamMag. PAR and unsqueeze flag forwarded for the same
+                    # reasons cam_preview forwards them.
+                    cutil.generate_comp_preview(buf_f, static_dir, cam_mag_dir,
+                                                frame_num, st['cg'], mono_active,
+                                                black_clip, par_x=par_x, par_y=par_y,
+                                                preview_unsqueeze=preview_unsqueeze)
+                elif is_preview:
+                    # cam_preview path: forward the PAR + unsqueeze flag so the
+                    # captured JPG can be optionally resampled for the preview
+                    # window. The original DNG and the disk-bound latent TIFFs
+                    # are NOT touched - those must remain squeezed so downstream
+                    # NLE work has clean PAR-driven unsqueeze in post.
+                    cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip,
+                                                  par_x=par_x, par_y=par_y, preview_unsqueeze=preview_unsqueeze)
                 else:
                     tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
                     out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
@@ -401,18 +467,83 @@ def run_persistent_engine():
             # ---------------------------------------------------------
             try:
                 if task == 'preview':
+                    # PROJ PROBE
+                    # 1. Render the dual-world to the HDMI screen at real PAR
+                    #    (the override that used to force 1.0/1.0 here was
+                    #    removed in render_dual_world above).
+                    # 2. Read the 1920x1080 screen-grab.
+                    # 3. Apply the JPG-level unsqueeze (same helper Cam Probe
+                    #    uses, same math Cam View / Comp View have inline).
+                    # 4. Letterbox the result into a camera-shaped canvas so
+                    #    the Proj Probe JPG has the same outer shape as the
+                    #    other three preview buttons under matching settings.
+                    #
+                    # End result: the preview window shape is consistent
+                    # across all four preview buttons, and Proj Probe shows
+                    # the FULL logical frame even at non-square PARs - no
+                    # silent cropping at the screen edges.
                     render_dual_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
                     ctx.finish()
                     raw_bytes = ctx.screen.read(components=4)
                     img_data = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((HEIGHT, WIDTH, 4))
                     img_data = cv2.flip(img_data, 0)
                     img_data = cv2.cvtColor(img_data, cv2.COLOR_RGBA2BGR)
+
+                    # Step 3: JPG-level unsqueeze. Forwards the same PAR and
+                    # toggle values that were used to render. With
+                    # preview_unsqueeze off this is a no-op pass-through.
+                    img_data = cutil.unsqueeze_preview_jpg(img_data, par_x, par_y, preview_unsqueeze)
+
+                    # Step 4: letterbox into a Cam-View-shaped canvas.
+                    # Compute target dims from cam_res and PAR using the
+                    # same formula generate_sensor_preview applies when it
+                    # builds Cam View's output. Defaults to '2028x1520' to
+                    # match the rest of the engine when cam_res is unset.
+                    cam_res_str = job_data.get('cam_res', '2028x1520')
+                    try:
+                        cw_str, ch_str = cam_res_str.lower().split('x')
+                        cam_w, cam_h = int(cw_str), int(ch_str)
+                    except (ValueError, AttributeError):
+                        # Defensive fallback - never let a malformed cam_res
+                        # crash a preview. Matches the default elsewhere.
+                        cam_w, cam_h = 2028, 1520
+
+                    # Target shape mirrors what Cam View produces under the
+                    # same PAR + unsqueeze inputs:
+                    #   - unsqueeze off  -> camera native
+                    #   - PAR > 1, on    -> wider than camera (cam_w * PAR)
+                    #   - PAR < 1, on    -> taller than camera (cam_h / PAR)
+                    target_w, target_h = cam_w, cam_h
+                    if preview_unsqueeze:
+                        try:
+                            px = float(par_x) if float(par_x) > 0 else 1.0
+                            py = float(par_y) if float(par_y) > 0 else 1.0
+                            par = px / py
+                            if abs(par - 1.0) > 1e-6:
+                                if par > 1.0:
+                                    target_w = int(round(cam_w * par))
+                                else:
+                                    target_h = int(round(cam_h / par))
+                        except Exception as e:
+                            log_audit(f"Proj Probe target-shape calc failed: {e}")
+
+                    img_data = cutil.letterbox_into(img_data, target_w, target_h)
+
                     out_file = os.path.join(static_dir, "probe_live.jpg")
                     cv2.imwrite(out_file, img_data)
                     pygame.display.flip()
                     
                 elif task == 'cam_preview':
                     execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
+
+                elif task == 'comp_preview':
+                    # Identical hardware path to cam_preview - smear-render the
+                    # dual world while the camera captures - but route the
+                    # captured DNG through the Comp Preview pipeline so the
+                    # resulting JPG shows the new exposure additively
+                    # composited on top of any existing latent for this frame.
+                    # Nothing on disk in CamMag is altered.
+                    execute_exposure(float(job_data.get('probe_frame', 1)), is_comp_preview=True)
                 
                 elif task == 'measure_noise':
                     probe_f = float(job_data.get('probe_frame', 1))

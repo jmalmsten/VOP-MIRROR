@@ -1,3 +1,32 @@
+# V0.7.1 (20260511)
+## Notes:
+## Added: 
+### Rotation Order setting (dropdown menu)
+In order to control which axis rotates before which other axis, I added a dropdown menu that allows you to choose which of the 6 permutations that are possible. This is a per job constant for now. 
+### Anamorphic / Non-square Pixel Aspect Ratio (PAR)
+Added the ability to use non-square pixel aspect ratio. This is to maximize the resolution for aspect ratios that are not the same as the HDMI monitor.
+#### How to use:
+See wiki at [https://codeberg.org/jmalmsten-com/VOP/wiki/PAR-Anamorphic](https://codeberg.org/jmalmsten-com/VOP/wiki/PAR-Anamorphic)
+
+There's also a ramble about it on the blog: [https://www.jmalmsten.com/post/vop-anamorphics](https://www.jmalmsten.com/post/vop-anamorphics)
+### Comp View button (issue #175)
+Sits next to Cam View. Behaves like Cam View — same smear-render-plus-camera-capture path — but the resulting preview JPG is the new exposure additively composited on top of whatever latent TIFF already exists in the CamMag for that frame. The latent on disk is NOT modified; this is preview-only. Use it as a viewfinder for lining up multi-pass exposures so you can verify ProjMag / BiPack / CamMag positions all land where you intended before committing with Execute Sequence.
+### Cam Probe button + 2x2 probe button layout (issue #175 follow-up)
+Cam Probe is a fourth probe/preview button that simply pulls the existing latent TIFF for the current probe frame out of CamMag, converts it to JPG, and shows it in the preview window. No camera capture, no smear render, no engine round-trip - it's a pure read-and-convert via the Flask request thread, which means it also works while the engine is busy with another task (e.g. mid-Execute sanity checking).
+
+The four probe/preview buttons are now arranged as a 2x2 grid:
+- Proj Probe | Cam Probe
+- Cam View   | Comp View
+
+Cam Probe is colored to match Proj Probe (both use the global accent color), pairing them visually as the two non-capturing probes.
+## Changed: 
+### Preview area
+Tweaked a bit of how the preview area is presented. 
+## Corrected:
+### PH input in SSS mode
+Found that the helper hover text for some reason said "Playhead" for the PH input. Should be Shutter Phase. Corrected that. 
+
+
 # V0.7.0 (20260429) Prerelease
 ## Notes:
 Quite a big one here. Most notably, the **VOP**, the Video **Optical Printer** now actually accepts video. So it can do... optical printing. Like ye olde J.K. Optical Printers. 

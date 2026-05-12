@@ -122,9 +122,33 @@ function collectParams() {
 
 async function runTask(type) {
     await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
-    if (type === 'preview' || type === 'cam_preview') {
+    // comp_preview writes to the same /static/probe_live.jpg as the
+    // other two preview types, so it gets the same image-reload treatment.
+    if (type === 'preview' || type === 'cam_preview' || type === 'comp_preview') {
         document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
     }
+}
+
+/* Cam Probe: read the existing latent TIFF for the current probe frame
+ * from CamMag, convert to JPG, and show it in the preview window.
+ *
+ * If no latent exists for this frame, the backend writes a clearly-marked
+ * placeholder JPG to probe_live.jpg instead - so from the frontend's
+ * perspective Cam Probe always succeeds and always produces a fresh JPG.
+ * That keeps this handler trivially shaped: post, then cache-bust.
+ *
+ * Cam Probe runs as a plain Flask request (no engine dispatch) so it's
+ * fast and works even while the engine is busy with a long Execute job.
+ */
+async function runCamProbe() {
+    await fetch('/cam_probe', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+    });
+    // Cache-bust the preview image so the browser fetches the freshly
+    // written JPG instead of serving the stale one.
+    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
 }
 
 function panic() { 
@@ -763,11 +787,19 @@ async function renderProRes() {
     if (btn) { btn.innerText = 'RENDERING...'; btn.disabled = true; }
 
     try {
-        // 1. Start the background render, passing current fps from the UI
+        // 1. Start the background render, passing current fps + PAR from the UI.
+        // PAR fields are read from the new anamorphic section and forwarded so
+        // ffmpeg can write the 'pasp' atom into the MOV. Without these, the
+        // editor would have to manually punch the PAR in on import.
+        const cp = collectParams();
         const startResp = await fetch('/render_prores', {
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fps: collectParams().fps || 24 })
+            body: JSON.stringify({ 
+                fps: cp.fps || 24,
+                par_x: cp.par_x || 1.0,
+                par_y: cp.par_y || 1.0
+            })
         });
         const startData = await startResp.json();
 
