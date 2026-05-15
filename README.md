@@ -1,4 +1,4 @@
-**Latest Stable:** v0.6.3 | **In Development:** v0.7.0 (JK - Optical Printer Project)
+**Latest Stable:** v0.6.3 | **In Development:** v0.8.0
 > [!IMPORTANT]
 > **USE AT YOUR OWN RISK.** - This project is a learning experiment. If you brick your hardware, I cannot provide support outside of what has worked for me. Run this code only if you accept the risks of experimental software. And while this Flask Web application **CAN** be exposed on the public internet. I **HIGHLY** recommend doing it through a VPN instead if you want to reach it from outside.
 
@@ -36,7 +36,7 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 > ### Hardware needed:
 > - **Raspberry Pi 5 or 4 (4GB+)** - The VOP is lightweight, typically using <1GB of RAM  
 > - **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens
->- **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
+> - **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
 > - **HDMI Monitor** - Preferably an OLED (although the [black crush system](https://codeberg.org/jmalmsten-com/VOP/wiki/NoiseCrush) introduced in v0.6.3 helps a lot here for cheaper screens)
 > - **Device for control** - the VOP is mostly controlled with a web interface, pretty much any web browser works as long as it's on the same network. But as the exposure sheet has quite a few columns. I recommend having the browser on a a screen at at least 1920x1080.
 > 
