@@ -1,8 +1,9 @@
 """ 
 VOP Module:     engine.py
-Description:    Multiplicative Dual-World Engine.
+Description:    Multiplicative Multi-Layer Engine.
                 Forces GLES 3.0 profile prior to display initialization.
                 Added contextual dark gray background for UI previews to visualize frustum bounds.
+                Expanded from 2-layer (PM+BP) to 3-layer (PM+BP1+BP2) compositing (v0.8.0).
 """
 #
 ###########################################################################
@@ -153,10 +154,18 @@ def run_persistent_engine():
     
     ctx, prog, vao = gfx.init_render_pipeline()
 
-    # Pre-allocate an off-screen Framebuffer Object (FBO) for the BiPack mask.
-    # This persists in GPU memory for the entire lifecycle of the daemon.
-    bp_tex = ctx.texture((WIDTH, HEIGHT), 4)
-    bp_fbo = ctx.framebuffer(color_attachments=[bp_tex])
+    # Pre-allocate off-screen Framebuffer Objects (FBOs) for the BiPack masks.
+    # One FBO per bipack layer so they render independently before being
+    # multiplicatively composited over the PM screen pass. Both persist in 
+    # GPU memory for the entire lifecycle of the daemon - allocating them 
+    # once at boot rather than per-job avoids fragmentation and GL state churn.
+    # 
+    # Memory cost is ~8 MB per FBO at 1920x1080 RGBA, well within the Pi 4's 
+    # VRAM budget. Adding a third layer's FBO is therefore a near-free change.
+    bp1_tex = ctx.texture((WIDTH, HEIGHT), 4)
+    bp1_fbo = ctx.framebuffer(color_attachments=[bp1_tex])
+    bp2_tex = ctx.texture((WIDTH, HEIGHT), 4)
+    bp2_fbo = ctx.framebuffer(color_attachments=[bp2_tex])
 
     # ---------------------------------------------------------
     # IDLE SCREEN ASSET SETUP
@@ -216,7 +225,11 @@ def run_persistent_engine():
             prog['mono_mode'].value = mono_active
 
             mag_scale = float(job_data.get('coord_scale', 1.0))
-            bp_scale = float(job_data.get('bipack_coord_scale', 1.0))
+            # Per-bipack-layer world scales. The PM key 'coord_scale' is 
+            # unchanged for backward compatibility. BP1 inherits the old 
+            # 'bipack_coord_scale' name now suffixed to '1'; BP2 is new.
+            bp1_scale = float(job_data.get('bipack1_coord_scale', 1.0))
+            bp2_scale = float(job_data.get('bipack2_coord_scale', 1.0))
 
             # ---------------------------------------------------------
             # ANAMORPHIC PAR (Pixel Aspect Ratio) RESOLUTION
@@ -245,7 +258,22 @@ def run_persistent_engine():
             # Defined inside the execution block so they securely inherit 
             # the current job_data, timeline, and tex_mgr states.
             # ---------------------------------------------------------
-            def render_dual_world(frame_num, t_norm, is_preview=False):
+            def render_world(frame_num, t_norm, is_preview=False):
+                """
+                Renders one composite frame to the HDMI screen.
+                
+                Three optical layers stack multiplicatively:
+                  PASS 1: BP1 rendered into bp1_fbo
+                  PASS 2: BP2 rendered into bp2_fbo
+                  PASS 3: PM rendered to the screen
+                  PASS 4: bp1_tex multiplied over the screen
+                  PASS 5: bp2_tex multiplied over the screen
+                
+                Multiplication is commutative so the order of the two BP 
+                blends doesn't affect output. PM always renders to screen 
+                directly because the projector gel (PG) filter color is 
+                applied to it - that's the bulb's tint, not a mask.
+                """
                 if timeline.mode == 'mds':
                     st = timeline.get_mds_state(float(frame_num), t_norm)
                 else:
@@ -276,47 +304,71 @@ def run_persistent_engine():
                 render_par_x, render_par_y = par_x, par_y
 
                 # Resolve playhead positions independently for each optical layer.
-                # The ProjMag and BiPack run on separate JK printer tracks - so a job
-                # could, for example, hold the projmag still while reverse running the
-                # bipack, just like a real optical printer's two independently-clocked
-                # magazine heads.
-                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
-                ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
+                # The PM and both BiPack reels run on separate JK printer tracks - 
+                # a job could, for example, hold the PM still while reverse-running 
+                # BP1 and forward-running BP2, just like a real optical printer's 
+                # multiple independently-clocked magazine heads.
+                ph_pm  = timeline.calculate_playhead_at(frame_num, layer='pm')
+                ph_bp1 = timeline.calculate_playhead_at(frame_num, layer='bp1')
+                ph_bp2 = timeline.calculate_playhead_at(frame_num, layer='bp2')
 
-                tex_mag, asp_mag = tex_mgr.load(ph_pm, is_bipack=False)
-                tex_bp,  asp_bp  = tex_mgr.load(ph_bp, is_bipack=True)
+                tex_mag, asp_mag = tex_mgr.load(ph_pm,  layer='pm')
+                tex_bp1, asp_bp1 = tex_mgr.load(ph_bp1, layer='bp1')
+                tex_bp2, asp_bp2 = tex_mgr.load(ph_bp2, layer='bp2')
                 
                 # Layer visibility toggles (the "eye" icons next to the upload fields).
                 # When a layer is hidden, swap its texture for the all-white texture.
-                # The existing white_tex check below handles this cleanly: the layer
-                # is rendered as pure pass-through, no geometry transform, no masking
-                # contribution. With both layers hidden, the user sees the bare bulb 
-                # (still tintable via PG / CG).
+                # The white_tex check inside each pass below handles this cleanly: 
+                # the layer is rendered as pure pass-through, no geometry transform, 
+                # no masking contribution. With all layers hidden, the user sees the 
+                # bare bulb (still tintable via PG / CG).
                 # Defaults to True (visible) so missing keys don't accidentally hide
                 # layers in jobs created before this feature existed.
                 if not job_data.get('pm_visible', True):
                     tex_mag = tex_mgr.white_tex
-                if not job_data.get('bp_visible', True):
-                    tex_bp = tex_mgr.white_tex
+                if not job_data.get('bp1_visible', True):
+                    tex_bp1 = tex_mgr.white_tex
+                if not job_data.get('bp2_visible', True):
+                    tex_bp2 = tex_mgr.white_tex
                     
                 bg_color = (0.1, 0.1, 0.1, 1.0) if is_preview else (0.0, 0.0, 0.0, 1.0)
-                
-                # PASS 1: RENDER BIPACK INTO OFF-SCREEN FBO
-                bp_fbo.use()
-                if tex_bp == tex_mgr.white_tex:
-                    bp_fbo.clear(1.0, 1.0, 1.0, 1.0)
-                else:
-                    bp_fbo.clear(0.0, 0.0, 0.0, 1.0)
-                    mvp_bp = vmath.get_frustum_fit_matrix(float(job_data.get('fov', 45)), asp_bp, bp_scale, 
-                                                        st['bp_p'], st['bp_r'], st['lbp_p'], st['lbp_r'], WIDTH, HEIGHT,
-                                                        par_x=render_par_x, par_y=render_par_y,
-                                                        rot_order=rot_order)
-                    prog['mvp'].write(mvp_bp)
+
+                def render_bipack_to_fbo(fbo, tex, asp, world_scale, mst_p, mst_r, lcl_p, lcl_r):
+                    """
+                    Renders one bipack layer into its dedicated off-screen FBO.
+                    
+                    If the layer's texture is the all-white pass-through (because 
+                    the eye is closed or no source file exists), clear the FBO 
+                    to white and skip the geometry pass entirely - that produces 
+                    a true identity contribution under multiplication. Otherwise 
+                    clear to black (so the unrendered border around the artwork 
+                    cleanly masks out the PM contribution) and render the textured 
+                    quad with the layer's MVP matrix.
+                    """
+                    fbo.use()
+                    if tex == tex_mgr.white_tex:
+                        fbo.clear(1.0, 1.0, 1.0, 1.0)
+                        return
+                    fbo.clear(0.0, 0.0, 0.0, 1.0)
+                    mvp = vmath.get_frustum_fit_matrix(
+                        float(job_data.get('fov', 45)), asp, world_scale,
+                        mst_p, mst_r, lcl_p, lcl_r, WIDTH, HEIGHT,
+                        par_x=render_par_x, par_y=render_par_y,
+                        rot_order=rot_order)
+                    prog['mvp'].write(mvp)
                     prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
-                    tex_bp.use(0)
+                    tex.use(0)
                     vao.render(moderngl.TRIANGLE_STRIP)
 
-                # PASS 2: RENDER MAG TO THE ACTUAL SCREEN
+                # PASS 1: RENDER BIPACK 1 INTO OFF-SCREEN FBO
+                render_bipack_to_fbo(bp1_fbo, tex_bp1, asp_bp1, bp1_scale,
+                                     st['bp1_p'], st['bp1_r'], st['lbp1_p'], st['lbp1_r'])
+
+                # PASS 2: RENDER BIPACK 2 INTO OFF-SCREEN FBO
+                render_bipack_to_fbo(bp2_fbo, tex_bp2, asp_bp2, bp2_scale,
+                                     st['bp2_p'], st['bp2_r'], st['lbp2_p'], st['lbp2_r'])
+
+                # PASS 3: RENDER PM TO THE ACTUAL SCREEN
                 ctx.screen.use()
                 ctx.clear(*bg_color)
                 if tex_mag == tex_mgr.white_tex:
@@ -332,12 +384,18 @@ def run_persistent_engine():
                 tex_mag.use(0)
                 vao.render(moderngl.TRIANGLE_STRIP)
                 
-                # PASS 3: MULTIPLY THE FBO OVER THE SCREEN
+                # PASS 4 & 5: MULTIPLY EACH BIPACK FBO OVER THE SCREEN.
+                # DST_COLOR * srcColor + ZERO is the classic multiplicative blend: 
+                # destination becomes destination*source. Applied once per layer.
+                # Multiplication is commutative so the application order doesn't 
+                # change the final pixel values.
                 ctx.enable(moderngl.BLEND)
                 ctx.blend_func = (moderngl.DST_COLOR, moderngl.ZERO)
                 prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
                 prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
-                bp_tex.use(0)
+                bp1_tex.use(0)
+                vao.render(moderngl.TRIANGLE_STRIP)
+                bp2_tex.use(0)
                 vao.render(moderngl.TRIANGLE_STRIP)
                 ctx.disable(moderngl.BLEND)
 
@@ -361,10 +419,12 @@ def run_persistent_engine():
                 # the main thread from stalling during the first frame render.
                 # ---------------------------------------------------------
 
-                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
-                ph_bp = timeline.calculate_playhead_at(frame_num, layer='bp')
-                tex_mgr.load(ph_pm, is_bipack=False)
-                tex_mgr.load(ph_bp, is_bipack=True)
+                ph_pm  = timeline.calculate_playhead_at(frame_num, layer='pm')
+                ph_bp1 = timeline.calculate_playhead_at(frame_num, layer='bp1')
+                ph_bp2 = timeline.calculate_playhead_at(frame_num, layer='bp2')
+                tex_mgr.load(ph_pm,  layer='pm')
+                tex_mgr.load(ph_bp1, layer='bp1')
+                tex_mgr.load(ph_bp2, layer='bp2')
 
                 # ---------------------------------------------------------
                 # PRE-EXPOSURE BLACKOUT
@@ -405,7 +465,7 @@ def run_persistent_engine():
 
                         clamped_elapsed = min(elapsed, 500.0 + smr_ms)
                         t_norm = (clamped_elapsed - 500.0) / max(1.0, smr_ms)
-                        render_dual_world(frame_num, t_norm, is_preview=False)
+                        render_world(frame_num, t_norm, is_preview=False)
                         frame_rendered = True
                     else:
                         # OPTICAL SHUTTER ENFORCEMENT
@@ -468,9 +528,9 @@ def run_persistent_engine():
             try:
                 if task == 'preview':
                     # PROJ PROBE
-                    # 1. Render the dual-world to the HDMI screen at real PAR
+                    # 1. Render the composite world to the HDMI screen at real PAR
                     #    (the override that used to force 1.0/1.0 here was
-                    #    removed in render_dual_world above).
+                    #    removed in render_world above).
                     # 2. Read the 1920x1080 screen-grab.
                     # 3. Apply the JPG-level unsqueeze (same helper Cam Probe
                     #    uses, same math Cam View / Comp View have inline).
@@ -482,7 +542,7 @@ def run_persistent_engine():
                     # across all four preview buttons, and Proj Probe shows
                     # the FULL logical frame even at non-square PARs - no
                     # silent cropping at the screen edges.
-                    render_dual_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
+                    render_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
                     ctx.finish()
                     raw_bytes = ctx.screen.read(components=4)
                     img_data = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((HEIGHT, WIDTH, 4))
@@ -538,7 +598,7 @@ def run_persistent_engine():
 
                 elif task == 'comp_preview':
                     # Identical hardware path to cam_preview - smear-render the
-                    # dual world while the camera captures - but route the
+                    # combined world while the camera captures - but route the
                     # captured DNG through the Comp Preview pipeline so the
                     # resulting JPG shows the new exposure additively
                     # composited on top of any existing latent for this frame.
