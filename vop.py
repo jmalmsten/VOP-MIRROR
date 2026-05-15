@@ -54,11 +54,8 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
 # Renamed from PROJ_BIPACK_DIR. We now have two numbered bipack layers.
-# Legacy "ProjBiPack" folders from pre-rename installs are migrated by 
-# vop.py at startup (see migrate_legacy_bipack_folder below).
 PROJ_BIPACK1_DIR = os.path.join(BASE_DIR, "ProjBiPack1")
 PROJ_BIPACK2_DIR = os.path.join(BASE_DIR, "ProjBiPack2")
-CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 
@@ -71,53 +68,10 @@ VOP_VERSION ="0.6.5"
 # Initialize required directory structure on boot if missing
 PRORES_DIR = os.path.join(BASE_DIR, "ProRes")
 for d in [PROJ_MAG_DIR, PROJ_BIPACK1_DIR, PROJ_BIPACK2_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints"), PRORES_DIR]:
-
-def migrate_legacy_bipack_folder():
-    """
-    One-shot rename of the legacy single-bipack folder.
-    
-    Pre-v0.7 installs had a single 'ProjBiPack' folder. With the addition of a 
-    second bipack layer that folder is renamed to 'ProjBiPack1' and a new 
-    'ProjBiPack2' is created. If we boot and find the old folder still present, 
-    move its contents into ProjBiPack1 (which os.makedirs above just created 
-    empty), then remove the legacy folder.
-    
-    Safe to run on every boot: after the first successful migration the legacy
-    folder is gone, so subsequent calls short-circuit immediately.
-    """
-    legacy = os.path.join(BASE_DIR, "ProjBiPack")
-    if not os.path.isdir(legacy):
-        return
-    
-    # If the legacy folder exists alongside the new one, move files across.
-    # We don't trust os.rename here because ProjBiPack1 was just created (empty),
-    # so the destination already exists. Move file-by-file instead.
-    print(f"[VOP SERVER] MIGRATION: Found legacy ProjBiPack folder. Moving contents to ProjBiPack1.")
-    moved = 0
-    for fname in os.listdir(legacy):
-        src = os.path.join(legacy, fname)
-        dst = os.path.join(PROJ_BIPACK1_DIR, fname)
-        if os.path.exists(dst):
-            # Defensive: if a same-named file already exists at the destination,
-            # skip rather than overwrite. Should only happen if the user has 
-            # already started using ProjBiPack1 before deploying this version.
-            print(f"[VOP SERVER] MIGRATION: Skipping {fname} (already present in ProjBiPack1)")
-            continue
-        os.rename(src, dst)
-        moved += 1
-    
-    # Try to remove the now-empty legacy folder.
-    try:
-        os.rmdir(legacy)
-        print(f"[VOP SERVER] MIGRATION: Moved {moved} files. Legacy ProjBiPack folder removed.")
-    except OSError as e:
-        # Not empty (some skipped files remain) or permission issue. Leave it
-        # in place rather than recursively deleting - the user can investigate.
-        print(f"[VOP SERVER] MIGRATION: Moved {moved} files. Could not remove legacy folder: {e}")
-
-migrate_legacy_bipack_folder()
+    os.makedirs(d, exist_ok=True)
 
 # Single global reference for the persistent GPU engine subprocess
+
 engine_process = None
 prores_process = None
 
@@ -310,7 +264,9 @@ def status():
         status_state = "rendering"
         try:
             # Read telemetry written by engine.py for UI progress bars
-            return jsonify({
+            with open("/tmp/vop_heartbeat", "r") as f:
+                hb = json.load(f)
+                return jsonify({
                     "status": "rendering", 
                     "heartbeat": hb, 
                     "params": params, 
@@ -512,6 +468,17 @@ def get_img_aspect():
         check_dir = PROJ_BIPACK2_DIR
     else:
         check_dir = PROJ_MAG_DIR
+    try:
+        valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+        files = sorted([f for f in os.listdir(check_dir) if f.lower().endswith(valid_exts)])
+        
+        if files:
+            img = cv2.imread(os.path.join(check_dir, files[0]))
+            if img is not None: 
+                h, w = img.shape[:2]
+                aspect = w / h
+                print(f"[VOP SERVER] {target.upper()} Aspect Assessed: {w}x{h} ({aspect:.4f})")
+                return jsonify({"aspect": aspect})
     except Exception as e: 
         print(f"[VOP SERVER] Aspect Calc Error: {e}")
         
@@ -866,92 +833,6 @@ def export_job():
         return send_file(CURRENT_JOB_FILE, as_attachment=True)
     return jsonify({"error": "No active job found to export"}), 404
 
-def migrate_legacy_bp_keys(job_data):
-    """
-    Rewrites legacy single-bipack field names to the new numbered bipack scheme.
-    
-    Pre-v0.7 saved jobs used 'bp_*' prefixes for the only bipack layer. With 
-    BiPack2 added, that layer is renamed to 'bp1_*'. We rewrite the keys here 
-    so that all downstream code (interpolator, engine, UI) only ever has to 
-    deal with the new naming.
-    
-    Returns: (mutated job_data, True if any keys were rewritten).
-    
-    Idempotent: if no legacy keys are present this is a no-op.
-    """
-    # Map of legacy-prefix -> new-prefix. Order matters: we check longer
-    # prefixes first so 'start_bp_p' maps to 'start_bp1_p' before any rule
-    # that might catch the bare 'bp_p'.
-    prefix_renames = [
-        # MDS smear sub-row keys
-        ('start_bp_',      'start_bp1_'),
-        ('stop_bp_',       'stop_bp1_'),
-        # JK printer keys
-        ('bp_gate',        'bp1_gate'),
-        ('bp_cam',         'bp1_cam'),
-        ('bp_stp',         'bp1_stp'),
-        # Per-keyframe spatial keys (handles 'bp_p1', 'bp_r1', etc.)
-        ('bp_p',           'bp1_p'),
-        ('bp_r',           'bp1_r'),
-        # Layer visibility flag
-        ('bp_visible',     'bp1_visible'),
-        # Layer-level scale + fit-Z (note: these used 'bipack_' prefix, not 'bp_')
-        ('bipack_coord_scale', 'bipack1_coord_scale'),
-        ('bipack_fit_z',       'bipack1_fit_z'),
-        ('bipack_image',       'bipack1_image'),
-    ]
-    
-    # Per-keyframe-prefixed variants: SSS and MDS both stamp their mode prefix
-    # before the field key (e.g. 'sss_bp_p1', 'mds_bp_gate3'). Build the full
-    # rename map by combining each mode prefix with each legacy field name.
-    full_renames = {}
-    for mode_prefix in ('sss_', 'mds_', ''):
-        for legacy, new in prefix_renames:
-            full_renames[mode_prefix + legacy] = mode_prefix + new
-    
-    rewrote = False
-    out = {}
-    for key, val in job_data.items():
-        new_key = key
-        # Find the longest matching legacy prefix. Sort by length descending 
-        # so 'sss_start_bp_p1' matches 'sss_start_bp_' before 'sss_bp_'.
-        # Idempotency is automatic: already-migrated keys like 'bp1_p1' don't 
-        # start with any of the legacy prefixes ('bp_', 'bp_p', etc.), so they 
-        # pass through unchanged.
-        for legacy_prefix in sorted(full_renames.keys(), key=len, reverse=True):
-            if key.startswith(legacy_prefix):
-                suffix = key[len(legacy_prefix):]
-                new_key = full_renames[legacy_prefix] + suffix
-                rewrote = True
-                break
-        out[new_key] = val
-    
-    return out, rewrote
-
-
-def migrate_current_job_file():
-    """
-    Runs the legacy-bp-key rewrite against an existing current_job.json on disk
-    at server boot. Called once during startup, not per request. After this 
-    runs, the persistent job file is guaranteed to use the new naming scheme 
-    and the rest of the codebase never needs to handle legacy keys.
-    """
-    if not os.path.exists(CURRENT_JOB_FILE):
-        return
-    try:
-        with open(CURRENT_JOB_FILE, 'r') as f:
-            job_data = json.load(f)
-        migrated, rewrote = migrate_legacy_bp_keys(job_data)
-        if rewrote:
-            with open(CURRENT_JOB_FILE, 'w') as f:
-                json.dump(migrated, f, indent=4)
-            print("[VOP SERVER] MIGRATION: current_job.json rewritten with bp_* -> bp1_* keys.")
-    except Exception as e:
-        print(f"[VOP SERVER] MIGRATION: current_job.json rewrite failed: {e}")
-
-# Run job-file migration once at module load (before any requests are served).
-migrate_current_job_file()
-
 @app.route('/import_job', methods=['POST'])
 def import_job():
     # Receives a JSON configuration file and overwrites the active session
@@ -970,13 +851,9 @@ def import_job():
         # Provide feedback if the imported file structure might be incompatible
         if file_version != VOP_VERSION:
             warning = f"System is v{VOP_VERSION}, but the file is v{file_version}."
-        # Rewrite legacy 'bp_*' field names to the new 'bp1_*' scheme. This 
-        # lets users keep importing jobs they saved before the BiPack2 feature
-        # existed without any manual JSON surgery. If the file is already in 
-        # the new format this is a no-op.
-        job_data, was_migrated = migrate_legacy_bp_keys(job_data)
-        if was_migrated:
-            print("[VOP SERVER] IMPORT: Migrated legacy bp_* keys to bp1_*.")
+        
+        with open(CURRENT_JOB_FILE, 'w') as f:
+            json.dump(job_data, f, indent=4)
         with open(CURRENT_JOB_FILE, 'w') as f:
             json.dump(job_data, f, indent=4)
         
