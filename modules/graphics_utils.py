@@ -3,6 +3,8 @@ VOP Module:     graphics_utils.py
 Description:    GL Pipeline management.
                 Enforces #version 300 es and overrides ModernGL's default 330 requirement.
                 Added vertical flip to OpenCV image loading to match OpenGL texture coords.
+                TextureManager now keys per-layer file lists by layer name (pm/bp1/bp2)
+                to support three independent optical layers.
 """
 #
 ###########################################################################
@@ -91,32 +93,87 @@ def init_render_pipeline():
     return ctx, prog, vao
 
 class TextureManager:
+    """
+    Per-layer image cache and texture loader for the engine.
+    
+    The VOP renders multiple optical layers (PM = Projection Mag, BP1/BP2 = 
+    BiPack reels). Each layer has its own folder of source frames on disk and 
+    its own playhead position. This class loads frames lazily on demand,
+    converts them to GPU textures, and caches the result so the same gate
+    frame isn't re-read from disk on every camera frame.
+    
+    Cache key is the full file path, which lets all three layers share the
+    single self.cache dict without collisions - paths from different folders
+    can never collide.
+    """
+
+    # Layer key -> folder name (relative to BASE_DIR). The folder names are 
+    # fixed by the on-disk layout managed by vop.py's upload routes. Order in 
+    # this dict is meaningless; it's used only for lookups.
+    LAYER_FOLDERS = {
+        'pm':  'ProjMag',
+        'bp1': 'ProjBiPack1',
+        'bp2': 'ProjBiPack2',
+    }
+
     def __init__(self, ctx, proj_dir, job_data):
+        """
+        proj_dir is the ProjMag directory. We derive sibling folders for BP1 
+        and BP2 from its parent (BASE_DIR). Caller doesn't need to know 
+        anything about bipack folders - the layer layout is encoded here.
+        """
         self.ctx = ctx
         self.cache = {}
 
+        # 1x1 pure-white texture used as a pass-through stand-in whenever a 
+        # layer is hidden (eye-toggle off) or has no source frames on disk. 
+        # White is multiplicatively identity in the blend pipeline, so swapping
+        # it in for a real layer texture cleanly removes that layer's 
+        # contribution without changing any other render state.
         white = np.ones((1,1,3), dtype='uint8') * 255
         self.white_tex = ctx.texture((1,1), 3, white.tobytes())
 
         valid_exts = ('.png', '.jpg', '.tif', '.tiff')
-        bp_dir = os.path.join(os.path.dirname(proj_dir), "ProjBiPack")
+        base_path = os.path.dirname(proj_dir)  # parent of ProjMag = repo BASE_DIR
 
-        self.mag_files = sorted([
-            os.path.join(proj_dir, f) for f in os.listdir(proj_dir)
-            if f.lower().endswith(valid_exts)
-        ]) if os.path.exists(proj_dir) else []
+        # Scan every layer's folder once at job-start. Files are stored sorted
+        # so that the playhead index maps deterministically to a gate frame.
+        # If a folder is missing (shouldn't happen because vop.py creates them
+        # at boot) we fall back to an empty list - load() then returns the 
+        # white pass-through texture.
+        self.layer_files = {}
+        for layer_key, folder_name in self.LAYER_FOLDERS.items():
+            folder_path = os.path.join(base_path, folder_name)
+            if os.path.exists(folder_path):
+                self.layer_files[layer_key] = sorted([
+                    os.path.join(folder_path, f) for f in os.listdir(folder_path)
+                    if f.lower().endswith(valid_exts)
+                ])
+            else:
+                self.layer_files[layer_key] = []
 
-        self.bp_files = sorted([
-            os.path.join(bp_dir, f) for f in os.listdir(bp_dir)
-            if f.lower().endswith(valid_exts)
-        ]) if os.path.exists(bp_dir) else []
-
-    def load(self, playhead, is_bipack=False):
-        files = self.bp_files if is_bipack else self.mag_files
+    def load(self, playhead, layer='pm'):
+        """
+        Returns (texture, aspect_ratio) for the requested layer at the given
+        playhead position.
+        
+        layer: one of 'pm', 'bp1', 'bp2'. Anything else falls back to PM for 
+               safety, so a typo in a caller can't crash the engine.
+        
+        If the layer has no frames on disk, returns the white pass-through 
+        texture with a default 16:9 aspect ratio - the engine's render path
+        special-cases white_tex to skip the geometry transform entirely.
+        """
+        files = self.layer_files.get(layer, self.layer_files.get('pm', []))
 
         if not files:
             return self.white_tex, 1.777
             
+        # Clamp the playhead to the available range. The JK printer logic in 
+        # the interpolator can produce gate indices that overshoot the end of
+        # a sequence (e.g. stepping past the last frame on a held shot); 
+        # clamping here means those overshoots safely hold on the last frame
+        # instead of crashing with an IndexError.
         idx = max(0, min(len(files)-1, int(playhead)))
         f_path = files[idx]
         
