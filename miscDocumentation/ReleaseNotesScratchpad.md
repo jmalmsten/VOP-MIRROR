@@ -8,3 +8,5 @@ This version brings with it a big bit of refactoring as I add a third layer to t
 ### BiPack becomes BiPack1
 As we now have two bipacks I went ahead and renamed BiPack to BiPack1 so things make more sense going forward. 
 
+## Fixed: 
+Keyframing got inherited values from wrong fields. Fixed.

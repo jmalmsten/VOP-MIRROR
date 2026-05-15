@@ -170,10 +170,18 @@ function nukeProjMag() {
     }
 }
 
-function nukeProjBiPack() {
-    if (confirm("This deletes whatever is in the Projector BiPack. Are you sure? This cannot be undone.")) {
-        fetch('/nuke_proj_bipack', {method: 'POST'});
-        document.getElementById('bipack_image').value = '';
+function nukeProjBiPack1() {
+    if (confirm("This deletes whatever is in Projector BiPack 1. Are you sure? This cannot be undone.")) {
+        fetch('/nuke_proj_bipack1', {method: 'POST'});
+        document.getElementById('bipack1_image').value = '';
+        triggerSync();
+    }
+}
+
+function nukeProjBiPack2() {
+    if (confirm("This deletes whatever is in Projector BiPack 2. Are you sure? This cannot be undone.")) {
+        fetch('/nuke_proj_bipack2', {method: 'POST'});
+        document.getElementById('bipack2_image').value = '';
         triggerSync();
     }
 }
@@ -233,53 +241,86 @@ async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
 
 function addMDSKeyframe() {
     mdsMasterCount++; 
-    const idx = mdsMasterCount; 
-    
+
     const existingRows = document.querySelectorAll('.mds-keyframe-group');
     const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
 
-    // Default baseline
+    // Default baseline. One block per layer for clarity. PM keeps its original
+    // unsuffixed key names ('p', 'r', 'sp', 'sr', 'ep', 'er', 'pm_gate' etc.)
+    // because PM was never asymmetric; only BP got numbered. BP1 inherits the
+    // shape of the old single-BP defaults but with 'bp1_' / 'sbp1_' / 'ebp1_'
+    // prefixes; BP2 is new and parallel.
     let vals = {
-        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0",
+        m: "S", crn: false,
+        // Master row spatial defaults
+        p: "0,0,-1.0", r: "0,0,0",
+        bp1_p: "0,0,-1.0", bp1_r: "0,0,0",
+        bp2_p: "0,0,-1.0", bp2_r: "0,0,0",
+        // Light + exposure
         c: "#ffffff", cg: "#ffffff", exp: "1.0", f: 1,
         // JK Printer defaults: empty gate (no anchor, just continue), 1:1 playback rate
-        pm_gate: "", pm_cam: "1", pm_stp: "1",
-        bp_gate: "", bp_cam: "1", bp_stp: "1",
-        sp: "0,0,0", sr: "0,0,0", sbp_p: "0,0,0", sbp_r: "0,0,0", sc: "#ffffff", scg: "#ffffff",
-        ep: "0,0,0", er: "0,0,0", ebp_p: "0,0,0", ebp_r: "0,0,0", ec: "#ffffff", ecg: "#ffffff"
+        pm_gate: "",  pm_cam: "1",  pm_stp: "1",
+        bp1_gate: "", bp1_cam: "1", bp1_stp: "1",
+        bp2_gate: "", bp2_cam: "1", bp2_stp: "1",
+        // Smear START row offsets (one set per layer)
+        sp: "0,0,0", sr: "0,0,0",
+        sbp1_p: "0,0,0", sbp1_r: "0,0,0",
+        sbp2_p: "0,0,0", sbp2_r: "0,0,0",
+        sc: "#ffffff", scg: "#ffffff",
+        // Smear STOP row offsets (one set per layer)
+        ep: "0,0,0", er: "0,0,0",
+        ebp1_p: "0,0,0", ebp1_r: "0,0,0",
+        ebp2_p: "0,0,0", ebp2_r: "0,0,0",
+        ec: "#ffffff", ecg: "#ffffff"
     };
 
     if (lastRow) {
-        // Scraper helper: looks for an input that starts with the prefix and ends with the suffix
+        // Scraper helpers: look up by selector inside the previous row's DOM
         const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
         const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
         
+        // The previous-row scrape now uses explicit per-layer class hooks 
+        // (.bp1-input, .bp2-input) rather than the old :not([id*="bp"]) trick.
+        // The class-hook approach is clearer and also future-proof - adding a 
+        // BP3 wouldn't break PM scrapes the way an [id*="bp"] filter eventually 
+        // would once we run out of letters to negate on.
         vals = {
             m: getV('.mds-master-row select'),
             crn: getC('.mds-master-row input[type="checkbox"]'),
-            p: getV('.mds-master-row input[id*="_p"]:not([id*="bp"])'),
-            r: getV('.mds-master-row input[id*="_r"]:not([id*="bp"])'),
-            bp_p: getV('.mds-master-row .bp-input[id*="_p"]'),
-            bp_r: getV('.mds-master-row .bp-input[id*="_r"]'),
-            // Fixed Color Selectors: Targets hidden hex fields within specific row types
+            // PM spatial - master row. The :not([id^="mds_pm_"]) excludes 
+            // mds_pm_gate / mds_pm_cam / mds_pm_stp from accidentally being 
+            // picked up by [id^="mds_p"] (which would otherwise match the 
+            // 'pm_' prefix because "mds_p" is a prefix of "mds_pm_").
+            p: getV('.mds-master-row input[id^="mds_p"]:not([id^="mds_pm_"]):not([id^="mds_bp1_"]):not([id^="mds_bp2_"])'),
+            r: getV('.mds-master-row input[id^="mds_r"]:not([id^="mds_bp1_"]):not([id^="mds_bp2_"])'),
+            // BP1/BP2 spatial - master row
+            bp1_p: getV('.mds-master-row .bp1-input[id*="_p"]'),
+            bp1_r: getV('.mds-master-row .bp1-input[id*="_r"]'),
+            bp2_p: getV('.mds-master-row .bp2-input[id*="_p"]'),
+            bp2_r: getV('.mds-master-row .bp2-input[id*="_r"]'),
+            // Color selectors: Targets hidden hex fields within specific row types
             c: getV('.mds-master-row input[id^="mds_c"]:not([id*="cg"])[id$="_hex"]'),
             cg: getV('.mds-master-row input[id^="mds_cg"][id$="_hex"]'),
             exp: getV('.mds-master-row input[id*="mds_s"]'),
             f: parseInt(getV('.mds-master-row input[id*="_f"]')) + 1,
             
-            // Smear Start Scrapes
-            sp: getV('.mds-smear-row:nth-child(2) input[id*="_p"]:not([id*="bp"])'),
-            sr: getV('.mds-smear-row:nth-child(2) input[id*="_r"]:not([id*="bp"])'),
-            sbp_p: getV('.mds-smear-row:nth-child(2) .bp-input[id*="_p"]'),
-            sbp_r: getV('.mds-smear-row:nth-child(2) .bp-input[id*="_r"]'),
+            // Smear START scrapes (one block per layer)
+            sp: getV('.mds-smear-row:nth-child(2) input[id^="mds_start_p"]:not(.bp1-input):not(.bp2-input)'),
+            sr: getV('.mds-smear-row:nth-child(2) input[id^="mds_start_r"]:not(.bp1-input):not(.bp2-input)'),
+            sbp1_p: getV('.mds-smear-row:nth-child(2) .bp1-input[id*="_p"]'),
+            sbp1_r: getV('.mds-smear-row:nth-child(2) .bp1-input[id*="_r"]'),
+            sbp2_p: getV('.mds-smear-row:nth-child(2) .bp2-input[id*="_p"]'),
+            sbp2_r: getV('.mds-smear-row:nth-child(2) .bp2-input[id*="_r"]'),
             sc: getV('.mds-smear-row:nth-child(2) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
             scg: getV('.mds-smear-row:nth-child(2) input[id*="_cg"][id$="_hex"]'),
 
-            // Smear Stop Scrapes
-            ep: getV('.mds-smear-row:nth-child(3) input[id*="_p"]:not([id*="bp"])'),
-            er: getV('.mds-smear-row:nth-child(3) input[id*="_r"]:not([id*="bp"])'),
-            ebp_p: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_p"]'),
-            ebp_r: getV('.mds-smear-row:nth-child(3) .bp-input[id*="_r"]'),
+            // Smear STOP scrapes (one block per layer)
+            ep: getV('.mds-smear-row:nth-child(3) input[id^="mds_stop_p"]:not(.bp1-input):not(.bp2-input)'),
+            er: getV('.mds-smear-row:nth-child(3) input[id^="mds_stop_r"]:not(.bp1-input):not(.bp2-input)'),
+            ebp1_p: getV('.mds-smear-row:nth-child(3) .bp1-input[id*="_p"]'),
+            ebp1_r: getV('.mds-smear-row:nth-child(3) .bp1-input[id*="_r"]'),
+            ebp2_p: getV('.mds-smear-row:nth-child(3) .bp2-input[id*="_p"]'),
+            ebp2_r: getV('.mds-smear-row:nth-child(3) .bp2-input[id*="_r"]'),
             ec: getV('.mds-smear-row:nth-child(3) input[id*="_c"][id$="_hex"]:not([id*="cg"])'),
             ecg: getV('.mds-smear-row:nth-child(3) input[id*="_cg"][id$="_hex"]'),
             // JK Printer scrape from previous row.
@@ -290,9 +331,12 @@ function addMDSKeyframe() {
             pm_gate: "",
             pm_cam: getV('.mds-master-row input[id^="mds_pm_cam"]') || "1",
             pm_stp: getV('.mds-master-row input[id^="mds_pm_stp"]') || "1",
-            bp_gate: "",
-            bp_cam: getV('.mds-master-row input[id^="mds_bp_cam"]') || "1",
-            bp_stp: getV('.mds-master-row input[id^="mds_bp_stp"]') || "1"
+            bp1_gate: "",
+            bp1_cam: getV('.mds-master-row input[id^="mds_bp1_cam"]') || "1",
+            bp1_stp: getV('.mds-master-row input[id^="mds_bp1_stp"]') || "1",
+            bp2_gate: "",
+            bp2_cam: getV('.mds-master-row input[id^="mds_bp2_cam"]') || "1",
+            bp2_stp: getV('.mds-master-row input[id^="mds_bp2_stp"]') || "1"
         };
     }
 
@@ -306,17 +350,24 @@ function addMDSKeyframe() {
             <select id="mds_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
             <input type="checkbox" id="mds_crn${idx}" ${vals.crn?'checked':''}>
             <div class="node-tag master">MST</div>
-            <!-- JK printer inputs: insert AFTER the MST node-tag, BEFORE the PM POS input. -->
-            <input type="number" step="1"           id="mds_pm_gate${idx}" value="${vals.pm_gate}" class="pm-jk-cell jk-input" placeholder="—">
-            <input type="number" step="1" min="1"   id="mds_pm_cam${idx}"  value="${vals.pm_cam}"  class="pm-jk-cell jk-input">
-            <input type="number" step="1"           id="mds_pm_stp${idx}"  value="${vals.pm_stp}"  class="pm-jk-cell jk-input">
-            <input type="number" step="1"           id="mds_bp_gate${idx}" value="${vals.bp_gate}" class="bp-jk-cell jk-input bp-input" placeholder="—">
-            <input type="number" step="1" min="1"   id="mds_bp_cam${idx}"  value="${vals.bp_cam}"  class="bp-jk-cell jk-input bp-input">
-            <input type="number" step="1"           id="mds_bp_stp${idx}"  value="${vals.bp_stp}"  class="bp-jk-cell jk-input bp-input">
-            <input id="mds_p${idx}" value="${vals.p}">
-            <input id="mds_r${idx}" value="${vals.r}">
-            <input id="mds_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
-            <input id="mds_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
+            <!-- JK printer inputs per layer. Each block of three (gate, cam, stp) is gated 
+                 by its layer's pm-jk-cell / bp1-jk-cell / bp2-jk-cell class so CSS can 
+                 collapse it when the corresponding layer is absent or disabled. -->
+            <input type="number" step="1"           id="mds_pm_gate${idx}"  value="${vals.pm_gate}"  class="pm-jk-cell jk-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_pm_cam${idx}"   value="${vals.pm_cam}"   class="pm-jk-cell jk-input">
+            <input type="number" step="1"           id="mds_pm_stp${idx}"   value="${vals.pm_stp}"   class="pm-jk-cell jk-input">
+            <input type="number" step="1"           id="mds_bp1_gate${idx}" value="${vals.bp1_gate}" class="bp1-jk-cell jk-input bp1-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_bp1_cam${idx}"  value="${vals.bp1_cam}"  class="bp1-jk-cell jk-input bp1-input">
+            <input type="number" step="1"           id="mds_bp1_stp${idx}"  value="${vals.bp1_stp}"  class="bp1-jk-cell jk-input bp1-input">
+            <input type="number" step="1"           id="mds_bp2_gate${idx}" value="${vals.bp2_gate}" class="bp2-jk-cell jk-input bp2-input" placeholder="—">
+            <input type="number" step="1" min="1"   id="mds_bp2_cam${idx}"  value="${vals.bp2_cam}"  class="bp2-jk-cell jk-input bp2-input">
+            <input type="number" step="1"           id="mds_bp2_stp${idx}"  value="${vals.bp2_stp}"  class="bp2-jk-cell jk-input bp2-input">
+            <input id="mds_p${idx}"     value="${vals.p}"     class="pm-spatial-cell">
+            <input id="mds_r${idx}"     value="${vals.r}"     class="pm-spatial-cell">
+            <input id="mds_bp1_p${idx}" value="${vals.bp1_p}" class="bp1-spatial-cell bp1-input">
+            <input id="mds_bp1_r${idx}" value="${vals.bp1_r}" class="bp1-spatial-cell bp1-input">
+            <input id="mds_bp2_p${idx}" value="${vals.bp2_p}" class="bp2-spatial-cell bp2-input">
+            <input id="mds_bp2_r${idx}" value="${vals.bp2_r}" class="bp2-spatial-cell bp2-input">
             <input type="color" id="mds_c${idx}" value="${vals.c}" onchange="updateHex(this, 'mds_c${idx}_hex')">
             <input type="hidden" id="mds_c${idx}_hex" value="${vals.c}">
             <input type="color" id="mds_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'mds_cg${idx}_hex')">
@@ -330,13 +381,18 @@ function addMDSKeyframe() {
             <div class="pm-jk-cell"></div>
             <div class="pm-jk-cell"></div>
             <div class="pm-jk-cell"></div>
-            <div class="bp-jk-cell"></div>
-            <div class="bp-jk-cell"></div>
-            <div class="bp-jk-cell"></div>
-            <input id="mds_start_p${idx}" value="${vals.sp}">
-            <input id="mds_start_r${idx}" value="${vals.sr}">
-            <input id="mds_start_bp_p${idx}" value="${vals.sbp_p}" class="bp-input">
-            <input id="mds_start_bp_r${idx}" value="${vals.sbp_r}" class="bp-input">
+            <div class="bp1-jk-cell"></div>
+            <div class="bp1-jk-cell"></div>
+            <div class="bp1-jk-cell"></div>
+            <div class="bp2-jk-cell"></div>
+            <div class="bp2-jk-cell"></div>
+            <div class="bp2-jk-cell"></div>
+            <input id="mds_start_p${idx}"     value="${vals.sp}"     class="pm-spatial-cell">
+            <input id="mds_start_r${idx}"     value="${vals.sr}"     class="pm-spatial-cell">
+            <input id="mds_start_bp1_p${idx}" value="${vals.sbp1_p}" class="bp1-spatial-cell bp1-input">
+            <input id="mds_start_bp1_r${idx}" value="${vals.sbp1_r}" class="bp1-spatial-cell bp1-input">
+            <input id="mds_start_bp2_p${idx}" value="${vals.sbp2_p}" class="bp2-spatial-cell bp2-input">
+            <input id="mds_start_bp2_r${idx}" value="${vals.sbp2_r}" class="bp2-spatial-cell bp2-input">
             <input type="color" id="mds_start_c${idx}" value="${vals.sc}" onchange="updateHex(this, 'mds_start_c${idx}_hex')">
             <input type="hidden" id="mds_start_c${idx}_hex" value="${vals.sc}">
             <div></div>
@@ -349,13 +405,18 @@ function addMDSKeyframe() {
             <div class="pm-jk-cell"></div>
             <div class="pm-jk-cell"></div>
             <div class="pm-jk-cell"></div>
-            <div class="bp-jk-cell"></div>
-            <div class="bp-jk-cell"></div>
-            <div class="bp-jk-cell"></div>
-            <input id="mds_stop_p${idx}" value="${vals.ep}">
-            <input id="mds_stop_r${idx}" value="${vals.er}">
-            <input id="mds_stop_bp_p${idx}" value="${vals.ebp_p}" class="bp-input">
-            <input id="mds_stop_bp_r${idx}" value="${vals.ebp_r}" class="bp-input">
+            <div class="bp1-jk-cell"></div>
+            <div class="bp1-jk-cell"></div>
+            <div class="bp1-jk-cell"></div>
+            <div class="bp2-jk-cell"></div>
+            <div class="bp2-jk-cell"></div>
+            <div class="bp2-jk-cell"></div>
+            <input id="mds_stop_p${idx}"     value="${vals.ep}"     class="pm-spatial-cell">
+            <input id="mds_stop_r${idx}"     value="${vals.er}"     class="pm-spatial-cell">
+            <input id="mds_stop_bp1_p${idx}" value="${vals.ebp1_p}" class="bp1-spatial-cell bp1-input">
+            <input id="mds_stop_bp1_r${idx}" value="${vals.ebp1_r}" class="bp1-spatial-cell bp1-input">
+            <input id="mds_stop_bp2_p${idx}" value="${vals.ebp2_p}" class="bp2-spatial-cell bp2-input">
+            <input id="mds_stop_bp2_r${idx}" value="${vals.ebp2_r}" class="bp2-spatial-cell bp2-input">
             <input type="color" id="mds_stop_c${idx}" value="${vals.ec}" onchange="updateHex(this, 'mds_stop_c${idx}_hex')">
             <input type="hidden" id="mds_stop_c${idx}_hex" value="${vals.ec}">
             <div></div>
@@ -374,31 +435,45 @@ function reindexMDS() {
 
 function addSSSKeyframe() {
     sssMasterCount++; 
-    const idx = sssMasterCount; 
-    
-    const existingRows = document.querySelectorAll('.sss-master-row');
+const existingRows = document.querySelectorAll('.sss-master-row');
     const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
 
-    // SSS Base Defaults (Includes SD and PH)
+    // SSS Base Defaults (Includes SD and PH; the smear-by-shutter knobs SSS
+    // adds on top of the shared spatial/light/JK parameters).
     let vals = {
-        m: "S", crn: false, p: "0,0,-1.0", r: "0,0,0", bp_p: "0,0,-1.0", bp_r: "0,0,0", 
+        m: "S", crn: false,
+        p: "0,0,-1.0", r: "0,0,0",
+        bp1_p: "0,0,-1.0", bp1_r: "0,0,0",
+        bp2_p: "0,0,-1.0", bp2_r: "0,0,0",
         c: "#ffffff", cg: "#ffffff", exp: "1.0", sd: "1.0", ph: "0.5", f: 1,
         // JK Printer defaults: empty gate (no anchor, just continue), 1:1 playback rate
-        pm_gate: "", pm_cam: "1", pm_stp: "1",
-        bp_gate: "", bp_cam: "1", bp_stp: "1"
+        pm_gate: "",  pm_cam: "1",  pm_stp: "1",
+        bp1_gate: "", bp1_cam: "1", bp1_stp: "1",
+        bp2_gate: "", bp2_cam: "1", bp2_stp: "1"
     };
 
     if (lastRow) {
         const getV = (sel) => { const el = lastRow.querySelector(sel); return el ? el.value : ""; };
         const getC = (sel) => { const el = lastRow.querySelector(sel); return el ? el.checked : false; };
         
+        // Class-hook scrapes (.bp1-input / .bp2-input) for the same reasons as 
+        // the MDS scraper above: clearer intent and future-proof against an 
+        // eventual BP3 layer.
+        // 
+        // The :not([id^="sss_pm_"]):not([id^="sss_bp1_"]):not([id^="sss_bp2_"]) 
+        // chain on the PM p/r scrapes is necessary because input[id^="sss_p"] 
+        // would otherwise match sss_pm_gate / sss_pm_cam / sss_pm_stp - "sss_p" 
+        // is also a prefix of "sss_pm". (This was a latent bug in the original 
+        // single-BP code that was fixed in passing during the rename.)
         vals = {
             m: getV('select[id^="sss_m"]'),
             crn: getC('input[type="checkbox"]'),
-            p: getV('input[id^="sss_p"]:not([id*="bp"])'),
-            r: getV('input[id^="sss_r"]:not([id*="bp"])'),
-            bp_p: getV('.bp-input[id^="sss_bp_p"]'),
-            bp_r: getV('.bp-input[id^="sss_bp_r"]'),
+            p: getV('input[id^="sss_p"]:not([id^="sss_pm_"]):not([id^="sss_bp1_"]):not([id^="sss_bp2_"])'),
+            r: getV('input[id^="sss_r"]:not([id^="sss_bp1_"]):not([id^="sss_bp2_"])'),
+            bp1_p: getV('.bp1-input[id^="sss_bp1_p"]'),
+            bp1_r: getV('.bp1-input[id^="sss_bp1_r"]'),
+            bp2_p: getV('.bp2-input[id^="sss_bp2_p"]'),
+            bp2_r: getV('.bp2-input[id^="sss_bp2_r"]'),
             c: getV('input[id^="sss_c"][id$="_hex"]:not([id*="cg"])'),
             cg: getV('input[id^="sss_cg"][id$="_hex"]'),
             exp: getV('input[id^="sss_exp"]'),
@@ -413,9 +488,12 @@ function addSSSKeyframe() {
             pm_gate: "",
             pm_cam: getV('input[id^="sss_pm_cam"]') || "1",
             pm_stp: getV('input[id^="sss_pm_stp"]') || "1",
-            bp_gate: "",
-            bp_cam: getV('input[id^="sss_bp_cam"]') || "1",
-            bp_stp: getV('input[id^="sss_bp_stp"]') || "1"
+            bp1_gate: "",
+            bp1_cam: getV('input[id^="sss_bp1_cam"]') || "1",
+            bp1_stp: getV('input[id^="sss_bp1_stp"]') || "1",
+            bp2_gate: "",
+            bp2_cam: getV('input[id^="sss_bp2_cam"]') || "1",
+            bp2_stp: getV('input[id^="sss_bp2_stp"]') || "1"
         };
     }
 
@@ -429,16 +507,21 @@ function addSSSKeyframe() {
         <input type="number" id="sss_f${idx}" value="${vals.f}">
         <select id="sss_m${idx}"><option value="S" ${vals.m==='S'?'selected':''}>S</option><option value="L" ${vals.m==='L'?'selected':''}>L</option></select>
         <input type="checkbox" id="sss_crn${idx}" ${vals.crn?'checked':''}>
-        <input type="number" step="1"           id="sss_pm_gate${idx}" value="${vals.pm_gate}" class="pm-jk-cell jk-input" placeholder="—">
-        <input type="number" step="1" min="1"   id="sss_pm_cam${idx}"  value="${vals.pm_cam}"  class="pm-jk-cell jk-input">
-        <input type="number" step="1"           id="sss_pm_stp${idx}"  value="${vals.pm_stp}"  class="pm-jk-cell jk-input">
-        <input type="number" step="1"           id="sss_bp_gate${idx}" value="${vals.bp_gate}" class="bp-jk-cell jk-input bp-input" placeholder="—">
-        <input type="number" step="1" min="1"   id="sss_bp_cam${idx}"  value="${vals.bp_cam}"  class="bp-jk-cell jk-input bp-input">
-        <input type="number" step="1"           id="sss_bp_stp${idx}"  value="${vals.bp_stp}"  class="bp-jk-cell jk-input bp-input">
-        <input id="sss_p${idx}" value="${vals.p}">
-        <input id="sss_r${idx}" value="${vals.r}">
-        <input id="sss_bp_p${idx}" value="${vals.bp_p}" class="bp-input">
-        <input id="sss_bp_r${idx}" value="${vals.bp_r}" class="bp-input">
+        <input type="number" step="1"           id="sss_pm_gate${idx}"  value="${vals.pm_gate}"  class="pm-jk-cell jk-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_pm_cam${idx}"   value="${vals.pm_cam}"   class="pm-jk-cell jk-input">
+        <input type="number" step="1"           id="sss_pm_stp${idx}"   value="${vals.pm_stp}"   class="pm-jk-cell jk-input">
+        <input type="number" step="1"           id="sss_bp1_gate${idx}" value="${vals.bp1_gate}" class="bp1-jk-cell jk-input bp1-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_bp1_cam${idx}"  value="${vals.bp1_cam}"  class="bp1-jk-cell jk-input bp1-input">
+        <input type="number" step="1"           id="sss_bp1_stp${idx}"  value="${vals.bp1_stp}"  class="bp1-jk-cell jk-input bp1-input">
+        <input type="number" step="1"           id="sss_bp2_gate${idx}" value="${vals.bp2_gate}" class="bp2-jk-cell jk-input bp2-input" placeholder="—">
+        <input type="number" step="1" min="1"   id="sss_bp2_cam${idx}"  value="${vals.bp2_cam}"  class="bp2-jk-cell jk-input bp2-input">
+        <input type="number" step="1"           id="sss_bp2_stp${idx}"  value="${vals.bp2_stp}"  class="bp2-jk-cell jk-input bp2-input">
+        <input id="sss_p${idx}"     value="${vals.p}"     class="pm-spatial-cell">
+        <input id="sss_r${idx}"     value="${vals.r}"     class="pm-spatial-cell">
+        <input id="sss_bp1_p${idx}" value="${vals.bp1_p}" class="bp1-spatial-cell bp1-input">
+        <input id="sss_bp1_r${idx}" value="${vals.bp1_r}" class="bp1-spatial-cell bp1-input">
+        <input id="sss_bp2_p${idx}" value="${vals.bp2_p}" class="bp2-spatial-cell bp2-input">
+        <input id="sss_bp2_r${idx}" value="${vals.bp2_r}" class="bp2-spatial-cell bp2-input">
         <input type="color" id="sss_c${idx}" value="${vals.c}" onchange="updateHex(this, 'sss_c${idx}_hex')">
         <input type="hidden" id="sss_c${idx}_hex" value="${vals.c}">
         <input type="color" id="sss_cg${idx}" value="${vals.cg}" onchange="updateHex(this, 'sss_cg${idx}_hex')">
@@ -452,20 +535,66 @@ function addSSSKeyframe() {
     reindexSSS();
 }
 
-// Toggle .has-pm-video / .has-bp-video classes on the SSS and MDS sheet
-// wrappers based on /status frame counts. CSS rules in style.css use these
-// classes to expand the grid template (revealing JK columns) and unhide the 
-// individual JK input cells.
+// Toggle column-visibility classes on the SSS and MDS sheet wrappers.
 //
-// >1 frame is the threshold: a single TIFF (still image) doesn't benefit from
-// JK printer controls since GATE clamps to frame 0 anyway, so we keep the
-// columns hidden for stills to reduce sheet clutter.
-function applyVideoVisibility(pmFrames, bpFrames) {
+// Each layer (PM, BP1, BP2) has two independent reasons its columns might be
+// hidden, so the CSS expands the grid template based on TWO orthogonal classes
+// per layer:
+//
+//   .has-{layer}-video    - The layer holds a video sequence (>1 source frame),
+//                           so the JK printer GATE/CAM/STP columns are useful.
+//                           A single-frame still doesn't benefit from these knobs.
+//
+//   .layer-disabled-{layer} - The layer's eye toggle is closed. Both the JK 
+//                             columns AND the POS/ROT columns collapse because
+//                             a disabled layer can't be animated either.
+//
+// The two classes interact in CSS via :has() selectors - see style.css.
+//
+// Called from:
+//   1. The 1Hz /status poll loop (so server-side frame-count changes are 
+//      reflected within a second of an upload finishing).
+//   2. Each eye-toggle's onchange handler (so the columns react immediately, 
+//      not on the next poll tick - DOMContentLoaded wires these up below).
+function applyLayerVisibility(pmFrames, bp1Frames, bp2Frames,
+                              pmVisible, bp1Visible, bp2Visible) {
     const sheets = document.querySelectorAll('.sss-sheet, .mds-sheet');
     sheets.forEach(sheet => {
-        sheet.classList.toggle('has-pm-video', pmFrames > 1);
-        sheet.classList.toggle('has-bp-video', bpFrames > 1);
+        // Video presence drives the JK column visibility. >1 because a single 
+        // TIFF (still image) doesn't benefit from JK printer controls since 
+        // GATE clamps to frame 0 anyway.
+        sheet.classList.toggle('has-pm-video',  pmFrames  > 1);
+        sheet.classList.toggle('has-bp1-video', bp1Frames > 1);
+        sheet.classList.toggle('has-bp2-video', bp2Frames > 1);
+        // Eye-toggle state drives the full per-layer column hiding (JK 
+        // columns + POS/ROT columns for that layer).
+        sheet.classList.toggle('layer-disabled-pm',  !pmVisible);
+        sheet.classList.toggle('layer-disabled-bp1', !bp1Visible);
+        sheet.classList.toggle('layer-disabled-bp2', !bp2Visible);
     });
+}
+
+// Reads current eye-toggle states from the three layer-visibility checkboxes
+// and re-applies the visibility classes. Cached frame counts come from the 
+// last /status response so we don't need to re-fetch just to update on a 
+// toggle change.
+//
+// _layerVisibilityFrames: last-known frame counts from /status. Updated by 
+// the poll loop. Defaults to all-zero so a toggle event that fires before 
+// the first poll doesn't crash.
+let _layerVisibilityFrames = { pm: 0, bp1: 0, bp2: 0 };
+function refreshLayerVisibility() {
+    const pmEye  = document.getElementById('pm_visible');
+    const bp1Eye = document.getElementById('bp1_visible');
+    const bp2Eye = document.getElementById('bp2_visible');
+    applyLayerVisibility(
+        _layerVisibilityFrames.pm,
+        _layerVisibilityFrames.bp1,
+        _layerVisibilityFrames.bp2,
+        pmEye  ? pmEye.checked  : true,
+        bp1Eye ? bp1Eye.checked : true,
+        bp2Eye ? bp2Eye.checked : true
+    );
 }
 
 function reindexSSS() {
@@ -561,8 +690,14 @@ setInterval(async () => {
             bar.style.width = "0%";
             if (etaEl) etaEl.innerText = ""; 
         }
-        // Drive JK printer column visibility from server-reported source frame counts.
-        applyVideoVisibility(st.pm_frames || 0, st.bp_frames || 0);
+        // Drive layer column visibility from server-reported source frame counts
+        // and the current eye-toggle states. Cache the frame counts so eye-toggle 
+        // change events can also call refreshLayerVisibility() without needing to 
+        // re-fetch /status.
+        _layerVisibilityFrames.pm  = st.pm_frames  || 0;
+        _layerVisibilityFrames.bp1 = st.bp1_frames || 0;
+        _layerVisibilityFrames.bp2 = st.bp2_frames || 0;
+        refreshLayerVisibility();
     } catch(e) { console.error("Poll Error:", e); }
 }, 1000);
 
@@ -602,8 +737,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Bind drop zones to the text input fields showing the active image
-    setupDropZone('image', 'file_input', 'image', '/upload_target');
-    setupDropZone('bipack_image', 'bp_file_input', 'bipack_image', '/upload_proj_bipack');
+    setupDropZone('image',          'file_input',     'image',          '/upload_target');
+    setupDropZone('bipack1_image',  'bp1_file_input', 'bipack1_image',  '/upload_proj_bipack1');
+    setupDropZone('bipack2_image',  'bp2_file_input', 'bipack2_image',  '/upload_proj_bipack2');
+    
+    // Wire eye-toggle change events so column visibility reacts immediately. 
+    // Without this, toggling a layer's eye would only update the columns on 
+    // the next /status poll (up to 1s lag), which feels broken.
+    // refreshLayerVisibility() reads the current eye states and reuses the 
+    // cached frame counts from the last poll.
+    ['pm_visible', 'bp1_visible', 'bp2_visible'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', refreshLayerVisibility);
+    });
 });
 
 /* * Dispatches the dark frame measurement task to the engine and polls the
