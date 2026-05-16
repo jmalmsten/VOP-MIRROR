@@ -241,9 +241,9 @@ async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
 
 function addMDSKeyframe() {
     mdsMasterCount++; 
+    const idx = mdsMasterCount;
 
     const existingRows = document.querySelectorAll('.mds-keyframe-group');
-    const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
 
     // Default baseline. One block per layer for clarity. PM keeps its original
     // unsuffixed key names ('p', 'r', 'sp', 'sr', 'ep', 'er', 'pm_gate' etc.)
@@ -435,7 +435,9 @@ function reindexMDS() {
 
 function addSSSKeyframe() {
     sssMasterCount++; 
-const existingRows = document.querySelectorAll('.sss-master-row');
+    const idx = sssMasterCount;
+
+    const existingRows = document.querySelectorAll('.sss-master-row');
     const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
 
     // SSS Base Defaults (Includes SD and PH; the smear-by-shutter knobs SSS
