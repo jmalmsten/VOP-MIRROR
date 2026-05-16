@@ -11,11 +11,11 @@ The VOP (Video Optical Printer) is a combination of hardware and software to mak
 
 ### What does it aim to do?
 
-In essence. In its simplest form. It takes an input image. And "projects" it onto an HDMI screen in a virtual 3D plane. And during a long exposure, the camera sensor records the light coming off that HDMI screen to a frame that's saved in a folder called CamMag. This image is saved as a 16 bit linear color tiff. And if you do another exposure and target that same tiff. The VOP will merge the two using additive mix. This additive workflow is named LIME. (Latent Image Multiple Exposures)
+In essence. In its simplest form. It takes an input image. And "projects" it onto an HDMI screen in a virtual 3D plane. And during a long exposure, the camera sensor records the light coming off that HDMI screen to a frame that's saved in a folder called CamMag. This image is saved as a 16 bit linear color tiff. And if you do another exposure and target that same tiff. The VOP will merge the two using additive mix. This additive workflow is named LIME (Latent Image Multiple Exposures) and is designed to mimic real world film workflows where exposing the frame in the camera to light adds it to the existing latent image.
 
-This is all orchestrated with an exposure sheet to make a sequence. That sequence can then be moved to a desktop for further digital compositing and NLE work.
+This is all orchestrated with an exposure sheet to make a sequence of TIFFS or ProRes444. That sequence can then be moved to a desktop for further digital compositing and NLE work.
 
-With the LIME system, the ability to bipack multiple 3D planes and the exposure sheet. You can achieve slitscan animation, compositing and optical image processing. And whatever the user dreams up within the VOP's capabilities.
+With the LIME system, the ability to bipack multiple 3D planes and the exposure sheet (three in total). You can achieve slitscan animation, compositing and optical image processing. And whatever the user dreams up within the VOP's capabilities.
 
 ### Who is this intended to be used by?
 Mainly... me. I'm just putting this on a public repo in case someone out there with a madness similar to mine stumbles upon it and wants to explore this particular workflow.  
