@@ -53,7 +53,9 @@ app = Flask(__name__)
 # Absolute path resolutions for standard system directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJ_MAG_DIR = os.path.join(BASE_DIR, "ProjMag")
-PROJ_BIPACK_DIR = os.path.join(BASE_DIR, "ProjBiPack")
+# Renamed from PROJ_BIPACK_DIR. We now have two numbered bipack layers.
+PROJ_BIPACK1_DIR = os.path.join(BASE_DIR, "ProjBiPack1")
+PROJ_BIPACK2_DIR = os.path.join(BASE_DIR, "ProjBiPack2")
 CAM_MAG_DIR = os.path.join(BASE_DIR, "CamMag")
 CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 
@@ -65,10 +67,11 @@ VOP_VERSION ="0.6.5"
 
 # Initialize required directory structure on boot if missing
 PRORES_DIR = os.path.join(BASE_DIR, "ProRes")
-for d in [PROJ_MAG_DIR, PROJ_BIPACK_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints"), PRORES_DIR]:
+for d in [PROJ_MAG_DIR, PROJ_BIPACK1_DIR, PROJ_BIPACK2_DIR, CAM_MAG_DIR, os.path.join(BASE_DIR, "WorkPrints"), PRORES_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Single global reference for the persistent GPU engine subprocess
+
 engine_process = None
 prores_process = None
 
@@ -124,7 +127,8 @@ def process_video_ingestion(filepath, target_dir):
 
 def count_source_frames(directory):
     """
-    Counts image frames in a media directory (PROJ_MAG_DIR or PROJ_BIPACK_DIR).
+    Counts image frames in a media directory (PROJ_MAG_DIR, PROJ_BIPACK1_DIR, 
+    or PROJ_BIPACK2_DIR).
 
     Used by /status to tell the web UI whether a layer holds a still image
     (1 frame or a video sequence (>1 frame)). The UI uses this to show or hide
@@ -269,7 +273,8 @@ def status():
                     "latest_wp": latest_wp,
                     # JK printer column visibility hints for the web UI
                     "pm_frames": count_source_frames(PROJ_MAG_DIR),
-                    "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
+                    "bp1_frames": count_source_frames(PROJ_BIPACK1_DIR),
+                    "bp2_frames": count_source_frames(PROJ_BIPACK2_DIR),
                 })
         except:
             pass
@@ -281,7 +286,8 @@ def status():
         "workprint": f"/workprints/{latest_wp}" if latest_wp else None,
         # JK printer column visibility hints for the web UI
         "pm_frames": count_source_frames(PROJ_MAG_DIR),
-        "bp_frames": count_source_frames(PROJ_BIPACK_DIR),
+        "bp1_frames": count_source_frames(PROJ_BIPACK1_DIR),
+        "bp2_frames": count_source_frames(PROJ_BIPACK2_DIR),
     })
 
 @app.route('/render_prores', methods=['POST'])
@@ -408,15 +414,26 @@ def upload_target():
 
     return jsonify({"status": "ok", "filename": file.filename})
 
-@app.route('/upload_proj_bipack', methods=['POST'])
-def upload_proj_bipack():
-    # Handles file reception for the secondary mask/bipack layer
-    print("[VOP SERVER] UPLOADING: ProjBiPack Mask")
+@app.route('/upload_proj_bipack1', methods=['POST'])
+def upload_proj_bipack1():
+    # Handles file reception for BiPack layer 1 (the holdout-matte / first secondary mask)
+    print("[VOP SERVER] UPLOADING: ProjBiPack1 Mask")
     file = request.files['file']
-    for f in os.listdir(PROJ_BIPACK_DIR): os.remove(os.path.join(PROJ_BIPACK_DIR, f))
-    filepath = os.path.join(PROJ_BIPACK_DIR, file.filename)
+    for f in os.listdir(PROJ_BIPACK1_DIR): os.remove(os.path.join(PROJ_BIPACK1_DIR, f))
+    filepath = os.path.join(PROJ_BIPACK1_DIR, file.filename)
     file.save(filepath)  
-    process_video_ingestion(filepath, PROJ_BIPACK_DIR)
+    process_video_ingestion(filepath, PROJ_BIPACK1_DIR)
+    return jsonify({"status": "ok", "filename": file.filename})
+
+@app.route('/upload_proj_bipack2', methods=['POST'])
+def upload_proj_bipack2():
+    # Handles file reception for BiPack layer 2 (the second optional mask reel)
+    print("[VOP SERVER] UPLOADING: ProjBiPack2 Mask")
+    file = request.files['file']
+    for f in os.listdir(PROJ_BIPACK2_DIR): os.remove(os.path.join(PROJ_BIPACK2_DIR, f))
+    filepath = os.path.join(PROJ_BIPACK2_DIR, file.filename)
+    file.save(filepath)  
+    process_video_ingestion(filepath, PROJ_BIPACK2_DIR)
     return jsonify({"status": "ok", "filename": file.filename})
 
 @app.route('/nuke_proj_mag', methods=['POST'])
@@ -426,18 +443,31 @@ def nuke_proj_mag():
     for f in os.listdir(PROJ_MAG_DIR): os.remove(os.path.join(PROJ_MAG_DIR, f))
     return jsonify({"status": "ok"})
 
-@app.route('/nuke_proj_bipack', methods=['POST'])
-def nuke_proj_bipack():
-    # Deletes all secondary bipack assets
-    print("[VOP SERVER] ACTION: NUKE PROJ BIPACK")
-    for f in os.listdir(PROJ_BIPACK_DIR): os.remove(os.path.join(PROJ_BIPACK_DIR, f))
+@app.route('/nuke_proj_bipack1', methods=['POST'])
+def nuke_proj_bipack1():
+    # Deletes all BiPack layer 1 assets
+    print("[VOP SERVER] ACTION: NUKE PROJ BIPACK1")
+    for f in os.listdir(PROJ_BIPACK1_DIR): os.remove(os.path.join(PROJ_BIPACK1_DIR, f))
     return jsonify({"status": "ok"})
 
+@app.route('/nuke_proj_bipack2', methods=['POST'])
+def nuke_proj_bipack2():
+    # Deletes all BiPack layer 2 assets
+    print("[VOP SERVER] ACTION: NUKE PROJ BIPACK2")
+    for f in os.listdir(PROJ_BIPACK2_DIR): os.remove(os.path.join(PROJ_BIPACK2_DIR, f))
+    return jsonify({"status": "ok"})
+    
 @app.route('/get_img_aspect', methods=['GET'])
 def get_img_aspect():
     # Analyzes the first valid image frame in the target directory to return the aspect ratio
+    # mag query: 'proj' (default) | 'bipack1' | 'bipack2'
     target = request.args.get('mag', 'proj')
-    check_dir = PROJ_BIPACK_DIR if target == 'bipack' else PROJ_MAG_DIR
+    if target == 'bipack1':
+        check_dir = PROJ_BIPACK1_DIR
+    elif target == 'bipack2':
+        check_dir = PROJ_BIPACK2_DIR
+    else:
+        check_dir = PROJ_MAG_DIR
     try:
         valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
         files = sorted([f for f in os.listdir(check_dir) if f.lower().endswith(valid_exts)])
@@ -822,6 +852,8 @@ def import_job():
         if file_version != VOP_VERSION:
             warning = f"System is v{VOP_VERSION}, but the file is v{file_version}."
         
+        with open(CURRENT_JOB_FILE, 'w') as f:
+            json.dump(job_data, f, indent=4)
         with open(CURRENT_JOB_FILE, 'w') as f:
             json.dump(job_data, f, indent=4)
         

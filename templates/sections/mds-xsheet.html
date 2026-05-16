@@ -4,6 +4,13 @@
     Same column-order philosophy as SSS, but no SD/PH columns (MDS uses 
     Start/Stop sub-rows for smear definition, not shutter sweep timing).
     The TYPE column carries over from the existing MDS layout.
+    
+    Column visibility is controlled by the same hook classes as SSS:
+    pm-jk-cell / bp1-jk-cell / bp2-jk-cell for JK printer inputs,
+    pm-spatial-cell / bp1-spatial-cell / bp2-spatial-cell for pos/rot.
+    main.js toggles has-pm-video / has-bp1-video / has-bp2-video and 
+    layer-disabled-pm / layer-disabled-bp1 / layer-disabled-bp2 on the
+    parent .mds-sheet wrapper.
 -->
 <div class="vop-sheet mds-sheet">
     <div class="sheet-row mds-header">
@@ -18,16 +25,23 @@
         <div data-title="ProjMag Camera-Frame Hold (CAM:STP, x)" class="pm-jk-cell">PM<br>CAM</div>
         <div data-title="ProjMag Gate-Frame Step (CAM:STP, y, signed)" class="pm-jk-cell">PM<br>STP</div>
         
-        <!-- JK Printer: BiPack layer -->
-        <div data-title="BiPack Gate Frame Anchor (empty = inherit)" class="bp-jk-cell bp-header-text">BP<br>GATE</div>
-        <div data-title="BiPack Camera-Frame Hold (CAM:STP, x)" class="bp-jk-cell bp-header-text">BP<br>CAM</div>
-        <div data-title="BiPack Gate-Frame Step (CAM:STP, y, signed)" class="bp-jk-cell bp-header-text">BP<br>STP</div>
+        <!-- JK Printer: BiPack 1 layer -->
+        <div data-title="BiPack 1 Gate Frame Anchor (empty = inherit)" class="bp1-jk-cell bp1-header-text">BP1<br>GATE</div>
+        <div data-title="BiPack 1 Camera-Frame Hold (CAM:STP, x)" class="bp1-jk-cell bp1-header-text">BP1<br>CAM</div>
+        <div data-title="BiPack 1 Gate-Frame Step (CAM:STP, y, signed)" class="bp1-jk-cell bp1-header-text">BP1<br>STP</div>
+        
+        <!-- JK Printer: BiPack 2 layer -->
+        <div data-title="BiPack 2 Gate Frame Anchor (empty = inherit)" class="bp2-jk-cell bp2-header-text">BP2<br>GATE</div>
+        <div data-title="BiPack 2 Camera-Frame Hold (CAM:STP, x)" class="bp2-jk-cell bp2-header-text">BP2<br>CAM</div>
+        <div data-title="BiPack 2 Gate-Frame Step (CAM:STP, y, signed)" class="bp2-jk-cell bp2-header-text">BP2<br>STP</div>
         
         <!-- Spatial -->
-        <div data-title="ProjMag Position (X,Y,Z)">PM POS<br>(X,Y,Z)</div>
-        <div data-title="ProjMag Rotation (P,R,Y)">PM ROT<br>(P,R,Y)</div>
-        <div data-title="BiPack Position (X,Y,Z)" class="bp-header-text">BP POS<br>(X,Y,Z)</div>
-        <div data-title="BiPack Rotation (P,R,Y)" class="bp-header-text">BP ROT<br>(P,R,Y)</div>
+        <div data-title="ProjMag Position (X,Y,Z)" class="pm-spatial-cell">PM POS<br>(X,Y,Z)</div>
+        <div data-title="ProjMag Rotation (P,R,Y)" class="pm-spatial-cell">PM ROT<br>(P,R,Y)</div>
+        <div data-title="BiPack 1 Position (X,Y,Z)" class="bp1-spatial-cell bp1-header-text">BP1 POS<br>(X,Y,Z)</div>
+        <div data-title="BiPack 1 Rotation (P,R,Y)" class="bp1-spatial-cell bp1-header-text">BP1 ROT<br>(P,R,Y)</div>
+        <div data-title="BiPack 2 Position (X,Y,Z)" class="bp2-spatial-cell bp2-header-text">BP2 POS<br>(X,Y,Z)</div>
+        <div data-title="BiPack 2 Rotation (P,R,Y)" class="bp2-spatial-cell bp2-header-text">BP2 ROT<br>(P,R,Y)</div>
         
         <!-- Light & exposure -->
         <div data-title="Projector Gel">PG</div>

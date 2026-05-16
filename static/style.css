@@ -75,7 +75,15 @@ Description:        Stylings for the whole GUI
     --tag-master-text:      #0cf;
     --tag-smear-bg:         #210;
     --tag-smear-text:       #f80;
-    --tag-bipack-border:    #057;
+    --tag-bipack-border:    #057;     /* BP1 input border - keeps original color */
+    
+    /* >>> BiPack 2 accent <<< */
+    /* Distinct from BP1 (#0ad / #057) so the two layers are visually 
+       distinguishable in the timeline. Chosen as a green-shifted teal that 
+       sits adjacent to BP1's cyan on the color wheel: same coolness, 
+       different hue. */
+    --color-bipack2:        #0a8;
+    --tag-bipack2-border:   #075;
     --bg-sss-tag:           #331122;    /* Background for the SSS add-row button */
 }
 
@@ -265,7 +273,21 @@ body {
 }
 
 .group-box.bipack {
+    /* Shared base: muted accent stripe on the left edge so the user can 
+       spot the bipack panels at a glance. The specific color is set by
+       the per-layer .bipack1 / .bipack2 rules below. */
     border-left:        3px solid var(--color-accent);
+}
+
+.group-box.bipack1 {
+    /* BP1 keeps the original BiPack color (cyan-ish). */
+    border-left-color:  var(--color-accent);
+}
+
+.group-box.bipack2 {
+    /* BP2 uses its own green-shifted teal so the two panels are 
+       distinguishable at a glance. */
+    border-left-color:  var(--color-bipack2);
 }
 
 .group-title { 
@@ -679,8 +701,32 @@ body {
     box-sizing:         border-box; 
 }
 
-.bp-header-text {
+/* Per-layer header text tinting. The bp{N}-header-text class is applied 
+   to the column header divs (in sss-xsheet.html / mds-xsheet.html) and to 
+   the corresponding row inputs, so both the header and the data column 
+   share a tint. */
+.bp1-header-text {
     color:              var(--color-accent);
+}
+
+.bp2-header-text {
+    color:              var(--color-bipack2);
+}
+
+/* Per-layer input styling. The double-class scheme (e.g. bp1-jk-cell + 
+   bp1-input on the same element) is intentional: bp{N}-jk-cell drives 
+   show/hide based on visibility classes on the sheet wrapper, while 
+   bp{N}-input drives the colored accents below. Splitting the concerns 
+   into two classes means future visual or visibility tweaks can be made
+   independently. */
+.bp1-input { 
+    border-color:       var(--tag-bipack-border) !important; 
+    color:              var(--color-accent) !important; 
+}
+
+.bp2-input { 
+    border-color:       var(--tag-bipack2-border) !important; 
+    color:              var(--color-bipack2) !important; 
 }
 
 .bp-input { 
@@ -767,63 +813,163 @@ body {
    the actual visible column count.
    ============================================================ */
 
-/* --- SSS Sheet grid templates --- */
+/* --- SSS Sheet grid template ---
+ *
+ * Three-layer (PM + BP1 + BP2) compositing means up to 9 JK columns and 6
+ * spatial columns. Rather than writing 64 explicit grid-template-columns 
+ * rules (2^6 visibility combinations), we use CSS custom properties that 
+ * resolve to empty strings when their column group should disappear.
+ *
+ * An empty custom property in a grid-template-columns value contributes
+ * literally nothing - no column, no gap. That lets us write the master 
+ * template once and toggle column groups by setting/clearing variables.
+ *
+ * Column groups, in display order:
+ *   --col-pm-jk    : PM gate/cam/stp (3 inputs, 45px 40px 40px)
+ *   --col-bp1-jk   : BP1 gate/cam/stp (3 inputs, same widths)
+ *   --col-bp2-jk   : BP2 gate/cam/stp (3 inputs, same widths)
+ *   --col-pm-sp    : PM pos/rot (2 columns, 1fr 1fr each)
+ *   --col-bp1-sp   : BP1 pos/rot (2 columns)
+ *   --col-bp2-sp   : BP2 pos/rot (2 columns)
+ *
+ * Visibility logic:
+ *   JK columns appear when both:
+ *     (a) the layer holds a video sequence (.has-{layer}-video), AND
+ *     (b) the layer is not eye-disabled (NOT .layer-disabled-{layer})
+ *   Spatial columns appear when:
+ *     the layer is not eye-disabled (NOT .layer-disabled-{layer})
+ *   A still-image layer that's still eye-enabled keeps its pos/rot inputs 
+ *   visible but hides its JK columns - which is correct because pos/rot are
+ *   meaningful for stills, JK GATE/CAM/STP are not.
+ */
 
-/* Default: neither layer holds video. No JK columns. */
+.sss-sheet {
+    /* Defaults: all JK groups hidden, all spatial groups visible. */
+    --col-pm-jk:    ;
+    --col-bp1-jk:   ;
+    --col-bp2-jk:   ;
+    --col-pm-sp:    1fr 1fr;
+    --col-bp1-sp:   1fr 1fr;
+    --col-bp2-sp:   1fr 1fr;
+}
+
+/* JK columns appear when the layer has a video AND isn't eye-disabled. */
+.sss-sheet.has-pm-video:not(.layer-disabled-pm)   { --col-pm-jk:  45px 40px 40px; }
+.sss-sheet.has-bp1-video:not(.layer-disabled-bp1) { --col-bp1-jk: 45px 40px 40px; }
+.sss-sheet.has-bp2-video:not(.layer-disabled-bp2) { --col-bp2-jk: 45px 40px 40px; }
+
+/* Spatial columns collapse when the layer is eye-disabled. The remaining
+   visible 1fr columns redistribute the freed space automatically. */
+.sss-sheet.layer-disabled-pm  { --col-pm-sp:  ; }
+.sss-sheet.layer-disabled-bp1 { --col-bp1-sp: ; }
+.sss-sheet.layer-disabled-bp2 { --col-bp2-sp: ; }
+
 .sss-header, .sss-master-row {
     display:                    grid;
-    grid-template-columns:      30px 60px 50px 30px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+    grid-template-columns:      30px 60px 50px 30px
+                                var(--col-pm-jk) var(--col-bp1-jk) var(--col-bp2-jk)
+                                var(--col-pm-sp) var(--col-bp1-sp) var(--col-bp2-sp)
+                                40px 40px 60px 60px 60px 40px;
     gap:                        5px;
     align-items:                center;
     margin-bottom:              5px;
 }
 
-/* Exactly one layer holds video (3 JK columns visible). */
-.sss-sheet.has-pm-video:not(.has-bp-video) .sss-header,
-.sss-sheet.has-pm-video:not(.has-bp-video) .sss-master-row,
-.sss-sheet.has-bp-video:not(.has-pm-video) .sss-header,
-.sss-sheet.has-bp-video:not(.has-pm-video) .sss-master-row {
-    grid-template-columns:      30px 60px 50px 30px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
+/* --- MDS Sheet grid template ---
+ * Same CSS-variable scheme as SSS. MDS differs in:
+ *   - TYPE column adds one fixed cell (70px) near the front
+ *   - No SD/PH columns at the end (MDS doesn't use them)
+ *   - Smear START/STOP sub-rows also use this grid; they have empty 
+ *     placeholder divs carrying the same hook classes as the master row's 
+ *     inputs, so they collapse in lockstep.
+ * MDS spatial columns are fixed pixel widths (not 1fr) per the existing 
+ * design - the sheet is wider than the panel so horizontal scroll handles 
+ * overflow.
+ */
+
+.mds-sheet {
+    --col-pm-jk:    ;
+    --col-bp1-jk:   ;
+    --col-bp2-jk:   ;
+    --col-pm-sp:    105px 105px;
+    --col-bp1-sp:   105px 105px;
+    --col-bp2-sp:   105px 105px;
 }
 
-/* Both layers hold video (all 6 JK columns visible). */
-.sss-sheet.has-pm-video.has-bp-video .sss-header,
-.sss-sheet.has-pm-video.has-bp-video .sss-master-row {
-    grid-template-columns:      30px 60px 50px 30px 45px 40px 40px 45px 40px 40px 1fr 1fr 1fr 1fr 40px 40px 60px 60px 60px 40px;
-}
+.mds-sheet.has-pm-video:not(.layer-disabled-pm)   { --col-pm-jk:  45px 40px 40px; }
+.mds-sheet.has-bp1-video:not(.layer-disabled-bp1) { --col-bp1-jk: 45px 40px 40px; }
+.mds-sheet.has-bp2-video:not(.layer-disabled-bp2) { --col-bp2-jk: 45px 40px 40px; }
 
-/* --- MDS Sheet grid templates --- */
-/* Same logic as SSS but with the existing MDS pixel widths and the TYPE column. */
+.mds-sheet.layer-disabled-pm  { --col-pm-sp:  ; }
+.mds-sheet.layer-disabled-bp1 { --col-bp1-sp: ; }
+.mds-sheet.layer-disabled-bp2 { --col-bp2-sp: ; }
+
 .mds-header, .mds-master-row, .mds-smear-row {
-    grid-template-columns:      25px 90px 40px 25px 70px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
+    display:                    grid;
+    grid-template-columns:      25px 90px 40px 25px 70px
+                                var(--col-pm-jk) var(--col-bp1-jk) var(--col-bp2-jk)
+                                var(--col-pm-sp) var(--col-bp1-sp) var(--col-bp2-sp)
+                                35px 35px 70px 35px 30px;
+    gap:                        5px;
+    align-items:                center;
+    margin-bottom:              5px;
 }
 
-.mds-sheet.has-pm-video:not(.has-bp-video) .mds-header,
-.mds-sheet.has-pm-video:not(.has-bp-video) .mds-master-row,
-.mds-sheet.has-pm-video:not(.has-bp-video) .mds-smear-row,
-.mds-sheet.has-bp-video:not(.has-pm-video) .mds-header,
-.mds-sheet.has-bp-video:not(.has-pm-video) .mds-master-row,
-.mds-sheet.has-bp-video:not(.has-pm-video) .mds-smear-row {
-    grid-template-columns:      25px 90px 40px 25px 70px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
-}
-
-.mds-sheet.has-pm-video.has-bp-video .mds-header,
-.mds-sheet.has-pm-video.has-bp-video .mds-master-row,
-.mds-sheet.has-pm-video.has-bp-video .mds-smear-row {
-    grid-template-columns:      25px 90px 40px 25px 70px 45px 40px 40px 45px 40px 40px 105px 105px 105px 105px 35px 35px 70px 35px 30px;
-}
-
-/* --- Cell visibility --- */
-/* Hide JK cells when their layer doesn't hold video. The empty placeholder
-   divs in the MDS smear sub-rows also carry these classes, so they collapse
-   in lockstep with the master row's actual inputs. */
+/* --- Cell visibility ---
+ * Hide individual JK input cells when their layer's columns are collapsed.
+ * The grid-template-columns trick above removes the COLUMNS, but the 
+ * inputs themselves still take rendering width if they're not display:none. 
+ * Without this, the inputs would stack into the first remaining column and 
+ * visually break the layout.
+ *
+ * Same logic applies to the empty placeholder divs in MDS smear sub-rows -
+ * they carry the same hook classes so they collapse in lockstep.
+ *
+ * Combined hiding logic mirrors the JK column rule above: a JK cell is 
+ * hidden when its layer LACKS video OR when the layer is eye-disabled.
+ */
 .sss-sheet:not(.has-pm-video) .pm-jk-cell,
-.mds-sheet:not(.has-pm-video) .pm-jk-cell {
+.sss-sheet.layer-disabled-pm  .pm-jk-cell,
+.mds-sheet:not(.has-pm-video) .pm-jk-cell,
+.mds-sheet.layer-disabled-pm  .pm-jk-cell {
     display:            none;
 }
-.sss-sheet:not(.has-bp-video) .bp-jk-cell,
-.mds-sheet:not(.has-bp-video) .bp-jk-cell {
+.sss-sheet:not(.has-bp1-video) .bp1-jk-cell,
+.sss-sheet.layer-disabled-bp1  .bp1-jk-cell,
+.mds-sheet:not(.has-bp1-video) .bp1-jk-cell,
+.mds-sheet.layer-disabled-bp1  .bp1-jk-cell {
     display:            none;
+}
+.sss-sheet:not(.has-bp2-video) .bp2-jk-cell,
+.sss-sheet.layer-disabled-bp2  .bp2-jk-cell,
+.mds-sheet:not(.has-bp2-video) .bp2-jk-cell,
+.mds-sheet.layer-disabled-bp2  .bp2-jk-cell {
+    display:            none;
+}
+
+/* Spatial cells (POS/ROT inputs) get the same treatment when their layer 
+   is eye-disabled. No "video" condition here - pos/rot are meaningful 
+   for stills too. */
+.sss-sheet.layer-disabled-pm  .pm-spatial-cell,
+.mds-sheet.layer-disabled-pm  .pm-spatial-cell {
+    display:            none;
+}
+.sss-sheet.layer-disabled-bp1 .bp1-spatial-cell,
+.mds-sheet.layer-disabled-bp1 .bp1-spatial-cell {
+    display:            none;
+}
+.sss-sheet.layer-disabled-bp2 .bp2-spatial-cell,
+.mds-sheet.layer-disabled-bp2 .bp2-spatial-cell {
+    display:            none;
+}
+
+/* --- JK input styling ---
+   Tight integer inputs - shorter than the position/rotation fields. The
+   .bp1-input / .bp2-input classes on BP variants already apply their 
+   respective BiPack accent colors (border + text), inherited from the 
+   per-layer .bp{N}-input rules earlier in this file. */
+.jk-input {
+    font-variant-numeric:   tabular-nums;          /* keep digits aligned across rows */
 }
 
 /* --- JK input styling --- */

@@ -3,6 +3,8 @@ VOP Module:     interpolator.py
 Description:    Timeline state evaluation.
                 Integrated independent ProjBiPack (BP) spatial tracks.
                 And added video functionality.
+                Renamed bp_* tracks to bp1_* and added parallel bp2_* tracks 
+                to support a third optical layer (v0.8.0).
 """
 #
 ###########################################################################
@@ -69,13 +71,21 @@ class Timeline:
         #   *_stp  : Signed integer. Number of gate frames to ADVANCE after each hold.
         #            Can be negative (reverse) or 0 (pause). The "y" in CAM:STP.
         self.tracks = {
-            'm': [], 'pos': [], 'rot': [], 'bp_pos': [], 'bp_rot': [], 'pg': [], 'cg': [], 
+            'm': [], 'pos': [], 'rot': [], 
+            # Per-bipack-layer spatial tracks. bp1_* replaces the old single-bipack 
+            # 'bp_*' set; bp2_* is added for the new third optical layer.
+            'bp1_pos': [], 'bp1_rot': [], 
+            'bp2_pos': [], 'bp2_rot': [], 
+            'pg': [], 'cg': [], 
             'exp': [], 'sd': [], 'ph': [],
-            # JK Optical Printer playhead inputs (per-layer: PM=ProjMag, BP=BiPack)
+            # JK Optical Printer playhead inputs (per-layer: PM=ProjMag, BP1/BP2=BiPack reels)
             'pm_gate': [], 'pm_cam': [], 'pm_stp': [],
-            'bp_gate': [], 'bp_cam': [], 'bp_stp': [],
+            'bp1_gate': [], 'bp1_cam': [], 'bp1_stp': [],
+            'bp2_gate': [], 'bp2_cam': [], 'bp2_stp': [],
             'start_p': [], 'stop_p': [], 'start_r': [], 'stop_r': [],
-            'start_bp_p': [], 'stop_bp_p': [], 'start_bp_r': [], 'stop_bp_r': [],
+            # MDS smear start/stop offsets per bipack layer
+            'start_bp1_p': [], 'stop_bp1_p': [], 'start_bp1_r': [], 'stop_bp1_r': [],
+            'start_bp2_p': [], 'stop_bp2_p': [], 'start_bp2_r': [], 'stop_bp2_r': [],
             'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
         }
         
@@ -190,8 +200,11 @@ class Timeline:
             
             self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}p{idx}", "0,0,-1.0"), -1.0)})
             self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}r{idx}", "0,0,0"), 0.0)})
-            self.tracks['bp_pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_p{idx}", "0,0,-1.0"), -1.0)})
-            self.tracks['bp_rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp_r{idx}", "0,0,0"), 0.0)})
+            # Per-bipack-layer pos/rot. Keys: 'sss_bp1_p1', 'mds_bp2_r3', etc.
+            self.tracks['bp1_pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp1_p{idx}", "0,0,-1.0"), -1.0)})
+            self.tracks['bp1_rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp1_r{idx}", "0,0,0"), 0.0)})
+            self.tracks['bp2_pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp2_p{idx}", "0,0,-1.0"), -1.0)})
+            self.tracks['bp2_rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}bp2_r{idx}", "0,0,0"), 0.0)})
             
             self.tracks['pg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}c{idx}_hex", "#ffffff"))})
             self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}cg{idx}_hex", "#ffffff"))})
@@ -203,13 +216,16 @@ class Timeline:
             self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
             
             # JK Optical Printer playhead tracks - parsed per-layer.
-            # These keys come from the UI as e.g. "sss_pm_gate3" or "mds_bp_cam7".
+            # These keys come from the UI as e.g. "sss_pm_gate3", "mds_bp1_cam7", "sss_bp2_stp2".
             self.tracks['pm_gate'].append({'f': f_val, 'val': parse_optional_int(f"{prefix}pm_gate{idx}")})
             self.tracks['pm_cam'].append({'f': f_val, 'val': parse_cam(f"{prefix}pm_cam{idx}")})
             self.tracks['pm_stp'].append({'f': f_val, 'val': parse_stp(f"{prefix}pm_stp{idx}")})
-            self.tracks['bp_gate'].append({'f': f_val, 'val': parse_optional_int(f"{prefix}bp_gate{idx}")})
-            self.tracks['bp_cam'].append({'f': f_val, 'val': parse_cam(f"{prefix}bp_cam{idx}")})
-            self.tracks['bp_stp'].append({'f': f_val, 'val': parse_stp(f"{prefix}bp_stp{idx}")})
+            self.tracks['bp1_gate'].append({'f': f_val, 'val': parse_optional_int(f"{prefix}bp1_gate{idx}")})
+            self.tracks['bp1_cam'].append({'f': f_val, 'val': parse_cam(f"{prefix}bp1_cam{idx}")})
+            self.tracks['bp1_stp'].append({'f': f_val, 'val': parse_stp(f"{prefix}bp1_stp{idx}")})
+            self.tracks['bp2_gate'].append({'f': f_val, 'val': parse_optional_int(f"{prefix}bp2_gate{idx}")})
+            self.tracks['bp2_cam'].append({'f': f_val, 'val': parse_cam(f"{prefix}bp2_cam{idx}")})
+            self.tracks['bp2_stp'].append({'f': f_val, 'val': parse_stp(f"{prefix}bp2_stp{idx}")})
 
             # MDS Start/Stop offsets (Ignored during SSS execution)
             self.tracks['start_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_p{idx}", "0,0,0"))})
@@ -217,10 +233,15 @@ class Timeline:
             self.tracks['start_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_r{idx}", "0,0,0"))})
             self.tracks['stop_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_r{idx}", "0,0,0"))})
             
-            self.tracks['start_bp_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp_p{idx}", "0,0,0"))})
-            self.tracks['stop_bp_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp_p{idx}", "0,0,0"))})
-            self.tracks['start_bp_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp_r{idx}", "0,0,0"))})
-            self.tracks['stop_bp_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp_r{idx}", "0,0,0"))})
+            # Per-bipack-layer MDS smear offsets
+            self.tracks['start_bp1_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp1_p{idx}", "0,0,0"))})
+            self.tracks['stop_bp1_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp1_p{idx}", "0,0,0"))})
+            self.tracks['start_bp1_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp1_r{idx}", "0,0,0"))})
+            self.tracks['stop_bp1_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp1_r{idx}", "0,0,0"))})
+            self.tracks['start_bp2_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp2_p{idx}", "0,0,0"))})
+            self.tracks['stop_bp2_p'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp2_p{idx}", "0,0,0"))})
+            self.tracks['start_bp2_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}start_bp2_r{idx}", "0,0,0"))})
+            self.tracks['stop_bp2_r'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}stop_bp2_r{idx}", "0,0,0"))})
 
             self.tracks['start_c'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}start_c{idx}_hex", "#ffffff"))})
             self.tracks['stop_c'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}stop_c{idx}_hex", "#ffffff"))})
@@ -298,11 +319,16 @@ class Timeline:
         return {
             'p': safe_val('pos', np.array([0, 0, -1.0], dtype='f4')), 
             'r': safe_val('rot', np.array([0, 0, 0], dtype='f4')),
-            'bp_p': safe_val('bp_pos', np.array([0, 0, -1.0], dtype='f4')), 
-            'bp_r': safe_val('bp_rot', np.array([0, 0, 0], dtype='f4')),
+            'bp1_p': safe_val('bp1_pos', np.array([0, 0, -1.0], dtype='f4')), 
+            'bp1_r': safe_val('bp1_rot', np.array([0, 0, 0], dtype='f4')),
+            'bp2_p': safe_val('bp2_pos', np.array([0, 0, -1.0], dtype='f4')), 
+            'bp2_r': safe_val('bp2_rot', np.array([0, 0, 0], dtype='f4')),
             # Local offsets (lp/lr) are held at zero during SSS execution.
+            # One l*_p/l*_r pair per layer; engine multiplies these into the 
+            # master pos/rot to produce the per-smear-tick local offset.
             'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
-            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
+            'lbp1_p': np.zeros(3, 'f4'), 'lbp1_r': np.zeros(3, 'f4'),
+            'lbp2_p': np.zeros(3, 'f4'), 'lbp2_r': np.zeros(3, 'f4'),
             'pg': safe_col('pg', np.array([1, 1, 1], dtype='f4')), 
             'cg': safe_col('cg', np.array([1, 1, 1], dtype='f4')),
 
@@ -328,15 +354,23 @@ class Timeline:
         stop_p     = safe_val('stop_p',     np.zeros(3, 'f4'))
         start_r    = safe_val('start_r',    np.zeros(3, 'f4'))
         stop_r     = safe_val('stop_r',     np.zeros(3, 'f4'))
-        start_bp_p = safe_val('start_bp_p', np.zeros(3, 'f4'))
-        stop_bp_p  = safe_val('stop_bp_p',  np.zeros(3, 'f4'))
-        start_bp_r = safe_val('start_bp_r', np.zeros(3, 'f4'))
-        stop_bp_r  = safe_val('stop_bp_r',  np.zeros(3, 'f4'))
+        # Per-bipack-layer MDS smear offsets. Pulled from the start_bp{N}_* / 
+        # stop_bp{N}_* tracks, which the parser above populated from the UI.
+        start_bp1_p = safe_val('start_bp1_p', np.zeros(3, 'f4'))
+        stop_bp1_p  = safe_val('stop_bp1_p',  np.zeros(3, 'f4'))
+        start_bp1_r = safe_val('start_bp1_r', np.zeros(3, 'f4'))
+        stop_bp1_r  = safe_val('stop_bp1_r',  np.zeros(3, 'f4'))
+        start_bp2_p = safe_val('start_bp2_p', np.zeros(3, 'f4'))
+        stop_bp2_p  = safe_val('stop_bp2_p',  np.zeros(3, 'f4'))
+        start_bp2_r = safe_val('start_bp2_r', np.zeros(3, 'f4'))
+        stop_bp2_r  = safe_val('stop_bp2_r',  np.zeros(3, 'f4'))
 
-        lp    = start_p    + (stop_p    - start_p)    * t_norm
-        lr    = start_r    + (stop_r    - start_r)    * t_norm
-        lbp_p = start_bp_p + (stop_bp_p - start_bp_p) * t_norm
-        lbp_r = start_bp_r + (stop_bp_r - start_bp_r) * t_norm
+        lp     = start_p     + (stop_p     - start_p)     * t_norm
+        lr     = start_r     + (stop_r     - start_r)     * t_norm
+        lbp1_p = start_bp1_p + (stop_bp1_p - start_bp1_p) * t_norm
+        lbp1_r = start_bp1_r + (stop_bp1_r - start_bp1_r) * t_norm
+        lbp2_p = start_bp2_p + (stop_bp2_p - start_bp2_p) * t_norm
+        lbp2_r = start_bp2_r + (stop_bp2_r - start_bp2_r) * t_norm
         pg_start = safe_col('start_c', np.array([1,1,1],'f4'))
         pg_stop = safe_col('stop_c', np.array([1,1,1],'f4'))
         pg_val = oklab_to_linear(linear_to_oklab(pg_start) + (linear_to_oklab(pg_stop) - linear_to_oklab(pg_start)) * t_norm)
@@ -347,16 +381,19 @@ class Timeline:
         
         return {
             'p': st_base['p'], 'r': st_base['r'], 'lp': lp, 'lr': lr,
-            'bp_p': st_base['bp_p'], 'bp_r': st_base['bp_r'], 'lbp_p': lbp_p, 'lbp_r': lbp_r,
+            'bp1_p': st_base['bp1_p'], 'bp1_r': st_base['bp1_r'], 'lbp1_p': lbp1_p, 'lbp1_r': lbp1_r,
+            'bp2_p': st_base['bp2_p'], 'bp2_r': st_base['bp2_r'], 'lbp2_p': lbp2_p, 'lbp2_r': lbp2_r,
             'pg': pg_val, 'cg': cg_val, 'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
         }
 
     def get_default_state(self):
         return {
             'p': np.array([0, 0, -1.0], dtype='f4'), 'r': np.array([0, 0, 0], dtype='f4'),
-            'bp_p': np.array([0, 0, -1.0], dtype='f4'), 'bp_r': np.array([0, 0, 0], dtype='f4'),
+            'bp1_p': np.array([0, 0, -1.0], dtype='f4'), 'bp1_r': np.array([0, 0, 0], dtype='f4'),
+            'bp2_p': np.array([0, 0, -1.0], dtype='f4'), 'bp2_r': np.array([0, 0, 0], dtype='f4'),
             'lp': np.zeros(3, 'f4'), 'lr': np.zeros(3, 'f4'),
-            'lbp_p': np.zeros(3, 'f4'), 'lbp_r': np.zeros(3, 'f4'),
+            'lbp1_p': np.zeros(3, 'f4'), 'lbp1_r': np.zeros(3, 'f4'),
+            'lbp2_p': np.zeros(3, 'f4'), 'lbp2_r': np.zeros(3, 'f4'),
             'pg': np.array([1, 1, 1], dtype='f4'), 'cg': np.array([1, 1, 1], dtype='f4'),
             'exp': 1.0, 'sd': 1.0, 'ph': 0.5
         }
