@@ -244,7 +244,7 @@ function addMDSKeyframe() {
     const idx = mdsMasterCount;
 
     const existingRows = document.querySelectorAll('.mds-keyframe-group');
-
+    const lastRow = existingRows.length > 0 ? existingRows[existingRows.length - 1] : null;
     // Default baseline. One block per layer for clarity. PM keeps its original
     // unsuffixed key names ('p', 'r', 'sp', 'sr', 'ep', 'er', 'pm_gate' etc.)
     // because PM was never asymmetric; only BP got numbered. BP1 inherits the
