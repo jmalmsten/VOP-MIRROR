@@ -195,7 +195,11 @@ def dispatch_engine(task_type, payload):
 
     # HTTP Blocking logic for specific synchronous tasks.
     # Forces the Flask thread to wait until engine.py processes and deletes COMMAND_FILE.
-    if task_type in ['preview', 'cam_preview']:
+    # 
+    # comp_preview is included here for the same reason cam_preview is:
+    # the front end reloads probe_live.jpg right after the POST returns,
+    # so we must not return until the engine has actually written the JPG.
+    if task_type in ['preview', 'cam_preview', 'comp_preview']:
         timeout = 45.0
         start_t = time.time()
         while os.path.exists(COMMAND_FILE):
@@ -208,13 +212,6 @@ def dispatch_engine(task_type, payload):
                 print(f"[VOP SERVER] Task {task_type} timed out.")
                 break
             time.sleep(0.1)
-        # HTTP Blocking logic for specific synchronous tasks.
-        # Forces the Flask thread to wait until engine.py processes and deletes COMMAND_FILE.
-        # comp_preview is included here for the same reason cam_preview is:
-        # the front end reloads probe_live.jpg right after the POST returns,
-        # so we must not return until the engine has actually written the JPG.
-        if task_type in ['preview', 'cam_preview', 'comp_preview']:
-            timeout = 45.0
 
 # --- FLASK ROUTES ---
 

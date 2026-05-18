@@ -179,12 +179,13 @@ class TextureManager:
         
         if f_path in self.cache: 
             return self.cache[f_path]
-        """
-        The default cv2.imread automatically strips the alpha channel 
-        during the read process, turning transparent pixels into pure 
-        white (255, 255, 255). Adding cv2.IMREAD_UNCHANGED forces OpenCV 
-        to pull the raw 4-channel (BGRA) data into memory if it is a PNG.
-        """
+        if f_path in self.cache: 
+            return self.cache[f_path]
+        # The default cv2.imread automatically strips the alpha channel 
+        # during the read process, turning transparent pixels into pure 
+        # white (255, 255, 255). Adding cv2.IMREAD_UNCHANGED forces OpenCV 
+        # to pull the raw 4-channel (BGRA) data into memory if it is a PNG.
+        img = cv2.imread(f_path, cv2.IMREAD_UNCHANGED)
         img = cv2.imread(f_path, cv2.IMREAD_UNCHANGED)  
         if img is None: 
             return self.white_tex, 1.777
