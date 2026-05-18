@@ -59,7 +59,7 @@
                     <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
                     <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
                 </div>
-                <div class="probe-controls" style="margin-top:10px;">
+                <div class="probe-controls spaced">
                     <!-- 2x2 grid of probe / preview buttons.
                         Row 1: Proj Probe (HDMI screen) | Cam Probe (latent in CamMag)
                         Row 2: Cam View   (smear only)  | Comp View (smear + composite)
@@ -81,21 +81,21 @@
             <div class="group-box">
                 <div class="group-title">Projection Mag</div>
                 <div class="upload-cluster">
-                    <div class="c-box layer-vis-box" style="flex:1;">
+                    <div class="c-box layer-vis-box">
                         <label>Active Image</label>
                         <div class="layer-vis-row">
                             <input type="checkbox" id="pm_visible" class="layer-eye" checked title="Layer visibility — open eye = layer renders normally, closed eye = pass-through white (bare bulb)">
                             <input type="text" id="image" readonly>
                         </div>
                     </div>
-                    <input type="file" id="file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('file_input', 'image', '/upload_target')">
+                    <input type="file" id="file_input" class="hidden-file-input" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('file_input', 'image', '/upload_target')">
                     <button class="mini-btn" onclick="document.getElementById('file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjMag()">NUKE</button>
                 </div>
-                <div class="input-row" style="margin-top: 10px;">
+                <div class="input-row spaced">
                     <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="coord_scale" value="1.0"></div>
-                    <div class="c-box fit-fill-stack" style="justify-content: flex-end;">
+                    <div class="c-box fit-fill-stack">
                         <button class="mini-btn" onclick="calcFitScale('coord_scale', 'fit_z', 'proj', 'fit')" title="Scale image to fit entirely inside the projection frustum (letterbox/pillarbox)">FIT FOV</button>
                         <button class="mini-btn" onclick="calcFitScale('coord_scale', 'fit_z', 'proj', 'fill')" title="Scale image to fill the entire projection frustum (overflow on shorter axis)">FILL FOV</button>
                     </div>
@@ -104,22 +104,22 @@
 
             <div class="group-box bipack bipack1">
                 <div class="group-title">Projection BiPack 1</div>
-                <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
-                    <div class="c-box layer-vis-box" style="flex:1;">
+                <div class="upload-cluster">
+                    <div class="c-box layer-vis-box">
                         <label>Active BiPack 1</label>
                         <div class="layer-vis-row">
                             <input type="checkbox" id="bp1_visible" class="layer-eye" checked title="Layer visibility — open eye = layer renders normally, closed eye = pass-through white (no masking)">
                             <input type="text" id="bipack1_image" readonly>
                         </div>
                     </div>
-                    <input type="file" id="bp1_file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('bp1_file_input', 'bipack1_image', '/upload_proj_bipack1')">
+                    <input type="file" id="bp1_file_input" class="hidden-file-input" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('bp1_file_input', 'bipack1_image', '/upload_proj_bipack1')">
                     <button class="mini-btn" onclick="document.getElementById('bp1_file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjBiPack1()">NUKE</button>
                 </div>
-                <div class="input-row" style="margin-top: 10px;">
+                <div class="input-row spaced">
                     <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="bipack1_fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="bipack1_coord_scale" value="1.0"></div>
-                    <div class="c-box fit-fill-stack" style="justify-content: flex-end;">
+                    <div class="c-box fit-fill-stack">
                         <button class="mini-btn" onclick="calcFitScale('bipack1_coord_scale', 'bipack1_fit_z', 'bipack1', 'fit')" title="Scale image to fit entirely inside the projection frustum (letterbox/pillarbox)">FIT FOV</button>
                         <button class="mini-btn" onclick="calcFitScale('bipack1_coord_scale', 'bipack1_fit_z', 'bipack1', 'fill')" title="Scale image to fill the entire projection frustum (overflow on shorter axis)">FILL FOV</button>
                     </div>
@@ -128,22 +128,22 @@
 
             <div class="group-box bipack bipack2">
                 <div class="group-title">Projection BiPack 2</div>
-                <div class="upload-cluster" style="display:flex; gap: 5px; align-items: flex-end;">
-                    <div class="c-box layer-vis-box" style="flex:1;">
+                <div class="upload-cluster">
+                    <div class="c-box layer-vis-box">
                         <label>Active BiPack 2</label>
                         <div class="layer-vis-row">
                             <input type="checkbox" id="bp2_visible" class="layer-eye" checked title="Layer visibility — open eye = layer renders normally, closed eye = pass-through white (no masking)">
                             <input type="text" id="bipack2_image" readonly>
                         </div>
                     </div>
-                    <input type="file" id="bp2_file_input" style="display:none;" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('bp2_file_input', 'bipack2_image', '/upload_proj_bipack2')">
+                    <input type="file" id="bp2_file_input" class="hidden-file-input" accept=".png,.jpg,.jpeg,.tif,.tiff,.mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('bp2_file_input', 'bipack2_image', '/upload_proj_bipack2')">
                     <button class="mini-btn" onclick="document.getElementById('bp2_file_input').click()">UPLOAD</button>
                     <button class="mini-btn danger" onclick="nukeProjBiPack2()">NUKE</button>
                 </div>
-                <div class="input-row" style="margin-top: 10px;">
+                <div class="input-row spaced">
                     <div class="c-box"><label>Ref Z (Fit)</label><input type="number" step="0.1" id="bipack2_fit_z" value="-1.0"></div>
                     <div class="c-box"><label>World Scale</label><input type="number" step="0.0001" id="bipack2_coord_scale" value="1.0"></div>
-                    <div class="c-box fit-fill-stack" style="justify-content: flex-end;">
+                    <div class="c-box fit-fill-stack">
                         <button class="mini-btn" onclick="calcFitScale('bipack2_coord_scale', 'bipack2_fit_z', 'bipack2', 'fit')" title="Scale image to fit entirely inside the projection frustum (letterbox/pillarbox)">FIT FOV</button>
                         <button class="mini-btn" onclick="calcFitScale('bipack2_coord_scale', 'bipack2_fit_z', 'bipack2', 'fill')" title="Scale image to fill the entire projection frustum (overflow on shorter axis)">FILL FOV</button>
                     </div>
@@ -195,7 +195,7 @@
 
                     <div class="const-group crush-group">
                         <label>Noise Crusher</label>
-                        <input type="number" step="0.0001" id="black_clip" value="0.0" style="width: 75px;">
+                        <input type="number" step="0.0001" id="black_clip" value="0.0">
                         <button class="mini-btn measure_noise" onclick="triggerMeasurement()">MEASURE</button>
                         <span id="noise_result_txt"></span>
                         <span id="black_clip_warning" class="validation-warning"></span>
