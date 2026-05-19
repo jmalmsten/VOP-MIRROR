@@ -1,15 +1,15 @@
-# V0.8.1 (YYYYMMDD)
-## Notes: The big third layer addition!
+# V0.9.0 (YYYYMMDD)
+## Notes: Dynamic range!
 ## Added: 
-### A third layer
-This version brings with it a big bit of refactoring as I add a third layer to the pipeline. The third layer can be used in the same ways as the other two and are rendered on the projection side. Use it for a second bipack or hold-out matte or whatever you imagine it can be used for. 
+### HDR!
+This update introduces the third mode alongside the SSS and MDS. The new one is HDR. It is here to be used with images and video footage exposures that don't need smears but do need higher degree of tonal detail. The SSS and MDS are limited to 8bpc and this HDR mode tries to extend this to the cameras full 12bpc range by not moving the image, instead, it animates the brightness values of the pixels so that over time, darker pixels go black and lighter pixels stay on to burn in more tonal detail. Until the end of the exposure sweep where the whole image goes dark. 
+
 
 ## Changed:
-### BiPack becomes BiPack1
-As we now have two bipacks I went ahead and renamed BiPack to BiPack1 so things make more sense going forward. 
+### 
+ 
 
 ## Fixed: 
-### Keyframing got inherited values from wrong fields. 
-Fixed.
-### Code Cleanup
-cleaned up a few stray things that's been bothering me.
+### 
+
+### 

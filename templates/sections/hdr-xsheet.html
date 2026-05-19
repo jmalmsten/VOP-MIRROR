@@ -1,0 +1,37 @@
+<!--
+    HDR Exposure Sheet (Dynamic Range Extender mode)
+    
+    Phase 1 status: PLACEHOLDER. The dropdown can select this mode, 
+    but no keyframe UI exists yet. Phase 2 will add the 2D-only 
+    keyframe row schema (FR, INT, PM POS-XY only, PM SCALE, PM ROT-Z, 
+    PG, CG, EXP, etc — no 3D transforms, no smear start/stop columns).
+    
+    The hdr_sheet_body div is intentionally empty but present, so the 
+    mode-switch reset logic in main.js can innerHTML='' it the same 
+    way it wipes mds_sheet_body and sss_sheet_body. Without this hook 
+    the reset code would null-deref when switching INTO HDR mode.
+-->
+<div class="vop-sheet hdr-sheet">
+    <div class="sheet-row hdr-header">
+        <div>#</div>
+        <div data-title="Frame Number">FR</div>
+        <div data-title="HDR mode under construction">⚠ HDR Mode — Under Construction</div>
+    </div>
+    <!-- 
+        Body hook for phase 2 keyframe rows. Empty in phase 1, but 
+        must exist so addHDRKeyframe() (phase 2) and the mode-switch 
+        reset (snippet 1.4) can target it without null checks. 
+    -->
+    <div id="hdr_sheet_body"></div>
+</div>
+<div class="add-row hdr-add-row">
+    <!-- 
+        Disabled in phase 1. The button is here so the layout matches 
+        SSS/MDS visually and confirms the include is wired up. 
+        Phase 2 will hook this to an addHDRKeyframe() function. 
+    -->
+    <button class="hdr-add-btn" disabled
+            title="HDR keyframe authoring lands in Phase 2 (issue #169).">
+        + ADD HDR KEYFRAME (Phase 2)
+    </button>
+</div>

@@ -98,32 +98,63 @@ def process_video_ingestion(filepath, target_dir):
     If so, extracts all frames to zero-padded TIFFs matching the engine's
     playhead expectations (0000.tif, 0001.tif) and deletes the original video.
     
-    Forces 8-bit RGB output (-pix_fmt rgb24) because higher bit-depth source 
-    codecs like ProRes 422 HQ would otherwise produce 16-bit TIFFs that the 
-    moderngl texture pipeline (which expects 8-bit RGB) cannot consume.
+    Pixel format is mode-aware (issue #169)
+      - SSS / MDS jobs: force 8-bit rgb24, matching the moderngl texture
+        pipeline that currently expects 8bpc RGB.
+      - HDR jobs: preserve up to 16-bit precision via rgb48le. The DRE
+        mode is the whole point of keeping that range, since it uses
+        the extra bits to drive temporal luminance encoding during
+        exposure.
+    
+    The Current mode is read from current_job.json. If the file is missing
+    or unparseable we fall back to the safe 8-bit path, since an HDR-mode
+    16-bit TIFF would crash the current texture pipeline.
     """
     ext = os.path.splitext(filepath)[1].lower()
     video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
 
-    if ext in video_exts:
-        print(f"[VOP SERVER] Video detected! Extracting {filepath} to TIFF sequence...")
+    if ext not in video_exts:
+        return  # Stills pass through untouched, same as before
 
-        output_pattern = os.path.join(target_dir, "%04d.tif")
+    # --- Determine target bit depth from current job mode -------------
+    # We read CURRENT_JOB_FILE rather than receiving the mode as an arg
+    # because every caller of this function (PM, BP1, BP2 upload routes)
+    # would otherwise need plumbping. Reading the file once per upload is 
+    # cheap and keeps the call sites unchanged.
+    pix_fmt = "rgb24" # safe 8-bit default - won't crash smear pipelines
+    try:
+        if os.path.exists(CURRENT_JOB_FILE):
+            with open(CURRENT_JOB_FILE, 'r') as jf:
+                job_mode = json.load(jf).get('smear_mode', 'SSS').upper()
+            if job_mode == 'HDR':
+                # rgb48le = 16-bit RGB little-endian. Preserves the full
+                # tonal range of 10/12 bit source codecs (ProRes, DNxHR)
+                # into 16 bit TIFFs that the TextureManager will 
+                # consume natively.
+                pix_fmt = "rgb48le"
+    except (json.JSONDecodeError, OSError) as e:
+        # Don't fail the upload just because the job file is weird;
+        # log it and fall back to the safe 8-bit path
+        print(f"[VOP SERVER] WARN: Could not read job mode for ingestion "
+              f"({e}). Falling back to 8-bit rgb24.")
+    
+    print(f"[VOP SERVER] Video detected! Extracting {filepath} "
+          f"to TIFF sequence (pix_fmt={pix_fmt})...")
+    
+    output_pattern = os.path.join(target_dir, "%04d.tif")
+    cmd = [
+        "ffmpeg", "-y", "-i", filepath,
+        "-pix_fmt", pix_fmt,          # mode-aware: rgb or rgb48le
+        "-start_number", "0",
+        output_pattern
+    ]
 
-        cmd = [
-            "ffmpeg", "-y", "-i", filepath,
-            "-pix_fmt", "rgb24",          # ← force 8-bit RGB output
-            "-start_number", "0",
-            output_pattern
-        ]
-
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("[VOP SERVER] Frame extraction complete.")
-            os.remove(filepath)
-        
-        except subprocess.CalledProcessError as e:
-            print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("[VOP SERVER] Frame extraction complete.")
+        os.remove(filepath)
+    except subprocess.CalledProcessError as e:
+        print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion feiled: {e}")
 
 def count_source_frames(directory):
     """

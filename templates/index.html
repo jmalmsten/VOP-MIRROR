@@ -220,6 +220,7 @@
                     <select id="smear_mode">
                         <option value="SSS" selected>SSS</option>
                         <option value="MDS">MDS</option>
+                        <option value="HDR">HDR</option>
                     </select>
                 </div>
             </div>
@@ -230,6 +231,9 @@
             
             <div class="sheet-container" id="sss_wrapper" style="display: none;">
                 {% include 'sections/sss-xsheet.html' %}
+            </div>
+            <div class="sheet-container" id="hdr_wrapper" style="display: none;">
+                {% include 'sections/hdr-xsheet.html' %}
             </div>
         </div>
     </div>

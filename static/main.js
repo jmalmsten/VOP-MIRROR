@@ -33,6 +33,7 @@ Description:    Frontend logic.
 let local_sync_ts = 0; 
 let mdsMasterCount = 0;
 let sssMasterCount = 0;
+let hdrMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
 let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
@@ -49,8 +50,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentMode = this.value;
                 document.getElementById('mds_sheet_body').innerHTML = '';
                 document.getElementById('sss_sheet_body').innerHTML = '';
+                document.getElementById('hdr_sheet_body').innerHTML = '';
                 mdsMasterCount = 0;
                 sssMasterCount = 0;
+                hdrMasterCount = 0;
                 toggleSheetVisibility();
                 triggerSync();
             } else {
@@ -63,8 +66,10 @@ document.addEventListener('DOMContentLoaded', () => {
 function toggleSheetVisibility() {
     const mdsWrap = document.getElementById('mds_wrapper');
     const sssWrap = document.getElementById('sss_wrapper');
+    const hdrWrap = document.getElementById('hdr_wrapper');
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
+    if (hdrWrap) hdrWrap.style.display = (currentMode === 'HDR') ? 'block' : 'none';
 }
 
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
