@@ -99,7 +99,7 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
             Gamma correction is applied to T_s before subtraction so that 
             equal increments of T_s corresponds to equal increments of
             *emitted photons*, not equal increments of code value.
-        """
+    """
         # Input validation. We fail loud here because a quietly-wrong dtype
         # would produce output that *looks* okay but doesn't actually encode
         # 16-bit range - which would be very hard to debug from the captured
