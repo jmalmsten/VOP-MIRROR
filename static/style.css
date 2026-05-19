@@ -986,6 +986,22 @@ body {
     display:            none;
 }
 
+/* --- HDR Sheet grid template ---
+ * Issue #169: Dynamic Range Extender mode.
+ * HDR sheets are deliberately simpler than SSS/MDS - no JK printer 
+ * columns, no spatial transforms, no eye-toggle visibility hooks. 
+ * Just identity, frame number, interpolation mode, exposure, DRE 
+ * step count, the two gels, and the delete button.
+ */
+.hdr-header, .hdr-keyframe-row {
+    display:                    grid;
+    grid-template-columns:      30px 60px 50px 60px 60px 60px 60px 40px;
+    /*                          #    FR   INT  EXP  STEPS PG   CG  [×]   */
+    gap:                        5px;
+    align-items:                center;
+    margin-bottom:              5px;
+}
+
 /* --- JK input styling ---
    Tight integer inputs - shorter than the position/rotation fields. The
    .bp1-input / .bp2-input classes on BP variants already apply their 

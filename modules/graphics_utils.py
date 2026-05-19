@@ -225,20 +225,40 @@ class TextureManager:
         # ----- Texture upload (dtype-aware) -------------------------------
         # moderngl's dtype param controls the GPU-side storage format:
         #   'f1' = 8-bit per channel  (default - 1 byte, integer-normalized)
-        #   'f2' = 16-bit half-float per channel (2 bytes, preserves uint16 range)
+        #   'f2' = 16-bit half-float per channel (2 bytes)
         # The shader samples textures as normalized floats in [0.0, 1.0] in 
         # both cases, so no shader change is needed - only the precision of 
-        # what gets sampled changes. uint16 sources keep their full range; 
-        # uint8 sources continue to behave exactly as before phase 2.
+        # what gets sampled changes.
         if img.dtype == np.uint16:
-            # 16-bit RGB upload. components=3 (R,G,B), dtype='f2' (half-float).
-            # Note: moderngl reads img.tobytes() in row-major C order; uint16 
-            # serializes to little-endian on every platform we care about, 
-            # which matches GL_HALF_FLOAT's expected byte order on the GPU.
-            tex = self.ctx.texture((w, h), 3, img.tobytes(), dtype='f2')
+            # IMPORTANT: uint16 and float16 are both 2 bytes per channel but 
+            # have COMPLETELY different bit layouts. A uint16 value of 65535 
+            # would, if reinterpreted as a float16, be +Inf - not 1.0. So we 
+            # cannot just hand the uint16 buffer to moderngl with dtype='f2' 
+            # and hope for the best (an earlier phase-2 implementation did 
+            # exactly this and produced garbage on real 16-bit gradient 
+            # sources - looked plausible on solid colors but wrong on ramps).
+            # 
+            # The fix: convert uint16 [0..65535] to actual half-float [0..1] 
+            # in numpy, where we can see the math. We go via float32 as an 
+            # intermediate because:
+            #   1. Dividing uint16 by 65535.0 needs a float wide enough to 
+            #      hold both operands without overflow. float32 has plenty 
+            #      of headroom; float16 would overflow on the divisor.
+            #   2. Doing the divide in float32 means the values we cast to 
+            #      float16 are already in [0,1] - well within float16's 
+            #      representable range, so the final cast is precision-loss 
+            #      only (no overflow, no inf).
+            # 
+            # The cost is one full-image float32 buffer per cache-miss load. 
+            # At 1080p this is 1920*1080*3*4 = ~24MB transient - cheap 
+            # relative to the disk read we just did.
+            img_norm = img.astype(np.float32) / 65535.0  # uint16 -> float32 [0,1]
+            img_f16  = img_norm.astype(np.float16)        # float32 -> float16, same range
+            tex = self.ctx.texture((w, h), 3, img_f16.tobytes(), dtype='f2')
         else:
             # 8-bit RGB upload. Matches the pre-phase-2 behavior exactly so 
-            # SSS / MDS jobs continue producing bit-identical output.
+            # SSS / MDS jobs with 8-bit sources continue producing 
+            # bit-identical output.
             tex = self.ctx.texture((w, h), 3, img.tobytes())
         
         self.cache[f_path] = (tex, w/h)
