@@ -99,7 +99,7 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
             Gamma correction is applied to T_s before subtraction so that 
             equal increments of T_s corresponds to equal increments of
             *emitted photons*, not equal increments of code value.
-        """"
+        """
         # Input validation. We fail loud here because a quietly-wrong dtype
         # would produce output that *looks* okay but doesn't actually encode
         # 16-bit range - which would be very hard to debug from the captured
@@ -107,20 +107,25 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
         if source_16bpc.dtype != np.uint16:
             raise TypeError(
                 f"dre_sequencer expects a uint16 source, got {source_16bpc.dtype}. "
-                f"(If you passed a uint8 frmame, the DRE encoding will not work - "
+                f"(If you passed a uint8 frame, the DRE encoding will not work - "
                 f"check the ingestion pixel format and TextureManager paths.)"
             )
-        if source_16bpc.ndim != 3 or source_16bpc.shape[2] !=3;
-        raise ValueError(
-            f"dre_sequencer expects shape (H,W, 3), got {source_16bpc.hsape}."
-        )
+        # Shape validation. Must be (H, W, 3). The colon ends an `if`, not 
+        # a semicolon - and the raise must be indented inside the if-block,
+        # not at the same level as the if-statement itself. The original 
+        # transcription had `!=3;` (semicolon) and a top-level raise, 
+        # neither of which is valid Python.
+        if source_16bpc.ndim != 3 or source_16bpc.shape[2] != 3:
+            raise ValueError(
+                f"dre_sequencer expects shape (H, W, 3), got {source_16bpc.shape}."
+            )
         if steps < 2:
             raise ValueError(f"dre_sequencer requires steps>=2, got {steps}.")
         
         # Cast to float32 once at the start. uint16 arithmetic would overflow
         # on the (v - T) subtraction for low pixel values, and the (* 255)
         # multiplication for high ones. float32 has plenty of headroom and
-        # the per-frame allocation cost is neglible compared to disk I/O
+        # the per-frame allocation cost is negligible compared to disk I/O
         # and texture upload.
         src_f = source_16bpc.astype(np.float32)
 
@@ -135,7 +140,7 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
         # code-value steps. Normalize to 0..1, apply gamma, denormalize back.
         # This is the "dumb LUT" approximation - a measured LUT will replace
         # this curve with per-screen calibrated values in a later phase.
-        thresholds = (np.power(thresholds_linear / 65535, gamma) * 65535.0)
+        thresholds = (np.power(thresholds_linear / 65535.0, gamma) * 65535.0)
 
         # The per-step scaling factor that maps the residual (v - T) range
         # of (65535 / steps) up to the full 8-bit projector range of 255.
@@ -144,7 +149,7 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
         # range, never a compressed sub-range, so the screen's own bit
         # depth is fully exploited at every step.
         step_range = 65535.0 / steps
-        scale = 255.0 /step_range # constant across all steps
+        scale = 255.0 / step_range  # constant across all steps
 
         # Generate frames in dark-first order: step 0 lights every pixel
         # with any signal at all, later steps progressively drop the dim
@@ -152,7 +157,11 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
         # lighter pixels last") - after step 0, the darks have already
         # contributed their full quota of photons and are turned off so
         # they can't drift up from sensor noise.
-        for s in rante(steps):
+        # 
+        # The `range` builtin had been mistyped as `rante` in the original 
+        # transcription - silent until import time, then a NameError on 
+        # the first DRE exposure.
+        for s in range(steps):
             T = thresholds[s]
             # Subtract threshold, scale to 0..255, clip negative values to
             # zero (pixels below the threshold) and overshoots to 255.
