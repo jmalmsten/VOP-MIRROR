@@ -438,6 +438,57 @@ function reindexMDS() {
     });
 }
 
+// Field naming convention matches the interpolator's hdr_ prefix 
+// (snippet 3.1): hdr_f<n>, hdr_s<n> (EXP), hdr_steps<n>, hdr_c<n>_hex, 
+// hdr_cg<n>_hex. The 's' suffix for exposure time matches the SSS 
+// naming so the serializer code path in snippet 3.4-companion can 
+// stay simple.
+function addHDRKeyframe() {
+    hdrMasterCount++;
+    const idx = hdrMasterCount;
+    
+    // Suggest a frame number one ahead of the last keyframe. This 
+    // matches the affordance the SSS adder has - users almost always 
+    // want sequential frames and shouldn't have to type them.
+    const existingRows = document.querySelectorAll('.hdr-keyframe-row');
+    let suggestedFrame = 1;
+    if (existingRows.length > 0) {
+        const lastFrameInput = existingRows[existingRows.length - 1]
+            .querySelector('input[id^="hdr_f"]');
+        if (lastFrameInput) {
+            suggestedFrame = (parseInt(lastFrameInput.value) || 0) + 1;
+        }
+    }
+    
+    const row = document.createElement('div');
+    row.className = 'sheet-row hdr-keyframe-row';
+    row.innerHTML = `
+        <div>${idx}</div>
+        <div><input type="number" id="hdr_f${idx}" value="${suggestedFrame}" min="1"></div>
+        <div>
+            <select id="hdr_m${idx}">
+                <option value="L" selected>L</option>
+                <option value="E">E</option>
+                <option value="H">H</option>
+            </select>
+        </div>
+        <div><input type="number" id="hdr_s${idx}" value="1.0" step="0.1" min="0.1"></div>
+        <div><input type="number" id="hdr_steps${idx}" value="256" step="1" min="2" max="1024"></div>
+        <div><input type="color" id="hdr_c${idx}_hex" value="#ffffff"></div>
+        <div><input type="color" id="hdr_cg${idx}_hex" value="#ffffff"></div>
+        <div><button onclick="this.closest('.hdr-keyframe-row').remove(); triggerSync();">×</button></div>
+    `;
+    
+    // Wire every input in the new row to trigger a save after edit.
+    // Matches the SSS adder's behavior so HDR feels identical to use.
+    row.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', triggerSync);
+    });
+    
+    document.getElementById('hdr_sheet_body').appendChild(row);
+    triggerSync();
+}
+
 function addSSSKeyframe() {
     sssMasterCount++; 
     const idx = sssMasterCount;

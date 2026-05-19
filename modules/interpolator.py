@@ -89,8 +89,29 @@ class Timeline:
             'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
         }
         
+        # With this. The hdr prefix is "hdr_" matching the field naming we'll 
+        # use in the HDR exposure sheet (hdr_f1, hdr_exp1, hdr_pg1, hdr_cg1, 
+        # etc — see snippet 3.3). The else-clause catches typos in the saved 
+        # job file rather than letting them fall through to SSS.
+
         self.mode = job_data.get('smear_mode', 'SSS').lower()
-        prefix = "mds_" if self.mode == 'mds' else "sss_"
+        if self.mode == 'mds':
+            prefix = "mds_"
+        elif self.mode == 'sss':
+            prefix = "sss_"
+        elif self.mode == 'hdr':
+            # HDR mode (Dynamic Range Extender, issue #169). The exposure 
+            # sheet schema is intentionally minimal: frame number, exposure 
+            # time, DRE step count, and per-keyframe projector/camera gels. 
+            # No spatial transforms, no smear start/stop, no JK printer 
+            # columns - the frame is held stationary while luminance is 
+            # animated by the engine's DRE path.
+            prefix = "hdr_"
+        else:
+            raise ValueError(
+                f"Unknown smear_mode '{self.mode}' in job data. "
+                f"Expected one of: SSS, MDS, HDR."
+            )
         
         row_ids = set()
         for k in job_data.keys():
@@ -385,6 +406,52 @@ class Timeline:
             'bp2_p': st_base['bp2_p'], 'bp2_r': st_base['bp2_r'], 'lbp2_p': lbp2_p, 'lbp2_r': lbp2_r,
             'pg': pg_val, 'cg': cg_val, 'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
         }
+    
+    def get_hdr_state(self, frame_num):
+    """
+    Returns the resolved HDR state at a given frame.
+    
+    HDR (Dynamic Range Extender) mode schema is minimal compared to 
+    SSS / MDS:
+        exp        : exposure window in seconds (interpolated)
+        dre_steps  : number of temporal luminance sub-exposures 
+                     (snap-held from previous keyframe; integer-valued)
+        pg         : projector gel hex string (interpolated as RGB)
+        cg         : camera gel hex string (interpolated as RGB)
+    
+    No position, rotation, scale, smear start/stop, or JK printer 
+    columns - the frame is held stationary while luminance is 
+    animated by the engine's DRE render path (see engine.py 
+    execute_dre_exposure).
+    
+    Phase 3 of issue #169.
+    """
+    # The same lerp helper SSS uses for its 'exp' field. We rely on 
+    # the keyframe arrays self.keyframes['fr'] and ['exp'] which the 
+    # __init__ pass populated by reading hdr_f* and hdr_s* fields 
+    # from the job JSON. (The hdr_s* key is the EXP value - we reuse 
+    # the SSS naming convention 's' for the input field to keep the 
+    # JS form-serializer code path simple, see snippet 3.3.)
+    exp = self._lerp_at(frame_num, 'exp')
+    
+    # Snap-held integer field. We find the most recent keyframe at or 
+    # before frame_num and use its dre_steps value verbatim. This 
+    # avoids weird fractional step counts and avoids visible step-count 
+    # changes mid-exposure (which couldn't happen anyway since an 
+    # exposure runs to completion within a single keyframe).
+    dre_steps = self._snap_at(frame_num, 'dre_steps', default=256)
+    
+    # Gels interpolate the same way they do in SSS. _color_lerp_at is 
+    # the existing helper used by SSS keyframes for start_c / stop_c.
+    pg = self._color_lerp_at(frame_num, 'start_c', 'stop_c', default="#ffffff")
+    cg = self._color_lerp_at(frame_num, 'start_cg', 'stop_cg', default="#ffffff")
+    
+    return {
+        'exp': exp,
+        'dre_steps': dre_steps,
+        'pg': pg,
+        'cg': cg,
+    }
 
     def get_default_state(self):
         return {
