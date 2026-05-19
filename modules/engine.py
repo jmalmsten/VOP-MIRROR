@@ -624,16 +624,30 @@ def run_persistent_engine():
                 # second cache for CPU-side uint16 arrays.
                 import dre_sequencer as dre
                 
-                # Reload the source file as uint16. We trust the ingestion 
-                # pipeline (phase 1.5) and TextureManager (phase 2a) to have 
-                # produced 16-bit TIFFs; if a user uploaded an 8-bit source 
-                # under HDR mode the sequencer's dtype check will fail loud, 
-                # which is the desired behavior.
-                pm_path = tex_mgr.layer_files['pm'][int(ph_pm)] if tex_mgr.layer_files.get('pm') else None
-                if pm_path is None:
-                    log_audit(f"DRE ERROR frame {frame_num}: no PM source file. Aborting exposure.")
+                # ---------- Resolve PM playhead and source file -----
+                # Clamp the playhead the same way TextureManager.load() does,
+                # so probe-frame numbers that overshoot the available PM frames 
+                # (e.g. asking for frame 99 when only frame 1 exists on disk) 
+                # hold on the last available frame instead of raising IndexError.
+                # 
+                # The TextureManager already does this clamp internally for the 
+                # texture cache, but our DRE path bypasses that cache (we need 
+                # the raw uint16 array, not a GPU texture), so the clamp must 
+                # be repeated here.
+                pm_files = tex_mgr.layer_files.get('pm', [])
+                if not pm_files:
+                    log_audit(f"DRE ERROR frame {frame_num}: no PM source files. Aborting exposure.")
                     return
+                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
+                pm_idx = max(0, min(len(pm_files) - 1, int(ph_pm)))
+                pm_path = pm_files[pm_idx]
                 
+                # Warm tex_mgr's cache too. The post-capture pipeline doesn't 
+                # need this for DRE specifically, but it keeps the cache 
+                # consistent across mode switches.
+                tex_mgr.load(ph_pm, layer='pm')
+                
+                # ---------- Re-read source as raw uint16 numpy -----
                 source_arr = cv2.imread(pm_path, cv2.IMREAD_UNCHANGED)
                 if source_arr is None or source_arr.dtype != np.uint16:
                     log_audit(
@@ -643,10 +657,9 @@ def run_persistent_engine():
                     )
                     return
                 
-                # Same colorspace + flip handling as TextureManager.load(). We need 
-                # the array in the same orientation/order as what TextureManager 
-                # would have uploaded, because the sequenced frames are also 
-                # uploaded as moderngl textures below.
+                # Same colorspace + flip handling as TextureManager.load() so 
+                # the sequencer sees pixels in the same orientation/order the 
+                # eventual 8bit moderngl textures will be uploaded with.
                 if source_arr.ndim == 3 and source_arr.shape[2] == 4:
                     source_arr = source_arr[:, :, :3]  # strip alpha
                 source_arr = cv2.cvtColor(source_arr, cv2.COLOR_BGR2RGB)
@@ -654,25 +667,40 @@ def run_persistent_engine():
                 
                 h, w = source_arr.shape[:2]
                 
-                # Pre-generate the entire sequence as a list of uint8 arrays. We 
-                # do this eagerly rather than lazily (the sequencer is a generator) 
-                # because we want all the CPU work done before the camera shutter 
-                # opens. Holding the full sequence in RAM is fine - even at 4K with 
-                # 256 steps, it's ~6GB which won't fit, so cap at 1080p resolution 
-                # for now. (TODO: streaming version for larger sequences.)
-                # For 1080p (1920*1080*3 = 6.2MB per uint8 frame), 256 steps = 
-                # 1.6GB. The Pi has 4GB. Tight but workable for an initial 
-                # implementation; will need a streaming rewrite for higher 
-                # resolution sources.
-                sequence = list(dre.sequence_frame(source_arr, steps=dre_steps))
-                log_audit(f"DRE frame {frame_num}: generated {len(sequence)} steps, {ms_per_step:.1f}ms each")
+                # ---------- PG/CG combined filter for this keyframe ----
+                # get_hdr_state() already returns 'pg' and 'cg' as float RGB 
+                # numpy arrays (see interpolator.hex_to_rgb at line 37 - the 
+                # conversion happens at parse time, not engine time). 
+                # 
+                # Earlier transcription called cutil.hex_to_rgb_float() here, 
+                # but no such function exists in color_utils and st['pg']/'cg' 
+                # don't need it anyway. We just multiply the two RGB arrays 
+                # together component-wise to get the combined filter, the 
+                # same way the SSS path does at engine.py line 383.
+                combined_filter = (st['pg'] * st['cg']).astype('f4')
                 
-                # ---------- PG/CG tints for this keyframe ----------
-                # Same parsing the SSS path uses; we centralize it later.
-                pg = cutil.hex_to_rgb_float(st['pg'])
-                cg = cutil.hex_to_rgb_float(st['cg'])
-                combined_filter = np.array([pg[0]*cg[0], pg[1]*cg[1], pg[2]*cg[2]], dtype='f4')
+                # ---------- DRE sequencer setup (streaming) ----------
+                # Construct the generator. No CPU work yet - sequence_frame is 
+                # a Python generator, so this just builds a closure over the 
+                # source array + step count. Each `next()` during the display 
+                # loop triggers one numpy operation to produce one 8bit frame.
+                # 
+                # Streaming over eager list() construction matters for two 
+                # reasons on the Pi 4:
+                #   1. RAM: 256 frames * 1080p * uint8 RGB = ~1.5 GB resident. 
+                #      With 4 GB total and OS+GL+libcamera competing for it, 
+                #      eager allocation was OOM-prone.
+                #   2. Latency: eager generation serialized 256 numpy ops 
+                #      BEFORE the camera shutter opened, blowing past the 
+                #      IPC timeout (~2-4 min observed for a 256-step job).
+                # By yielding one frame at a time, the CPU work overlaps the 
+                # GPU's per-step screen-hold wait, so the camera sees frames 
+                # starting from the very beginning of the exposure window.
+                import dre_sequencer as dre
+                sequence_iter = dre.sequence_frame(source_arr, steps=dre_steps)
+                log_audit(f"DRE frame {frame_num}: streaming {dre_steps} steps, {ms_per_step:.1f}ms each")
                 
+
                 # ---------- Camera trigger + pre-roll (same as execute_exposure) ----------
                 ctx.screen.use()
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
@@ -699,7 +727,10 @@ def run_persistent_engine():
                 # step texture live at once.
                 pre_roll_ms = 500.0
                 
-                for step_idx, step_frame in enumerate(sequence):
+                # Iterate the generator directly. step_frame is computed 
+                # just-in-time on each iteration - while the previous step 
+                # is being held on the panel, the CPU is computing the next.
+                for step_idx, step_frame in enumerate(sequence_iter):
                     # When should this step's display end?
                     step_end_ms = pre_roll_ms + (step_idx + 1) * ms_per_step
                     

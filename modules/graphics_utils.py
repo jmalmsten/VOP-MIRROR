@@ -264,7 +264,18 @@ class TextureManager:
         self.cache[f_path] = (tex, w/h)
         return tex, w/h
 
-        def release(self):
-            for t, a in self.cache.values(): 
-                t.release()
-            self.white_tex.release()
+    def release(self):
+        """
+        Free all GPU textures owned by this manager. Called by 
+        run_persistent_engine at end-of-task to release VRAM before 
+        the next job's texture manager is created.
+        
+        Was buried inside load() due to a phase-2 indentation slip - 
+        meaning every job from phase 2 through phase 3 was crashing 
+        in cleanup with 'TextureManager has no attribute release', 
+        but the crash happened AFTER the exposure produced output so 
+        it appeared to work. Fixed here as part of phase 3 follow-up.
+        """
+        for t, a in self.cache.values(): 
+            t.release()
+        self.white_tex.release()
