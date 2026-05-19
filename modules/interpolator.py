@@ -77,7 +77,7 @@ class Timeline:
             'bp1_pos': [], 'bp1_rot': [], 
             'bp2_pos': [], 'bp2_rot': [], 
             'pg': [], 'cg': [], 
-            'exp': [], 'sd': [], 'ph': [],
+            'exp': [], 'sd': [], 'ph': [], 'dre_steps': [],
             # JK Optical Printer playhead inputs (per-layer: PM=ProjMag, BP1/BP2=BiPack reels)
             'pm_gate': [], 'pm_cam': [], 'pm_stp': [],
             'bp1_gate': [], 'bp1_cam': [], 'bp1_stp': [],
@@ -88,11 +88,6 @@ class Timeline:
             'start_bp2_p': [], 'stop_bp2_p': [], 'start_bp2_r': [], 'stop_bp2_r': [],
             'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
         }
-        
-        # With this. The hdr prefix is "hdr_" matching the field naming we'll 
-        # use in the HDR exposure sheet (hdr_f1, hdr_exp1, hdr_pg1, hdr_cg1, 
-        # etc — see snippet 3.3). The else-clause catches typos in the saved 
-        # job file rather than letting them fall through to SSS.
 
         self.mode = job_data.get('smear_mode', 'SSS').lower()
         if self.mode == 'mds':
@@ -231,7 +226,21 @@ class Timeline:
             self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}cg{idx}_hex", "#ffffff"))})
             
             # --- THESE LINES ENFORCE STRICT PARSING ---
-            exp_key = f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}"
+            # EXP field name varies by mode:
+            #   sss_exp<n>  (SSS)
+            #   mds_s<n>    (MDS; legacy short name)
+            #   hdr_exp<n>  (HDR; matches SSS convention)
+            # Both SSS and HDR use the long "exp" name; only MDS uses "s".
+            if self.mode == 'mds':
+                exp_key = f"{prefix}s{idx}"
+            else:
+                exp_key = f"{prefix}exp{idx}"
+            # HDR-only field. SSS/MDS jobs skip this (the key won't 
+            # exist; require_float falls back to the default of 256). 
+            # Parsing it unconditionally keeps the track-array lengths 
+            # aligned across all rows regardless of mode, which is what 
+            # _get_val expects.
+            self.tracks['dre_steps'].append({'f': f_val, 'val': require_float(f"{prefix}steps{idx}", 256.0)})
             self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
             self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
             self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
@@ -408,50 +417,61 @@ class Timeline:
         }
     
     def get_hdr_state(self, frame_num):
-    """
-    Returns the resolved HDR state at a given frame.
-    
-    HDR (Dynamic Range Extender) mode schema is minimal compared to 
-    SSS / MDS:
-        exp        : exposure window in seconds (interpolated)
-        dre_steps  : number of temporal luminance sub-exposures 
-                     (snap-held from previous keyframe; integer-valued)
-        pg         : projector gel hex string (interpolated as RGB)
-        cg         : camera gel hex string (interpolated as RGB)
-    
-    No position, rotation, scale, smear start/stop, or JK printer 
-    columns - the frame is held stationary while luminance is 
-    animated by the engine's DRE render path (see engine.py 
-    execute_dre_exposure).
-    
-    Phase 3 of issue #169.
-    """
-    # The same lerp helper SSS uses for its 'exp' field. We rely on 
-    # the keyframe arrays self.keyframes['fr'] and ['exp'] which the 
-    # __init__ pass populated by reading hdr_f* and hdr_s* fields 
-    # from the job JSON. (The hdr_s* key is the EXP value - we reuse 
-    # the SSS naming convention 's' for the input field to keep the 
-    # JS form-serializer code path simple, see snippet 3.3.)
-    exp = self._lerp_at(frame_num, 'exp')
-    
-    # Snap-held integer field. We find the most recent keyframe at or 
-    # before frame_num and use its dre_steps value verbatim. This 
-    # avoids weird fractional step counts and avoids visible step-count 
-    # changes mid-exposure (which couldn't happen anyway since an 
-    # exposure runs to completion within a single keyframe).
-    dre_steps = self._snap_at(frame_num, 'dre_steps', default=256)
-    
-    # Gels interpolate the same way they do in SSS. _color_lerp_at is 
-    # the existing helper used by SSS keyframes for start_c / stop_c.
-    pg = self._color_lerp_at(frame_num, 'start_c', 'stop_c', default="#ffffff")
-    cg = self._color_lerp_at(frame_num, 'start_cg', 'stop_cg', default="#ffffff")
-    
-    return {
-        'exp': exp,
-        'dre_steps': dre_steps,
-        'pg': pg,
-        'cg': cg,
-    }
+        """
+        Returns the resolved HDR state at a given frame.
+        
+        HDR (Dynamic Range Extender) mode schema is minimal compared 
+        to SSS / MDS:
+            exp        : exposure window in seconds (interpolated)
+            dre_steps  : number of temporal luminance sub-exposures 
+                         (interpolated, then cast to int)
+            pg         : projector gel as RGB float array (interpolated)
+            cg         : camera gel as RGB float array (interpolated)
+        
+        No position, rotation, scale, smear start/stop, or JK printer 
+        columns - the frame is held stationary while luminance is 
+        animated by engine.py's execute_dre_exposure path.
+        
+        Phase 3 of issue #169.
+        """
+        # No keyframes at all -> sane defaults so the engine can at 
+        # least try to render. Matches the behavior of get_state's 
+        # empty-tracks short-circuit.
+        if not any(self.tracks.values()):
+            return {
+                'exp': 1.0,
+                'dre_steps': 256,
+                'pg': np.array([1, 1, 1], dtype='f4'),
+                'cg': np.array([1, 1, 1], dtype='f4'),
+            }
+        
+        # Use the real interpolation helper _get_val. Pass True as the 
+        # third arg for color fields (signals RGB-array interpolation 
+        # rather than scalar). Default fallbacks mirror get_state's 
+        # safe_val / safe_col / safe_float pattern.
+        def safe_float(key, default_val):
+            v = self._get_val(key, frame_num)
+            return float(v) if v is not None else default_val
+        
+        def safe_col(key, default_arr):
+            v = self._get_val(key, frame_num, True)
+            return v if v is not None else default_arr
+        
+        exp       = safe_float('exp', 1.0)
+        dre_steps_f = safe_float('dre_steps', 256.0)
+        # Round to nearest int; engine will further clamp against the 
+        # panel refresh floor at exposure time.
+        dre_steps = max(2, int(round(dre_steps_f)))
+        
+        pg = safe_col('pg', np.array([1, 1, 1], dtype='f4'))
+        cg = safe_col('cg', np.array([1, 1, 1], dtype='f4'))
+        
+        return {
+            'exp': exp,
+            'dre_steps': dre_steps,
+            'pg': pg,
+            'cg': cg,
+        }
 
     def get_default_state(self):
         return {

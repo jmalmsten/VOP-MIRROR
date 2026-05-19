@@ -405,15 +405,20 @@ def run_persistent_engine():
                 # neither            -> Real exposure: capture + composite + commit to TIFF
                 # is_comp_preview takes precedence over is_preview when both are True
                 # (defensive - the caller should only set one).
-                st = timeline.get_state(frame_num)
-                # Mode dispatch for issue #169. HDR jobs run through a separate 
-                # exposure path because the inner loop is fundamentally different 
-                # (pre-generated DRE step sequence vs. time-normalized motion 
-                # smear). Returning early here means execute_exposure's existing 
-                # SSS/MDS body is completely untouched for non-HDR jobs.
+                #
+                # Mode dispatch for issue #169. HDR jobs run through a 
+                # completely separate exposure path because the inner 
+                # loop is fundamentally different (pre-generated DRE 
+                # step sequence vs. time-normalized motion smear). 
+                # Dispatching BEFORE get_state(frame_num) below avoids 
+                # the SSS-flavored state object being computed for an 
+                # HDR job - it would access pos/rot/sd/ph tracks that 
+                # HDR keyframes never populate.
                 if timeline.mode == 'hdr':
-                    return execute_dre_exposure(frame_num, is_preview=is_preview, 
+                    return execute_dre_exposure(frame_num, is_preview=is_preview,
                                                 is_comp_preview=is_comp_preview)
+                
+                st = timeline.get_state(frame_num)
                 smr_ms = float(st['exp']) * 1000.0
                 total_ms = smr_ms + 1000.0
                 
@@ -505,16 +510,40 @@ def run_persistent_engine():
                 log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] EXPOSURE {frame_num} | HDMI sequence complete. Waiting for camera file IO.")
                 cam_proc.wait()
                 
+                # Delegate to the shared post-capture helper. Centralizes 
+                # the three preview / commit branches so the HDR path 
+                # (execute_dre_exposure) can reuse the same logic.
+                _finalize_capture(buf_f, frame_num, is_preview, is_comp_preview,
+                                  st['cg'], black_clip)
+
+            def _finalize_capture(buf_f, frame_num, is_preview, is_comp_preview, 
+                                  cg_color, black_clip):
+                """
+                Shared post-capture pipeline for both execute_exposure (SSS/MDS) 
+                and execute_dre_exposure (HDR) paths.
+                
+                After cam_proc.wait() returns, the DNG is on disk and the camera 
+                doesn't care what kind of HDMI animation produced it. The three 
+                downstream paths (comp_preview / cam_preview / real exposure) 
+                are mode-agnostic, so we share one implementation.
+                
+                The cg_color argument is the resolved camera gel for this 
+                frame (RGB float array). In SSS/MDS this comes from 
+                timeline.get_state(...)['cg']; in HDR from get_hdr_state. 
+                Centralizing the call signature here means the exposure 
+                functions don't need to know about each other's state shapes.
+                """
                 # Branch on which post-capture pipeline to run. Order matters:
-                # comp_preview is checked first so a caller that accidentally sets
-                # both flags still gets the safer (non-committing) comp behavior.
+                # comp_preview is checked first so a caller that accidentally 
+                # sets both flags still gets the safer (non-committing) 
+                # comp behavior.
                 if is_comp_preview:
                     # Comp Preview: in-memory composite onto any existing latent
                     # TIFF for this frame, write JPG, do NOT commit anything to
                     # the CamMag. PAR and unsqueeze flag forwarded for the same
                     # reasons cam_preview forwards them.
                     cutil.generate_comp_preview(buf_f, static_dir, cam_mag_dir,
-                                                frame_num, st['cg'], mono_active,
+                                                frame_num, cg_color, mono_active,
                                                 black_clip, par_x=par_x, par_y=par_y,
                                                 preview_unsqueeze=preview_unsqueeze)
                 elif is_preview:
@@ -523,222 +552,221 @@ def run_persistent_engine():
                     # window. The original DNG and the disk-bound latent TIFFs
                     # are NOT touched - those must remain squeezed so downstream
                     # NLE work has clean PAR-driven unsqueeze in post.
-                    cutil.generate_sensor_preview(buf_f, static_dir, st['cg'], mono_active, black_clip,
+                    cutil.generate_sensor_preview(buf_f, static_dir, cg_color, mono_active, black_clip,
                                                   par_x=par_x, par_y=par_y, preview_unsqueeze=preview_unsqueeze)
                 else:
                     tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
                     out_f = os.path.join(cam_mag_dir, f"latent_{str(frame_num).zfill(4)}.tif")
-                    cutil.process_and_stack_latent_image(buf_f, static_dir, out_f, tiff_flag, st['cg'], mono_active, black_clip)
-
+                    cutil.process_and_stack_latent_image(buf_f, static_dir, out_f, tiff_flag, cg_color, mono_active, black_clip)
 
             def execute_dre_exposure(frame_num, is_preview=False, is_comp_preview=False):
-            """
-            HDR / Dynamic Range Extender exposure path (issue #169, phase 3).
-            
-            Sibling to execute_exposure(). Same camera trigger semantics 
-            (single libcamera exposure with pre-roll), but the HDMI animation 
-            pushes the DRE sequencer's output frames in dark-first order, 
-            holding each step for exp_ms / dre_steps milliseconds.
-            
-            The PM layer is the only layer rendered in DRE mode - bipack 
-            layers and spatial transforms are not part of the HDR schema. 
-            The PM source is rendered as a full-frame quad with no MVP 
-            transform applied (identity matrix), so what you see on screen 
-            is the raw sequenced frame at native resolution.
-            
-            Argument semantics mirror execute_exposure() so the dispatch 
-            site (snippet 3.6) can call either one with the same signature.
-            """
-            st = timeline.get_hdr_state(frame_num)
-            exp_ms = float(st['exp']) * 1000.0
-            dre_steps = int(st['dre_steps'])
-            total_ms = exp_ms + 1000.0  # same 500ms pre + 500ms post as SSS
-            
-            black_clip = validate_black_clip(job_data.get('black_clip', 0.0))
-            
-            buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
-            
-            # ---------- Refresh-rate sanity check ----------
-            # The Pi's HDMI output is 60Hz on the panels we ship; each frame 
-            # latches for ~16.7ms. If the requested ms_per_step falls below 
-            # that, most of the sequence would be skipped before latching, 
-            # silently corrupting the temporal encoding. Clamp steps down 
-            # rather than fail the job - the user gets a slightly coarser 
-            # bit depth but a valid result instead of garbage.
-            PANEL_REFRESH_MS = 16.7  # 60Hz floor; replace with measured value later
-            min_steps_dwell = PANEL_REFRESH_MS
-            max_steps_for_exp = int(exp_ms / min_steps_dwell)
-            if dre_steps > max_steps_for_exp:
-                log_audit(
-                    f"DRE WARNING frame {frame_num}: requested {dre_steps} steps in "
-                    f"{exp_ms:.0f}ms = {exp_ms/dre_steps:.2f}ms/step is below the "
-                    f"{PANEL_REFRESH_MS}ms panel floor. Clamping to {max_steps_for_exp} "
-                    f"steps. Increase EXP or reduce DRE STEPS to silence this warning."
-                )
-                dre_steps = max(2, max_steps_for_exp)
-            
-            ms_per_step = exp_ms / dre_steps
-            
-            # ---------- Pre-cache the PM source frame ----------
-            # DRE uses only the PM layer. The bipack textures still get loaded 
-            # for cache warmth (cheap if folders are empty), but they're never 
-            # rendered. The playhead is held at frame_num's resolved PM index 
-            # for the full exposure - DRE has no concept of motion within a 
-            # single exposure window.
-            ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
-            tex_pm_8bit, asp_pm = tex_mgr.load(ph_pm, layer='pm')
-            
-            # ---------- Generate the DRE sequence ----------
-            # The sequencer is pure numpy and expects a uint16 (H,W,3) array. 
-            # tex_mgr's cache holds GPU textures, not the raw arrays, so we 
-            # need to re-read the source file. This is fine for HDR mode - 
-            # one read per exposure - and avoids burdening tex_mgr with a 
-            # second cache for CPU-side uint16 arrays.
-            import dre_sequencer as dre
-            
-            # Reload the source file as uint16. We trust the ingestion 
-            # pipeline (phase 1.5) and TextureManager (phase 2a) to have 
-            # produced 16-bit TIFFs; if a user uploaded an 8-bit source 
-            # under HDR mode the sequencer's dtype check will fail loud, 
-            # which is the desired behavior.
-            pm_path = tex_mgr.layer_files['pm'][int(ph_pm)] if tex_mgr.layer_files.get('pm') else None
-            if pm_path is None:
-                log_audit(f"DRE ERROR frame {frame_num}: no PM source file. Aborting exposure.")
-                return
-            
-            source_arr = cv2.imread(pm_path, cv2.IMREAD_UNCHANGED)
-            if source_arr is None or source_arr.dtype != np.uint16:
-                log_audit(
-                    f"DRE ERROR frame {frame_num}: PM source is not 16-bit "
-                    f"(got dtype={None if source_arr is None else source_arr.dtype}). "
-                    f"HDR mode requires 16-bit TIFF sources. Aborting exposure."
-                )
-                return
-            
-            # Same colorspace + flip handling as TextureManager.load(). We need 
-            # the array in the same orientation/order as what TextureManager 
-            # would have uploaded, because the sequenced frames are also 
-            # uploaded as moderngl textures below.
-            if source_arr.ndim == 3 and source_arr.shape[2] == 4:
-                source_arr = source_arr[:, :, :3]  # strip alpha
-            source_arr = cv2.cvtColor(source_arr, cv2.COLOR_BGR2RGB)
-            source_arr = cv2.flip(source_arr, 0)  # OpenCV->OpenGL Y flip
-            
-            h, w = source_arr.shape[:2]
-            
-            # Pre-generate the entire sequence as a list of uint8 arrays. We 
-            # do this eagerly rather than lazily (the sequencer is a generator) 
-            # because we want all the CPU work done before the camera shutter 
-            # opens. Holding the full sequence in RAM is fine - even at 4K with 
-            # 256 steps, it's ~6GB which won't fit, so cap at 1080p resolution 
-            # for now. (TODO: streaming version for larger sequences.)
-            # For 1080p (1920*1080*3 = 6.2MB per uint8 frame), 256 steps = 
-            # 1.6GB. The Pi has 4GB. Tight but workable for an initial 
-            # implementation; will need a streaming rewrite for higher 
-            # resolution sources.
-            sequence = list(dre.sequence_frame(source_arr, steps=dre_steps))
-            log_audit(f"DRE frame {frame_num}: generated {len(sequence)} steps, {ms_per_step:.1f}ms each")
-            
-            # ---------- PG/CG tints for this keyframe ----------
-            # Same parsing the SSS path uses; we centralize it later.
-            pg = cutil.hex_to_rgb_float(st['pg'])
-            cg = cutil.hex_to_rgb_float(st['cg'])
-            combined_filter = np.array([pg[0]*cg[0], pg[1]*cg[1], pg[2]*cg[2]], dtype='f4')
-            
-            # ---------- Camera trigger + pre-roll (same as execute_exposure) ----------
-            ctx.screen.use()
-            ctx.clear(0.0, 0.0, 0.0, 1.0)
-            ctx.finish()
-            pygame.display.flip()
-            
-            t_trigger = time.time()
-            log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | Triggering libcamera")
-            cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0),
-                                        job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
-                                        job_data.get('cam_res', '2028x1520'))
-            hw.wait_for_sensor_prime()
-            anchor = time.time()
-            boot_delay = (anchor - t_trigger) * 1000
-            log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | Wait complete. Boot delay: {boot_delay:.1f}ms")
-            log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | Starting DRE sequence ({dre_steps} steps, {ms_per_step:.1f}ms each)")
-            
-            # ---------- The DRE sequence loop ----------
-            # Walk the sequence in dark-first order (sequencer already emits 
-            # them this way). Each step gets its own moderngl texture, uploaded 
-            # right before display, then released after the step's window 
-            # closes. This is texture-churn-heavy but bounded: the GL driver 
-            # reuses VRAM aggressively and we never have more than one DRE 
-            # step texture live at once.
-            pre_roll_ms = 500.0
-            
-            for step_idx, step_frame in enumerate(sequence):
-                # When should this step's display end?
-                step_end_ms = pre_roll_ms + (step_idx + 1) * ms_per_step
+                """
+                HDR / Dynamic Range Extender exposure path (issue #169, phase 3).
                 
-                # Pre-roll wait. For step 0 only - subsequent steps inherit 
-                # the wait by virtue of the previous step's hold ending exactly 
-                # at this step's start.
-                if step_idx == 0:
-                    while (time.time() - anchor) * 1000 < pre_roll_ms:
+                Sibling to execute_exposure(). Same camera trigger semantics 
+                (single libcamera exposure with pre-roll), but the HDMI animation 
+                pushes the DRE sequencer's output frames in dark-first order, 
+                holding each step for exp_ms / dre_steps milliseconds.
+                
+                The PM layer is the only layer rendered in DRE mode - bipack 
+                layers and spatial transforms are not part of the HDR schema. 
+                The PM source is rendered as a full-frame quad with no MVP 
+                transform applied (identity matrix), so what you see on screen 
+                is the raw sequenced frame at native resolution.
+                
+                Argument semantics mirror execute_exposure() so the dispatch 
+                site (snippet 3.6) can call either one with the same signature.
+                """
+                st = timeline.get_hdr_state(frame_num)
+                exp_ms = float(st['exp']) * 1000.0
+                dre_steps = int(st['dre_steps'])
+                total_ms = exp_ms + 1000.0  # same 500ms pre + 500ms post as SSS
+                
+                black_clip = validate_black_clip(job_data.get('black_clip', 0.0))
+                
+                buf_f = f"/tmp/vop_buf_{frame_num}.dng" if not is_preview else "/tmp/vop_prev_buf.dng"
+                
+                # ---------- Refresh-rate sanity check ----------
+                # The Pi's HDMI output is 60Hz on the panels we ship; each frame 
+                # latches for ~16.7ms. If the requested ms_per_step falls below 
+                # that, most of the sequence would be skipped before latching, 
+                # silently corrupting the temporal encoding. Clamp steps down 
+                # rather than fail the job - the user gets a slightly coarser 
+                # bit depth but a valid result instead of garbage.
+                PANEL_REFRESH_MS = 16.7  # 60Hz floor; replace with measured value later
+                min_steps_dwell = PANEL_REFRESH_MS
+                max_steps_for_exp = int(exp_ms / min_steps_dwell)
+                if dre_steps > max_steps_for_exp:
+                    log_audit(
+                        f"DRE WARNING frame {frame_num}: requested {dre_steps} steps in "
+                        f"{exp_ms:.0f}ms = {exp_ms/dre_steps:.2f}ms/step is below the "
+                        f"{PANEL_REFRESH_MS}ms panel floor. Clamping to {max_steps_for_exp} "
+                        f"steps. Increase EXP or reduce DRE STEPS to silence this warning."
+                    )
+                    dre_steps = max(2, max_steps_for_exp)
+                
+                ms_per_step = exp_ms / dre_steps
+                
+                # ---------- Pre-cache the PM source frame ----------
+                # DRE uses only the PM layer. The bipack textures still get loaded 
+                # for cache warmth (cheap if folders are empty), but they're never 
+                # rendered. The playhead is held at frame_num's resolved PM index 
+                # for the full exposure - DRE has no concept of motion within a 
+                # single exposure window.
+                ph_pm = timeline.calculate_playhead_at(frame_num, layer='pm')
+                tex_pm_8bit, asp_pm = tex_mgr.load(ph_pm, layer='pm')
+                
+                # ---------- Generate the DRE sequence ----------
+                # The sequencer is pure numpy and expects a uint16 (H,W,3) array. 
+                # tex_mgr's cache holds GPU textures, not the raw arrays, so we 
+                # need to re-read the source file. This is fine for HDR mode - 
+                # one read per exposure - and avoids burdening tex_mgr with a 
+                # second cache for CPU-side uint16 arrays.
+                import dre_sequencer as dre
+                
+                # Reload the source file as uint16. We trust the ingestion 
+                # pipeline (phase 1.5) and TextureManager (phase 2a) to have 
+                # produced 16-bit TIFFs; if a user uploaded an 8-bit source 
+                # under HDR mode the sequencer's dtype check will fail loud, 
+                # which is the desired behavior.
+                pm_path = tex_mgr.layer_files['pm'][int(ph_pm)] if tex_mgr.layer_files.get('pm') else None
+                if pm_path is None:
+                    log_audit(f"DRE ERROR frame {frame_num}: no PM source file. Aborting exposure.")
+                    return
+                
+                source_arr = cv2.imread(pm_path, cv2.IMREAD_UNCHANGED)
+                if source_arr is None or source_arr.dtype != np.uint16:
+                    log_audit(
+                        f"DRE ERROR frame {frame_num}: PM source is not 16-bit "
+                        f"(got dtype={None if source_arr is None else source_arr.dtype}). "
+                        f"HDR mode requires 16-bit TIFF sources. Aborting exposure."
+                    )
+                    return
+                
+                # Same colorspace + flip handling as TextureManager.load(). We need 
+                # the array in the same orientation/order as what TextureManager 
+                # would have uploaded, because the sequenced frames are also 
+                # uploaded as moderngl textures below.
+                if source_arr.ndim == 3 and source_arr.shape[2] == 4:
+                    source_arr = source_arr[:, :, :3]  # strip alpha
+                source_arr = cv2.cvtColor(source_arr, cv2.COLOR_BGR2RGB)
+                source_arr = cv2.flip(source_arr, 0)  # OpenCV->OpenGL Y flip
+                
+                h, w = source_arr.shape[:2]
+                
+                # Pre-generate the entire sequence as a list of uint8 arrays. We 
+                # do this eagerly rather than lazily (the sequencer is a generator) 
+                # because we want all the CPU work done before the camera shutter 
+                # opens. Holding the full sequence in RAM is fine - even at 4K with 
+                # 256 steps, it's ~6GB which won't fit, so cap at 1080p resolution 
+                # for now. (TODO: streaming version for larger sequences.)
+                # For 1080p (1920*1080*3 = 6.2MB per uint8 frame), 256 steps = 
+                # 1.6GB. The Pi has 4GB. Tight but workable for an initial 
+                # implementation; will need a streaming rewrite for higher 
+                # resolution sources.
+                sequence = list(dre.sequence_frame(source_arr, steps=dre_steps))
+                log_audit(f"DRE frame {frame_num}: generated {len(sequence)} steps, {ms_per_step:.1f}ms each")
+                
+                # ---------- PG/CG tints for this keyframe ----------
+                # Same parsing the SSS path uses; we centralize it later.
+                pg = cutil.hex_to_rgb_float(st['pg'])
+                cg = cutil.hex_to_rgb_float(st['cg'])
+                combined_filter = np.array([pg[0]*cg[0], pg[1]*cg[1], pg[2]*cg[2]], dtype='f4')
+                
+                # ---------- Camera trigger + pre-roll (same as execute_exposure) ----------
+                ctx.screen.use()
+                ctx.clear(0.0, 0.0, 0.0, 1.0)
+                ctx.finish()
+                pygame.display.flip()
+                
+                t_trigger = time.time()
+                log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | Triggering libcamera")
+                cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0),
+                                            job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
+                                            job_data.get('cam_res', '2028x1520'))
+                hw.wait_for_sensor_prime()
+                anchor = time.time()
+                boot_delay = (anchor - t_trigger) * 1000
+                log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | Wait complete. Boot delay: {boot_delay:.1f}ms")
+                log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | Starting DRE sequence ({dre_steps} steps, {ms_per_step:.1f}ms each)")
+                
+                # ---------- The DRE sequence loop ----------
+                # Walk the sequence in dark-first order (sequencer already emits 
+                # them this way). Each step gets its own moderngl texture, uploaded 
+                # right before display, then released after the step's window 
+                # closes. This is texture-churn-heavy but bounded: the GL driver 
+                # reuses VRAM aggressively and we never have more than one DRE 
+                # step texture live at once.
+                pre_roll_ms = 500.0
+                
+                for step_idx, step_frame in enumerate(sequence):
+                    # When should this step's display end?
+                    step_end_ms = pre_roll_ms + (step_idx + 1) * ms_per_step
+                    
+                    # Pre-roll wait. For step 0 only - subsequent steps inherit 
+                    # the wait by virtue of the previous step's hold ending exactly 
+                    # at this step's start.
+                    if step_idx == 0:
+                        while (time.time() - anchor) * 1000 < pre_roll_ms:
+                            pygame.event.pump()
+                            ctx.screen.use()
+                            ctx.clear(0.0, 0.0, 0.0, 1.0)
+                            ctx.finish()
+                            pygame.display.flip()
+                    
+                    # Upload this step as a fresh 8-bit RGB texture. We use the 
+                    # default 'f1' dtype because the sequencer's output is 
+                    # explicitly uint8 - this is what the projection monitor 
+                    # ultimately consumes.
+                    step_tex = ctx.texture((w, h), 3, step_frame.tobytes())
+                    
+                    # Render the step as a full-screen quad with identity transform 
+                    # and the keyframe's PG*CG filter color applied. No spatial 
+                    # geometry - DRE holds the frame stationary.
+                    ctx.screen.use()
+                    ctx.clear(0.0, 0.0, 0.0, 1.0)
+                    prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+                    prog['filter_color'].write(combined_filter.tobytes())
+                    step_tex.use(0)
+                    vao.render(moderngl.TRIANGLE_STRIP)
+                    ctx.finish()
+                    pygame.display.flip()
+                    
+                    # Hold this step until its allotted window expires. The 
+                    # pygame.event.pump() inside the wait loop keeps the OS happy 
+                    # about responsiveness; without it the Pi's window manager 
+                    # may flag us as unresponsive on long exposures.
+                    while (time.time() - anchor) * 1000 < step_end_ms:
                         pygame.event.pump()
-                        ctx.screen.use()
-                        ctx.clear(0.0, 0.0, 0.0, 1.0)
-                        ctx.finish()
-                        pygame.display.flip()
+                        # Brief sleep to avoid 100% CPU spin on the hold. 1ms is 
+                        # short enough that we'll wake well within a screen 
+                        # refresh of the target step_end_ms.
+                        time.sleep(0.001)
+                    
+                    # Release this step's texture before the next allocation. 
+                    # Without this the GL driver would accumulate textures across 
+                    # the whole sequence and VRAM-OOM by step ~50 on 1080p sources.
+                    step_tex.release()
                 
-                # Upload this step as a fresh 8-bit RGB texture. We use the 
-                # default 'f1' dtype because the sequencer's output is 
-                # explicitly uint8 - this is what the projection monitor 
-                # ultimately consumes.
-                step_tex = ctx.texture((w, h), 3, step_frame.tobytes())
-                
-                # Render the step as a full-screen quad with identity transform 
-                # and the keyframe's PG*CG filter color applied. No spatial 
-                # geometry - DRE holds the frame stationary.
+                # ---------- Post-exposure blackout (same as execute_exposure) ----------
                 ctx.screen.use()
                 ctx.clear(0.0, 0.0, 0.0, 1.0)
                 prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
-                prog['filter_color'].write(combined_filter.tobytes())
-                step_tex.use(0)
+                prog['filter_color'].write(np.array([0.0, 0.0, 0.0], dtype='f4'))
+                tex_mgr.white_tex.use(0)
                 vao.render(moderngl.TRIANGLE_STRIP)
                 ctx.finish()
                 pygame.display.flip()
                 
-                # Hold this step until its allotted window expires. The 
-                # pygame.event.pump() inside the wait loop keeps the OS happy 
-                # about responsiveness; without it the Pi's window manager 
-                # may flag us as unresponsive on long exposures.
-                while (time.time() - anchor) * 1000 < step_end_ms:
-                    pygame.event.pump()
-                    # Brief sleep to avoid 100% CPU spin on the hold. 1ms is 
-                    # short enough that we'll wake well within a screen 
-                    # refresh of the target step_end_ms.
-                    time.sleep(0.001)
+                log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | HDR sequence complete. Waiting for camera file IO.")
+                cam_proc.wait()
                 
-                # Release this step's texture before the next allocation. 
-                # Without this the GL driver would accumulate textures across 
-                # the whole sequence and VRAM-OOM by step ~50 on 1080p sources.
-                step_tex.release()
-            
-            # ---------- Post-exposure blackout (same as execute_exposure) ----------
-            ctx.screen.use()
-            ctx.clear(0.0, 0.0, 0.0, 1.0)
-            prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
-            prog['filter_color'].write(np.array([0.0, 0.0, 0.0], dtype='f4'))
-            tex_mgr.white_tex.use(0)
-            vao.render(moderngl.TRIANGLE_STRIP)
-            ctx.finish()
-            pygame.display.flip()
-            
-            log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | HDR sequence complete. Waiting for camera file IO.")
-            cam_proc.wait()
-            
-            # From here on, the post-capture pipeline (DNG demosaic, noise 
-            # crush, TIFF commit) is the same as SSS/MDS - the camera doesn't 
-            # know or care that the HDMI animation was a DRE sequence. We 
-            # delegate to the same downstream code by NOT duplicating it here. 
-            # The dispatcher in snippet 3.6 falls through to that pipeline 
-            # after execute_dre_exposure returns.
+                # Delegate to the shared post-capture helper (same one 
+                # execute_exposure uses for SSS/MDS). The camera doesn't 
+                # know or care what kind of HDMI animation produced 
+                # the DNG, so the downstream pipeline is mode-agnostic.
+                _finalize_capture(buf_f, frame_num, is_preview, is_comp_preview,
+                                  st['cg'], black_clip)
 
 
             # ---------------------------------------------------------

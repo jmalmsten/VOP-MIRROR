@@ -438,11 +438,21 @@ function reindexMDS() {
     });
 }
 
-// Field naming convention matches the interpolator's hdr_ prefix 
-// (snippet 3.1): hdr_f<n>, hdr_s<n> (EXP), hdr_steps<n>, hdr_c<n>_hex, 
-// hdr_cg<n>_hex. The 's' suffix for exposure time matches the SSS 
-// naming so the serializer code path in snippet 3.4-companion can 
-// stay simple.
+// addHDRKeyframe adds one row to the HDR exposure sheet.
+// 
+// Field naming convention mirrors SSS (so the interpolator parser 
+// can reuse the existing 'exp' track without special-casing): 
+//     hdr_f<n>        frame number
+//     hdr_m<n>        interpolation mode (S/L, matches SSS values)
+//     hdr_exp<n>      exposure seconds
+//     hdr_steps<n>    DRE step count (HDR-only)
+//     hdr_c<n>_hex    projector gel color
+//     hdr_cg<n>_hex   camera gel color
+//
+// The universal collectParams() walks all <input> and <select> 
+// elements and uses their IDs as JSON keys, so there's no separate 
+// serializer to update - any new HDR field added here is 
+// automatically included in the saved job state.
 function addHDRKeyframe() {
     hdrMasterCount++;
     const idx = hdrMasterCount;
@@ -467,13 +477,11 @@ function addHDRKeyframe() {
         <div><input type="number" id="hdr_f${idx}" value="${suggestedFrame}" min="1"></div>
         <div>
             <select id="hdr_m${idx}">
-                <option value="L" selected>L</option>
-                <option value="E">E</option>
-                <option value="H">H</option>
+                <option value="S" selected>S</option>
+                <option value="L">L</option>
             </select>
         </div>
-        <div><input type="number" id="hdr_s${idx}" value="1.0" step="0.1" min="0.1"></div>
-        <div><input type="number" id="hdr_steps${idx}" value="256" step="1" min="2" max="1024"></div>
+        <div><input type="number" id="hdr_exp${idx}" value="1.0" step="0.1" min="0.1"></div>        <div><input type="number" id="hdr_steps${idx}" value="256" step="1" min="2" max="1024"></div>
         <div><input type="color" id="hdr_c${idx}_hex" value="#ffffff"></div>
         <div><input type="color" id="hdr_cg${idx}_hex" value="#ffffff"></div>
         <div><button onclick="this.closest('.hdr-keyframe-row').remove(); triggerSync();">×</button></div>
