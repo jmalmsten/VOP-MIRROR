@@ -118,50 +118,78 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
     if steps < 2:
         raise ValueError(f"dre_sequencer requires steps>=2, got {steps}.")
 
-    # Cast to float32 once at the start. uint16 arithmetic would overflow
-    # on the (v - T) subtraction for low pixel values, and the (* 255)
-    # multiplication for high ones. float32 has plenty of headroom and
-    # the per-frame allocation cost is negligible compared to disk I/O
-    # and texture upload.
-    src_f = source_16bpc.astype(np.float32)
+# Input validation. We fail loud here because a quietly-wrong dtype
+    # would produce output that *looks* okay but doesn't actually encode
+    # 16-bit range - which would be very hard to debug from the captured
+    # results alone.
+    if source_16bpc.dtype != np.uint16:
+        raise TypeError(
+            f"dre_sequencer expects a uint16 source, got {source_16bpc.dtype}. "
+            f"(If you passed a uint8 frame, the DRE encoding will not work - "
+            f"check the ingestion pixel format and TextureManager paths.)"
+        )
+    # Shape validation. Must be (H, W, 3).
+    if source_16bpc.ndim != 3 or source_16bpc.shape[2] != 3:
+        raise ValueError(
+            f"dre_sequencer expects shape (H, W, 3), got {source_16bpc.shape}."
+        )
+    if steps < 2:
+        raise ValueError(f"dre_sequencer requires steps>=2, got {steps}.")
 
-    # Per-step linear threshold spacing across the 16-bit range. Step 0
-    # has threshold 0 (every nonzero pixel contributes), final step has
-    # threshold approaching 65535 (only the very brightest pixels still
-    # contribute). We exclude the endpoint via endpoint=False so the
-    # last step is the brightest-only step, not a no-op pure-black step.
-    thresholds_linear = np.linspace(0.0, 65535.0, steps, endpoint=False)
+    # Normalize source to [0.0, 1.0] in float32. The whole step calculation
+    # below is easier in normalized space - we map back to 0..255 uint8 at
+    # the very end. float32 has plenty of headroom for the multiply-and-
+    # subtract math without overflow.
+    src_normalized = source_16bpc.astype(np.float32) / 65535.0
 
-    # Apply screen-response gamma. We want equal-photon steps, not equal-
-    # code-value steps. Normalize to 0..1, apply gamma, denormalize back.
-    # This is the "dumb LUT" approximation - a measured LUT will replace
-    # this curve with per-screen calibrated values in a later phase.
-    thresholds = (np.power(thresholds_linear / 65535.0, gamma) * 65535.0)
-
-    # The per-step scaling factor that maps the residual (v - T) range
-    # of (65535 / steps) up to the full 8-bit projector range of 255.
-    # This is what gives each step the maximum possible SNR on the
-    # projection monitor: every sub-exposure uses the full 0..255 code
-    # range, never a compressed sub-range, so the screen's own bit
-    # depth is fully exploited at every step.
-    step_range = 65535.0 / steps
-    scale = 255.0 / step_range  # constant across all steps
-
-    # Generate frames in dark-first order: step 0 lights every pixel
-    # with any signal at all, later steps progressively drop the dim
-    # pixels. This matches the original concept ("darker pixels first,
-    # lighter pixels last") - after step 0, the darks have already
-    # contributed their full quota of photons and are turned off so
-    # they can't drift up from sensor noise.
+    # ---- The "fuel" formulation ----
+    # 
+    # Picture the source value of a pixel as a "fuel budget" measured in 
+    # step-units. A source pixel with normalized value 0.55 has 0.55 * S 
+    # = 33 step-units of fuel if S=60. The display sequence burns one 
+    # step-unit per step, at full panel intensity (code value 1.0), until 
+    # the fuel runs out. Step 32 emits 1.0 (one full unit), step 33 emits 
+    # 0.0 (the partial 33rd step is the last one — but wait, 0.55 * 60 = 
+    # 33.0 means the fuel is exactly used up at step 33). For src=0.5675 
+    # (0.5675 * 60 = 34.05), step 33 emits 1.0, step 34 emits 0.05, and 
+    # all later steps emit 0.0. Integrated = 33 + 0.05 + ... = 33.05 / 60 
+    # = 0.5675 normalized, exactly reconstructing the source value.
+    # 
+    # Per-step output formula:
+    #     remaining_after_step_s = src_normalized * steps - s
+    #     this_step_code         = clip(remaining_after_step_s, 0, 1)
+    # 
+    # The clip(_, 0, 1) handles both ends:
+    #   - For pixels with fuel already burned through (remaining < 0): 
+    #     output 0 (dark).
+    #   - For pixels with plenty of fuel remaining (remaining > 1): 
+    #     output 1 (full panel intensity).
+    #   - For the one partial step at the end of a pixel's fuel: output 
+    #     the fractional part, which is the "smooth gradient" contribution 
+    #     that takes us above 6-bit-equivalent precision.
+    # 
+    # Why this differs from the original threshold-based formulation:
+    # the original computed (v - T) * scale and clipped to 255. That made 
+    # every step a binary mask (above-threshold = 255, below = 0), with 
+    # no partial-step contribution. Integrated output was just "how many 
+    # steps survived" * 255, producing a staircase with only `steps`-many 
+    # distinct values. The smooth-gradient capture you wanted came out 
+    # as flat color bands because of this.
+    # 
+    # No screen-response gamma is applied here. The intent of phase 3 is 
+    # to produce linear-photon output; the screen's actual response curve 
+    # is a calibration concern handled by the LUT mapper in phase 4 
+    # (issue #184). Mixing them at the encoding stage made the math 
+    # non-monotonic and the captured images unrecoverable.
     for s in range(steps):
-        T = thresholds[s]
-        # Subtract threshold, scale to 0..255, clip negative values to
-        # zero (pixels below the threshold) and overshoots to 255.
-        # Cast to uint8 last; the clip ensures the cast is safe (no
-        # wraparound from negative floats).
-        frame = np.clip((src_f - T) * scale, 0.0, 255.0).astype(np.uint8)
+        # Per-pixel "remaining fuel after step s", clipped to [0, 1].
+        # numpy broadcasts the scalar s across the full (H,W,3) array.
+        per_step = np.clip(src_normalized * steps - s, 0.0, 1.0)
+        # Scale to 8-bit panel code values and cast. The clip above 
+        # guarantees per_step is in [0, 1] so the multiply lands cleanly 
+        # in [0, 255] with no wraparound risk on the uint8 cast.
+        frame = (per_step * 255.0).astype(np.uint8)
         yield frame
-
 
 def total_steps_for_exposure(exposure_seconds, min_step_seconds=0.01):
     """
