@@ -986,14 +986,14 @@ body {
     display:            none;
 }
 
-/* --- HDR Sheet grid template ---
+/* --- DRE Sheet grid template ---
  * Issue #169: Dynamic Range Extender mode.
- * HDR sheets are deliberately simpler than SSS/MDS - no JK printer 
+ * DRE sheets are deliberately simpler than SSS/MDS - no JK printer 
  * columns, no spatial transforms, no eye-toggle visibility hooks. 
  * Just identity, frame number, interpolation mode, exposure, DRE 
  * step count, the two gels, and the delete button.
  */
-.hdr-header, .hdr-keyframe-row {
+.dre-header, .dre-keyframe-row {
     display:                    grid;
     grid-template-columns:      30px 60px 50px 60px 60px 60px 60px 40px;
     /*                          #    FR   INT  EXP  STEPS PG   CG  [×]   */

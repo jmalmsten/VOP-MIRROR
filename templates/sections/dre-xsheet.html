@@ -1,7 +1,7 @@
 <!--
-    HDR Exposure Sheet (Dynamic Range Extender mode)
+    DRE Exposure Sheet (Dynamic Range Extender mode)
     
-    Issue #169, phase 3: minimal schema. HDR keyframes encode tonal 
+    Issue #169, phase 3: minimal schema. DRE keyframes encode tonal 
     behavior over time, not spatial behavior. Per-keyframe fields:
         FR        - frame number (timeline position)
         INT       - interpolation mode (linear / ease / hold etc, 
@@ -20,8 +20,8 @@
     start/stop, JK printer columns. The frame is held stationary 
     during a DRE exposure; only luminance varies.
 -->
-<div class="vop-sheet hdr-sheet">
-    <div class="sheet-row hdr-header">
+<div class="vop-sheet dre-sheet">
+    <div class="sheet-row dre-header">
         <div>#</div>
         <div data-title="Frame Number">FR</div>
         <div data-title="Interpolation Mode">INT</div>
@@ -31,8 +31,8 @@
         <div data-title="Camera Gel">CG</div>
         <div></div>
     </div>
-    <div id="hdr_sheet_body"></div>
+    <div id="dre_sheet_body"></div>
 </div>
-<div class="add-row hdr-add-row">
-    <button class="hdr-add-btn" onclick="addHDRKeyframe()">+ ADD HDR KEYFRAME</button>
+<div class="add-row dre-add-row">
+    <button class="dre-add-btn" onclick="addDREKeyframe()">+ ADD DRE KEYFRAME</button>
 </div>

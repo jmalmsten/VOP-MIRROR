@@ -406,15 +406,15 @@ def run_persistent_engine():
                 # is_comp_preview takes precedence over is_preview when both are True
                 # (defensive - the caller should only set one).
                 #
-                # Mode dispatch for issue #169. HDR jobs run through a 
+                # Mode dispatch for issue #169. DRE jobs run through a 
                 # completely separate exposure path because the inner 
                 # loop is fundamentally different (pre-generated DRE 
                 # step sequence vs. time-normalized motion smear). 
                 # Dispatching BEFORE get_state(frame_num) below avoids 
                 # the SSS-flavored state object being computed for an 
-                # HDR job - it would access pos/rot/sd/ph tracks that 
-                # HDR keyframes never populate.
-                if timeline.mode == 'hdr':
+                # DRE job - it would access pos/rot/sd/ph tracks that 
+                # DRE keyframes never populate.
+                if timeline.mode == 'dre':
                     return execute_dre_exposure(frame_num, is_preview=is_preview,
                                                 is_comp_preview=is_comp_preview)
                 
@@ -511,7 +511,7 @@ def run_persistent_engine():
                 cam_proc.wait()
                 
                 # Delegate to the shared post-capture helper. Centralizes 
-                # the three preview / commit branches so the HDR path 
+                # the three preview / commit branches so the DRE path 
                 # (execute_dre_exposure) can reuse the same logic.
                 _finalize_capture(buf_f, frame_num, is_preview, is_comp_preview,
                                   st['cg'], black_clip)
@@ -520,7 +520,7 @@ def run_persistent_engine():
                                   cg_color, black_clip):
                 """
                 Shared post-capture pipeline for both execute_exposure (SSS/MDS) 
-                and execute_dre_exposure (HDR) paths.
+                and execute_dre_exposure (DRE) paths.
                 
                 After cam_proc.wait() returns, the DNG is on disk and the camera 
                 doesn't care what kind of HDMI animation produced it. The three 
@@ -529,7 +529,7 @@ def run_persistent_engine():
                 
                 The cg_color argument is the resolved camera gel for this 
                 frame (RGB float array). In SSS/MDS this comes from 
-                timeline.get_state(...)['cg']; in HDR from get_hdr_state. 
+                timeline.get_state(...)['cg']; in DRE from get_dre_state. 
                 Centralizing the call signature here means the exposure 
                 functions don't need to know about each other's state shapes.
                 """
@@ -561,7 +561,7 @@ def run_persistent_engine():
 
             def execute_dre_exposure(frame_num, is_preview=False, is_comp_preview=False):
                 """
-                HDR / Dynamic Range Extender exposure path (issue #169, phase 3).
+                DRE / Dynamic Range Extender exposure path (issue #169, phase 3).
                 
                 Sibling to execute_exposure(). Same camera trigger semantics 
                 (single libcamera exposure with pre-roll), but the HDMI animation 
@@ -569,7 +569,7 @@ def run_persistent_engine():
                 holding each step for exp_ms / dre_steps milliseconds.
                 
                 The PM layer is the only layer rendered in DRE mode - bipack 
-                layers and spatial transforms are not part of the HDR schema. 
+                layers and spatial transforms are not part of the DRE schema. 
                 The PM source is rendered as a full-frame quad with no MVP 
                 transform applied (identity matrix), so what you see on screen 
                 is the raw sequenced frame at native resolution.
@@ -577,7 +577,7 @@ def run_persistent_engine():
                 Argument semantics mirror execute_exposure() so the dispatch 
                 site (snippet 3.6) can call either one with the same signature.
                 """
-                st = timeline.get_hdr_state(frame_num)
+                st = timeline.get_dre_state(frame_num)
                 exp_ms = float(st['exp']) * 1000.0
                 dre_steps = int(st['dre_steps'])
                 total_ms = exp_ms + 1000.0  # same 500ms pre + 500ms post as SSS
@@ -619,7 +619,7 @@ def run_persistent_engine():
                 # ---------- Generate the DRE sequence ----------
                 # The sequencer is pure numpy and expects a uint16 (H,W,3) array. 
                 # tex_mgr's cache holds GPU textures, not the raw arrays, so we 
-                # need to re-read the source file. This is fine for HDR mode - 
+                # need to re-read the source file. This is fine for DRE mode - 
                 # one read per exposure - and avoids burdening tex_mgr with a 
                 # second cache for CPU-side uint16 arrays.
                 import dre_sequencer as dre
@@ -653,7 +653,7 @@ def run_persistent_engine():
                     log_audit(
                         f"DRE ERROR frame {frame_num}: PM source is not 16-bit "
                         f"(got dtype={None if source_arr is None else source_arr.dtype}). "
-                        f"HDR mode requires 16-bit TIFF sources. Aborting exposure."
+                        f"DRE mode requires 16-bit TIFF sources. Aborting exposure."
                     )
                     return
                 
@@ -668,7 +668,7 @@ def run_persistent_engine():
                 h, w = source_arr.shape[:2]
                 
                 # ---------- PG/CG combined filter for this keyframe ----
-                # get_hdr_state() already returns 'pg' and 'cg' as float RGB 
+                # get_dre_state() already returns 'pg' and 'cg' as float RGB 
                 # numpy arrays (see interpolator.hex_to_rgb at line 37 - the 
                 # conversion happens at parse time, not engine time). 
                 # 
@@ -813,7 +813,7 @@ def run_persistent_engine():
                 ctx.finish()
                 pygame.display.flip()
                 
-                log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | HDR sequence complete. Waiting for camera file IO.")
+                log_audit(f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] DRE-EXPOSURE {frame_num} | DRE sequence complete. Waiting for camera file IO.")
                 cam_proc.wait()
                 
                 # Delegate to the shared post-capture helper (same one 
@@ -844,15 +844,15 @@ def run_persistent_engine():
                     # across all four preview buttons, and Proj Probe shows
                     # the FULL logical frame even at non-square PARs - no
                     # silent cropping at the screen edges.
-                    # ---- Render-to-screen branch: SSS/MDS path vs HDR DRE-step path ----
+                    # ---- Render-to-screen branch: SSS/MDS path vs DRE DRE-step path ----
                     # 
                     # The SSS/MDS path uses render_world() to composite all three 
                     # optical layers onto the screen with the smear's spatial 
                     # transforms applied. 
                     # 
-                    # The HDR path has two sub-cases:
+                    # The DRE path has two sub-cases:
                     #   - DRE preview OFF: same as today, render_world() draws the 
-                    #     raw PM source through identity transforms. Since HDR 
+                    #     raw PM source through identity transforms. Since DRE 
                     #     keyframes don't populate the SSS-style pos/rot tracks, 
                     #     get_state() returns identity defaults and the result is 
                     #     a clean preview of the source frame.
@@ -869,13 +869,13 @@ def run_persistent_engine():
                     # -> JPG) can consume unchanged.
                     probe_frame = float(job_data.get('probe_frame', 1))
                     probe_sub = float(job_data.get('probe_sub', 0.5))
-                    dre_preview_on = (timeline.mode == 'hdr' 
+                    dre_preview_on = (timeline.mode == 'dre' 
                                        and str(job_data.get('probe_dre', 'false')).lower() in ('true', 'on', '1'))
                     
                     if dre_preview_on:
                         # ---- DRE step preview path ----
-                        # Resolve HDR keyframe state (gives us dre_steps and gel colors).
-                        st = timeline.get_hdr_state(probe_frame)
+                        # Resolve DRE keyframe state (gives us dre_steps and gel colors).
+                        st = timeline.get_dre_state(probe_frame)
                         dre_steps = int(st['dre_steps'])
                         
                         # Map Sub [0.0, 1.0] to step index [0, dre_steps-1]. 
@@ -936,7 +936,7 @@ def run_persistent_engine():
                                 step_tex.release()
                                 log_audit(f"DRE PREVIEW: rendered step {step_idx}/{dre_steps-1} of frame {probe_frame}")
                     else:
-                        # Default path: SSS/MDS smear preview, or HDR with DRE 
+                        # Default path: SSS/MDS smear preview, or DRE with DRE 
                         # toggle off (which render_world handles correctly via 
                         # identity-transform defaults).
                         render_world(probe_frame, probe_sub, is_preview=True)

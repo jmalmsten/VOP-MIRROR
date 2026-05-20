@@ -101,13 +101,13 @@ def process_video_ingestion(filepath, target_dir):
     Pixel format is mode-aware (issue #169)
       - SSS / MDS jobs: force 8-bit rgb24, matching the moderngl texture
         pipeline that currently expects 8bpc RGB.
-      - HDR jobs: preserve up to 16-bit precision via rgb48le. The DRE
+      - DRE jobs: preserve up to 16-bit precision via rgb48le. The DRE
         mode is the whole point of keeping that range, since it uses
         the extra bits to drive temporal luminance encoding during
         exposure.
     
     The Current mode is read from current_job.json. If the file is missing
-    or unparseable we fall back to the safe 8-bit path, since an HDR-mode
+    or unparseable we fall back to the safe 8-bit path, since an DRE-mode
     16-bit TIFF would crash the current texture pipeline.
     """
     ext = os.path.splitext(filepath)[1].lower()
@@ -126,7 +126,7 @@ def process_video_ingestion(filepath, target_dir):
         if os.path.exists(CURRENT_JOB_FILE):
             with open(CURRENT_JOB_FILE, 'r') as jf:
                 job_mode = json.load(jf).get('smear_mode', 'SSS').upper()
-            if job_mode == 'HDR':
+            if job_mode == 'DRE':
                 # rgb48le = 16-bit RGB little-endian. Preserves the full
                 # tonal range of 10/12 bit source codecs (ProRes, DNxHR)
                 # into 16 bit TIFFs that the TextureManager will 

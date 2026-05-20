@@ -94,18 +94,18 @@ class Timeline:
             prefix = "mds_"
         elif self.mode == 'sss':
             prefix = "sss_"
-        elif self.mode == 'hdr':
-            # HDR mode (Dynamic Range Extender, issue #169). The exposure 
+        elif self.mode == 'dre':
+            # DRE mode (Dynamic Range Extender, issue #169). The exposure 
             # sheet schema is intentionally minimal: frame number, exposure 
             # time, DRE step count, and per-keyframe projector/camera gels. 
             # No spatial transforms, no smear start/stop, no JK printer 
             # columns - the frame is held stationary while luminance is 
             # animated by the engine's DRE path.
-            prefix = "hdr_"
+            prefix = "dre_"
         else:
             raise ValueError(
                 f"Unknown smear_mode '{self.mode}' in job data. "
-                f"Expected one of: SSS, MDS, HDR."
+                f"Expected one of: SSS, MDS, DRE."
             )
         
         row_ids = set()
@@ -229,13 +229,13 @@ class Timeline:
             # EXP field name varies by mode:
             #   sss_exp<n>  (SSS)
             #   mds_s<n>    (MDS; legacy short name)
-            #   hdr_exp<n>  (HDR; matches SSS convention)
-            # Both SSS and HDR use the long "exp" name; only MDS uses "s".
+            #   dre_exp<n>  (DRE; matches SSS convention)
+            # Both SSS and DRE use the long "exp" name; only MDS uses "s".
             if self.mode == 'mds':
                 exp_key = f"{prefix}s{idx}"
             else:
                 exp_key = f"{prefix}exp{idx}"
-            # HDR-only field. SSS/MDS jobs skip this (the key won't 
+            # DRE-only field. SSS/MDS jobs skip this (the key won't 
             # exist; require_float falls back to the default of 256). 
             # Parsing it unconditionally keeps the track-array lengths 
             # aligned across all rows regardless of mode, which is what 
@@ -416,11 +416,11 @@ class Timeline:
             'pg': pg_val, 'cg': cg_val, 'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
         }
     
-    def get_hdr_state(self, frame_num):
+    def get_dre_state(self, frame_num):
         """
-        Returns the resolved HDR state at a given frame.
+        Returns the resolved DRE state at a given frame.
         
-        HDR (Dynamic Range Extender) mode schema is minimal compared 
+        DRE (Dynamic Range Extender) mode schema is minimal compared 
         to SSS / MDS:
             exp        : exposure window in seconds (interpolated)
             dre_steps  : number of temporal luminance sub-exposures 

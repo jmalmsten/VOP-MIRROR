@@ -59,18 +59,18 @@
                     <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
                     <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
                     <!--
-                        To make it more easy to see what the DRE steps in HDR mode are doing
+                        To make it more easy to see what the DRE steps in DRE mode are doing
                         we have here a little checkbox that enables the probe system to check
                         what the DRE step does at a particular subframe and shows it like it
                         would with normal smear jobs. The input logic stays the same. It's a
                         float between 0.0 and 1.0 and it chooses the DRE step that's closest
                         to the float value.
 
-                        Normally, this checkbox is hidden and only becomes visible when HDR
+                        Normally, this checkbox is hidden and only becomes visible when DRE
                         mode is active. 
                     -->
-                    <div class="c-box" id="hdr_probe_controls" style="display: none;" 
-                                           title="HDR Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
+                    <div class="c-box" id="dre_probe_controls" style="display: none;" 
+                                           title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
                         <label>DRE</label>
                         <input type="checkbox" id="probe_dre" onchange="runTask('preview')">
                     </div>
@@ -236,7 +236,7 @@
                     <select id="smear_mode">
                         <option value="SSS" selected>SSS</option>
                         <option value="MDS">MDS</option>
-                        <option value="HDR">HDR</option>
+                        <option value="DRE">DRE (Experimental)</option>
                     </select>
                 </div>
             </div>
@@ -248,8 +248,8 @@
             <div class="sheet-container" id="sss_wrapper" style="display: none;">
                 {% include 'sections/sss-xsheet.html' %}
             </div>
-            <div class="sheet-container" id="hdr_wrapper" style="display: none;">
-                {% include 'sections/hdr-xsheet.html' %}
+            <div class="sheet-container" id="dre_wrapper" style="display: none;">
+                {% include 'sections/dre-xsheet.html' %}
             </div>
         </div>
     </div>

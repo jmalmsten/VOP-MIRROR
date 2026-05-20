@@ -33,7 +33,7 @@ Description:    Frontend logic.
 let local_sync_ts = 0; 
 let mdsMasterCount = 0;
 let sssMasterCount = 0;
-let hdrMasterCount = 0;
+let dreMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
 let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
@@ -50,10 +50,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentMode = this.value;
                 document.getElementById('mds_sheet_body').innerHTML = '';
                 document.getElementById('sss_sheet_body').innerHTML = '';
-                document.getElementById('hdr_sheet_body').innerHTML = '';
+                document.getElementById('dre_sheet_body').innerHTML = '';
                 mdsMasterCount = 0;
                 sssMasterCount = 0;
-                hdrMasterCount = 0;
+                dreMasterCount = 0;
                 toggleSheetVisibility();
                 triggerSync();
             } else {
@@ -66,14 +66,14 @@ document.addEventListener('DOMContentLoaded', () => {
 function toggleSheetVisibility() {
     const mdsWrap = document.getElementById('mds_wrapper');
     const sssWrap = document.getElementById('sss_wrapper');
-    const hdrWrap = document.getElementById('hdr_wrapper');
+    const dreWrap = document.getElementById('dre_wrapper');
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
-    if (hdrWrap) hdrWrap.style.display = (currentMode === 'HDR') ? 'block' : 'none';
-    // HDR-specific Probe row controls. Only visible in HDR mode because the 
+    if (dreWrap) dreWrap.style.display = (currentMode === 'DRE') ? 'block' : 'none';
+    // DRE-specific Probe row controls. Only visible in DRE mode because the 
     // DRE-step preview toggle makes no sense for SSS/MDS jobs.
-    const hdrProbe = document.getElementById('hdr_probe_controls');
-    if (hdrProbe) hdrProbe.style.display = (currentMode === 'HDR') ? 'inline-block' : 'none';
+    const dreProbe = document.getElementById('dre_probe_controls');
+    if (dreProbe) dreProbe.style.display = (currentMode === 'DRE') ? 'inline-block' : 'none';
 }
 
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
@@ -442,62 +442,62 @@ function reindexMDS() {
     });
 }
 
-// addHDRKeyframe adds one row to the HDR exposure sheet.
+// addDREKeyframe adds one row to the DRE exposure sheet.
 // 
 // Field naming convention mirrors SSS (so the interpolator parser 
 // can reuse the existing 'exp' track without special-casing): 
-//     hdr_f<n>        frame number
-//     hdr_m<n>        interpolation mode (S/L, matches SSS values)
-//     hdr_exp<n>      exposure seconds
-//     hdr_steps<n>    DRE step count (HDR-only)
-//     hdr_c<n>_hex    projector gel color
-//     hdr_cg<n>_hex   camera gel color
+//     dre_f<n>        frame number
+//     dre_m<n>        interpolation mode (S/L, matches SSS values)
+//     dre_exp<n>      exposure seconds
+//     dre_steps<n>    DRE step count (DRE-only)
+//     dre_c<n>_hex    projector gel color
+//     dre_cg<n>_hex   camera gel color
 //
 // The universal collectParams() walks all <input> and <select> 
 // elements and uses their IDs as JSON keys, so there's no separate 
-// serializer to update - any new HDR field added here is 
+// serializer to update - any new DRE field added here is 
 // automatically included in the saved job state.
-function addHDRKeyframe() {
-    hdrMasterCount++;
-    const idx = hdrMasterCount;
+function addDREKeyframe() {
+    dreMasterCount++;
+    const idx = dreMasterCount;
     
     // Suggest a frame number one ahead of the last keyframe. This 
     // matches the affordance the SSS adder has - users almost always 
     // want sequential frames and shouldn't have to type them.
-    const existingRows = document.querySelectorAll('.hdr-keyframe-row');
+    const existingRows = document.querySelectorAll('.dre-keyframe-row');
     let suggestedFrame = 1;
     if (existingRows.length > 0) {
         const lastFrameInput = existingRows[existingRows.length - 1]
-            .querySelector('input[id^="hdr_f"]');
+            .querySelector('input[id^="dre_f"]');
         if (lastFrameInput) {
             suggestedFrame = (parseInt(lastFrameInput.value) || 0) + 1;
         }
     }
     
     const row = document.createElement('div');
-    row.className = 'sheet-row hdr-keyframe-row';
+    row.className = 'sheet-row dre-keyframe-row';
     row.innerHTML = `
         <div>${idx}</div>
-        <div><input type="number" id="hdr_f${idx}" value="${suggestedFrame}" min="1"></div>
+        <div><input type="number" id="dre_f${idx}" value="${suggestedFrame}" min="1"></div>
         <div>
-            <select id="hdr_m${idx}">
+            <select id="dre_m${idx}">
                 <option value="S" selected>S</option>
                 <option value="L">L</option>
             </select>
         </div>
-        <div><input type="number" id="hdr_exp${idx}" value="1.0" step="0.1" min="0.1"></div>        <div><input type="number" id="hdr_steps${idx}" value="256" step="1" min="2" max="1024"></div>
-        <div><input type="color" id="hdr_c${idx}_hex" value="#ffffff"></div>
-        <div><input type="color" id="hdr_cg${idx}_hex" value="#ffffff"></div>
-        <div><button onclick="this.closest('.hdr-keyframe-row').remove(); triggerSync();">×</button></div>
+        <div><input type="number" id="dre_exp${idx}" value="1.0" step="0.1" min="0.1"></div>        <div><input type="number" id="dre_steps${idx}" value="256" step="1" min="2" max="1024"></div>
+        <div><input type="color" id="dre_c${idx}_hex" value="#ffffff"></div>
+        <div><input type="color" id="dre_cg${idx}_hex" value="#ffffff"></div>
+        <div><button onclick="this.closest('.dre-keyframe-row').remove(); triggerSync();">×</button></div>
     `;
     
     // Wire every input in the new row to trigger a save after edit.
-    // Matches the SSS adder's behavior so HDR feels identical to use.
+    // Matches the SSS adder's behavior so DRE feels identical to use.
     row.querySelectorAll('input, select').forEach(el => {
         el.addEventListener('change', triggerSync);
     });
     
-    document.getElementById('hdr_sheet_body').appendChild(row);
+    document.getElementById('dre_sheet_body').appendChild(row);
     triggerSync();
 }
 
