@@ -70,6 +70,10 @@ function toggleSheetVisibility() {
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
     if (hdrWrap) hdrWrap.style.display = (currentMode === 'HDR') ? 'block' : 'none';
+    // HDR-specific Probe row controls. Only visible in HDR mode because the 
+    // DRE-step preview toggle makes no sense for SSS/MDS jobs.
+    const hdrProbe = document.getElementById('hdr_probe_controls');
+    if (hdrProbe) hdrProbe.style.display = (currentMode === 'HDR') ? 'inline-block' : 'none';
 }
 
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);

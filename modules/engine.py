@@ -844,7 +844,102 @@ def run_persistent_engine():
                     # across all four preview buttons, and Proj Probe shows
                     # the FULL logical frame even at non-square PARs - no
                     # silent cropping at the screen edges.
-                    render_world(float(job_data.get('probe_frame', 1)), float(job_data.get('probe_sub', 0.5)), is_preview=True)
+                    # ---- Render-to-screen branch: SSS/MDS path vs HDR DRE-step path ----
+                    # 
+                    # The SSS/MDS path uses render_world() to composite all three 
+                    # optical layers onto the screen with the smear's spatial 
+                    # transforms applied. 
+                    # 
+                    # The HDR path has two sub-cases:
+                    #   - DRE preview OFF: same as today, render_world() draws the 
+                    #     raw PM source through identity transforms. Since HDR 
+                    #     keyframes don't populate the SSS-style pos/rot tracks, 
+                    #     get_state() returns identity defaults and the result is 
+                    #     a clean preview of the source frame.
+                    #   - DRE preview ON: pick one specific step from the DRE 
+                    #     sequencer (selected by Sub * dre_steps), upload it as a 
+                    #     full-screen quad, render to screen. This lets the user 
+                    #     visualize what the projection monitor will display at 
+                    #     that point during a real exposure - extremely useful for 
+                    #     calibration intuition and exposure planning.
+                    # 
+                    # Whichever branch runs, by the time we exit this block the 
+                    # HDMI screen holds a valid 1920x1080 render that the rest of 
+                    # the preview pipeline (screen-grab -> unsqueeze -> letterbox 
+                    # -> JPG) can consume unchanged.
+                    probe_frame = float(job_data.get('probe_frame', 1))
+                    probe_sub = float(job_data.get('probe_sub', 0.5))
+                    dre_preview_on = (timeline.mode == 'hdr' 
+                                       and str(job_data.get('probe_dre', 'false')).lower() in ('true', 'on', '1'))
+                    
+                    if dre_preview_on:
+                        # ---- DRE step preview path ----
+                        # Resolve HDR keyframe state (gives us dre_steps and gel colors).
+                        st = timeline.get_hdr_state(probe_frame)
+                        dre_steps = int(st['dre_steps'])
+                        
+                        # Map Sub [0.0, 1.0] to step index [0, dre_steps-1]. 
+                        # We use min() rather than clip so sub=1.0 exactly hits 
+                        # the last meaningful step (where only the brightest 
+                        # pixels still contribute), matching the SSS convention 
+                        # that sub=1.0 shows the END of a smear.
+                        step_idx = min(int(probe_sub * dre_steps), dre_steps - 1)
+                        step_idx = max(0, step_idx)  # also clamp the low end for safety
+                        
+                        # Resolve and load PM source as raw uint16 numpy (same 
+                        # pattern as execute_dre_exposure). The TextureManager 
+                        # cache holds GPU textures, not arrays, so we re-read 
+                        # the file. For a single-step preview the cost is fine.
+                        pm_files = tex_mgr.layer_files.get('pm', [])
+                        if not pm_files:
+                            log_audit(f"DRE PREVIEW: no PM source files. Falling back to render_world().")
+                            render_world(probe_frame, probe_sub, is_preview=True)
+                        else:
+                            ph_pm = timeline.calculate_playhead_at(probe_frame, layer='pm')
+                            pm_idx = max(0, min(len(pm_files) - 1, int(ph_pm)))
+                            pm_path = pm_files[pm_idx]
+                            
+                            source_arr = cv2.imread(pm_path, cv2.IMREAD_UNCHANGED)
+                            if source_arr is None or source_arr.dtype != np.uint16:
+                                log_audit(f"DRE PREVIEW: PM source not 16-bit. Falling back to render_world().")
+                                render_world(probe_frame, probe_sub, is_preview=True)
+                            else:
+                                # Same colorspace + flip handling as execute_dre_exposure.
+                                if source_arr.ndim == 3 and source_arr.shape[2] == 4:
+                                    source_arr = source_arr[:, :, :3]
+                                source_arr = cv2.cvtColor(source_arr, cv2.COLOR_BGR2RGB)
+                                source_arr = cv2.flip(source_arr, 0)
+                                h_src, w_src = source_arr.shape[:2]
+                                
+                                # Walk the sequencer to the requested step. Cheap: 
+                                # each step is one numpy clip, and we throw away 
+                                # all but the last. For dre_steps <= 256 this 
+                                # takes well under 100ms on the Pi.
+                                import dre_sequencer as dre
+                                seq_iter = dre.sequence_frame(source_arr, steps=dre_steps)
+                                step_frame = None
+                                for i, f in enumerate(seq_iter):
+                                    if i == step_idx:
+                                        step_frame = f
+                                        break
+                                
+                                # Render the step to the screen, identical to one 
+                                # iteration of the execute_dre_exposure inner loop.
+                                combined_filter = (st['pg'] * st['cg']).astype('f4')
+                                step_tex = ctx.texture((w_src, h_src), 3, step_frame.tobytes())
+                                ctx.screen.use()
+                                ctx.clear(0.1, 0.1, 0.1, 1.0)  # gray bg = frustum-bounds visual cue, matches is_preview=True
+                                prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+                                prog['filter_color'].write(combined_filter.tobytes())
+                                step_tex.use(0)
+                                vao.render(moderngl.TRIANGLE_STRIP)
+                                step_tex.release()
+                                log_audit(f"DRE PREVIEW: rendered step {step_idx}/{dre_steps-1} of frame {probe_frame}")
+                    else:
+                        # Default path: SSS/MDS smear preview, or HDR with DRE 
+                        # toggle off (which render_world handles correctly via 
+                        # identity-transform defaults).
+                        render_world(probe_frame, probe_sub, is_preview=True)
                     ctx.finish()
                     raw_bytes = ctx.screen.read(components=4)
                     img_data = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((HEIGHT, WIDTH, 4))
