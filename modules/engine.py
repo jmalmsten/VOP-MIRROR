@@ -731,19 +731,45 @@ def run_persistent_engine():
                 # just-in-time on each iteration - while the previous step 
                 # is being held on the panel, the CPU is computing the next.
                 for step_idx, step_frame in enumerate(sequence_iter):
-                    # When should this step's display end?
-                    step_end_ms = pre_roll_ms + (step_idx + 1) * ms_per_step
-                    
                     # Pre-roll wait. For step 0 only - subsequent steps inherit 
-                    # the wait by virtue of the previous step's hold ending exactly 
-                    # at this step's start.
+                    # the timing implicitly because flip() blocks for one vsync 
+                    # interval. The earlier wall-time polling version of this 
+                    # block was redundant: each pygame.display.flip() already 
+                    # waits for the panel refresh, so we just need to count 
+                    # them.
                     if step_idx == 0:
-                        while (time.time() - anchor) * 1000 < pre_roll_ms:
+                        pre_roll_flips = max(1, int(round(pre_roll_ms / PANEL_REFRESH_MS)))
+                        for _ in range(pre_roll_flips):
                             pygame.event.pump()
                             ctx.screen.use()
                             ctx.clear(0.0, 0.0, 0.0, 1.0)
                             ctx.finish()
                             pygame.display.flip()
+                    
+                    # ---------- Step display ----------
+                    # The previous version of this block tried to hold each 
+                    # step on screen by combining a single flip() with a 
+                    # busy wait-loop that called time.sleep(0.001). That 
+                    # was ~10x too slow per step on the Pi 4:
+                    #   - flip() already blocks for one ~16.7ms vsync interval
+                    #   - time.sleep(0.001) returns after ~10ms (kernel quantum)
+                    #   - the wait-loop's pygame.event.pump() added more latency
+                    # Net effect: a 19.5ms-per-step target was actually running 
+                    # at 200+ms per step, blowing past the IPC timeout on any 
+                    # job with more than ~30 steps.
+                    # 
+                    # Replacement is just N vsync-aligned flips per step. Each 
+                    # flip() blocks for exactly one refresh interval, so N 
+                    # flips = N * PANEL_REFRESH_MS of held display time.
+                    # 
+                    # Trade-off: effective ms-per-step becomes quantized to 
+                    # the refresh interval. For a 5s/256-step job, target 
+                    # 19.5ms rounds to 1 flip = 16.7ms, so the actual 
+                    # exposure runs slightly short of requested EXP. This 
+                    # is the price of vsync alignment - the calibration LUT 
+                    # phase (issue #184) will sharpen the relationship 
+                    # between user-requested EXP and integrated photons.
+                    flips_per_step = max(1, int(round(ms_per_step / PANEL_REFRESH_MS)))
                     
                     # Upload this step as a fresh 8-bit RGB texture. We use the 
                     # default 'f1' dtype because the sequencer's output is 
@@ -751,9 +777,9 @@ def run_persistent_engine():
                     # ultimately consumes.
                     step_tex = ctx.texture((w, h), 3, step_frame.tobytes())
                     
-                    # Render the step as a full-screen quad with identity transform 
-                    # and the keyframe's PG*CG filter color applied. No spatial 
-                    # geometry - DRE holds the frame stationary.
+                    # Render the step as a full-screen quad with identity 
+                    # transform and the keyframe's PG*CG filter color applied. 
+                    # No spatial geometry - DRE holds the frame stationary.
                     ctx.screen.use()
                     ctx.clear(0.0, 0.0, 0.0, 1.0)
                     prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
@@ -761,18 +787,16 @@ def run_persistent_engine():
                     step_tex.use(0)
                     vao.render(moderngl.TRIANGLE_STRIP)
                     ctx.finish()
-                    pygame.display.flip()
                     
-                    # Hold this step until its allotted window expires. The 
-                    # pygame.event.pump() inside the wait loop keeps the OS happy 
-                    # about responsiveness; without it the Pi's window manager 
-                    # may flag us as unresponsive on long exposures.
-                    while (time.time() - anchor) * 1000 < step_end_ms:
+                    # Hold the step on screen for flips_per_step vsync intervals. 
+                    # Each flip() blocks until the next refresh, so this is exactly 
+                    # flips_per_step * PANEL_REFRESH_MS of display time. The first 
+                    # flip in this batch is also what pushes the just-rendered 
+                    # contents to the screen, so the texture is visible for all 
+                    # N refresh intervals, not N-1.
+                    for _ in range(flips_per_step):
                         pygame.event.pump()
-                        # Brief sleep to avoid 100% CPU spin on the hold. 1ms is 
-                        # short enough that we'll wake well within a screen 
-                        # refresh of the target step_end_ms.
-                        time.sleep(0.001)
+                        pygame.display.flip()
                     
                     # Release this step's texture before the next allocation. 
                     # Without this the GL driver would accumulate textures across 
