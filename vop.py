@@ -41,6 +41,9 @@ import socket
 import time
 import numpy as np  # for 16-bit → 8-bit reduction in /cam_probe
 from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
+# Calibration store for reading the persisted hardware-calibration
+# values. Used by the /calibration_state GET route to expose the
+# current state to the frontend.
 import calibration_store as cstore
 
 # Append the modules directory to the system path for local imports
