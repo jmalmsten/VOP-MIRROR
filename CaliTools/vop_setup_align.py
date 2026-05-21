@@ -79,22 +79,29 @@ def prepare_system():
     os.environ["SDL_VIDEO_KMSDRM_DEVICE"] = "/dev/dri/card0"
     if "DISPLAY" in os.environ: del os.environ["DISPLAY"]
 
-def start_stream():
-    print(f"3. Connecting to Desktop at {DESKTOP_IP}:{PORT}...")
-    # 2028x1520 picks the IMX477's "2028x1520 [40.01 fps - (0, 0)/4056x3040 crop]"
-    # sensor mode. The crop region of (0,0)/4056x3040 means it's the FULL sensor 
-    # 2x2-binned down - every photosite is contributing, no hidden window. 
-    # That's critical for alignment: a smaller mode like 1280x720 puts the 
-    # sensor into a cropped readout (typically 2028x1080's (0,440)/4056x2160 
-    # window, then software-scaled), so the operator would be aligning 
-    # against a frame that doesn't match what real captures will see.
-    # 
-    # 30 fps was chosen rather than the mode's 40 fps max so the H.264 
-    # encoder has comfortable headroom on the Pi 4 - alignment doesn't 
-    # need maximum framerate, just smoothness for the human eye.
-    # 
-    # --intra 1: Every frame is a keyframe (Zero latency seeking)
-    # --inline: Keeps headers in every packet
+def _stream_proc_alive(proc):
+    """
+    Returns True if the subprocess is still running, False if it has 
+    exited. proc.poll() returns None for "still running" and the exit 
+    code otherwise; we just wrap that in a clearer name.
+    """
+    return proc.poll() is None
+
+
+def start_stream(retry_seconds=30):
+    """
+    Starts rpicam-vid streaming to the desktop's listener. Retries 
+    on TCP-connect failure for up to `retry_seconds` so the operator 
+    can start the Pi side before or after the desktop side without 
+    having to coordinate precisely.
+    
+    Returns the live Popen handle once a connection has stuck, or 
+    None if all retries failed (caller should treat as fatal).
+    """
+    # 2028x1520 sensor mode (full 4:3 sensor, 2x2 binned). See the 
+    # IMX477 mode table - this is the only video-rate mode that 
+    # sees the entire sensor area without cropping. 30 fps gives 
+    # the H.264 encoder comfortable headroom under the 40 fps cap.
     cmd = [
         "sudo", "rpicam-vid", "-t", "0", "--inline", 
         "--width", "2028", "--height", "1520",
@@ -102,7 +109,46 @@ def start_stream():
         "--profile", "baseline", "--intra", "1", "--inline",
         "-o", f"tcp://{DESKTOP_IP}:{PORT}"
     ]
-    return subprocess.Popen(cmd)
+    
+    # Retry loop: rpicam-vid fails fast (~under a second) if its TCP 
+    # destination isn't listening, so we can afford to spin reasonably 
+    # tight. 1-second sleep between attempts gives the desktop side a 
+    # human-friendly window to be started, without making the operator 
+    # wait noticeably once ffplay IS up.
+    #
+    # We rebuild Popen each attempt because once a Popen has terminated 
+    # there's no "restart" - we need a fresh process. This is fine; the 
+    # rpicam-vid startup cost is small.
+    deadline = time.time() + retry_seconds
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        print(f"3. Connecting to Desktop at {DESKTOP_IP}:{PORT}... (attempt {attempt})")
+        proc = subprocess.Popen(cmd)
+        
+        # Give rpicam-vid up to 1.5s to either die (TCP refused) or 
+        # stay alive (TCP accepted, stream started). 1.5s comfortably 
+        # covers the libcamera init time we see in alignment.log 
+        # (~0.06s of INFO lines before "failed to start output streaming"), 
+        # with margin for slower SD card / cold cache scenarios.
+        time.sleep(1.5)
+        
+        if _stream_proc_alive(proc):
+            # Process is still running 1.5s in - that means rpicam-vid 
+            # successfully opened the TCP connection AND the camera, 
+            # and is now streaming frames. We're good.
+            print(f"   Connected on attempt {attempt}.")
+            return proc
+        
+        # Process exited - almost certainly because the desktop ffplay 
+        # listener wasn't up. Sleep briefly and try again.
+        print(f"   No listener yet, retrying...")
+        time.sleep(1.0)
+    
+    # Total budget exhausted. Caller decides what to do; we just 
+    # return None so the failure path is explicit.
+    print(f"ERROR: could not establish stream to {DESKTOP_IP}:{PORT} within {retry_seconds}s")
+    return None
 
 # --- SHADERS (Targets & Focus) ---
 VERTEX_SHADER = """
@@ -134,6 +180,13 @@ void main() {
 def run():
     prepare_system()
     stream_proc = start_stream()
+    if stream_proc is None:
+        # No point starting pygame/KMSDRM if there's no camera feed 
+        # to align against. Exit cleanly so the SSH session and 
+        # any subsequent systemctl start vop work normally.
+        print("Aborting: no stream connection. Is ffplay running on the desktop?")
+        subprocess.run("sudo chvt 1", shell=True)
+        sys.exit(1)
     pygame.init()
     
     # ---------------------------------------------------------
