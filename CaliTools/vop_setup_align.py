@@ -32,10 +32,44 @@ Description:    Low-latency alignment. Uses all-intra frames for zero lag.
 
 import os, sys, time, subprocess, numpy as np
 import moderngl, pygame
+import signal
+
+# ---------------------------------------------------------
+# CLEAN SHUTDOWN HANDLING
+# ---------------------------------------------------------
+# Module-level flag the render loop polls each iteration. We use a 
+# flag rather than calling sys.exit() inside the signal handler 
+# because pygame + moderngl + KMSDRM all need orderly teardown - 
+# slamming exit() mid-frame can leave KMSDRM locked and force a 
+# reboot to recover (which is exactly the symptom this fixes).
+_shutdown_requested = False
+
+def _handle_shutdown_signal(signum, frame):
+    """
+    Signal handler for SIGTERM (sent by systemd, sudo reboot, or 
+    `kill <pid>` from SSH) and SIGINT (Ctrl+C). Just flips a flag - 
+    the main loop checks it each iteration and exits cleanly.
+    
+    This is the same pattern engine.py uses for the main daemon, 
+    kept consistent so both processes have the same shutdown 
+    semantics: receive signal -> release KMSDRM -> exit.
+    """
+    global _shutdown_requested
+    print(f"\nReceived signal {signum} - shutting down cleanly...")
+    _shutdown_requested = True
+
+# Register the handler for both SIGTERM (the standard 'please quit' 
+# signal used by systemd and reboot) and SIGINT (Ctrl+C). The 
+# default for both is to kill the process instantly, which doesn't 
+# give pygame.quit() a chance to release the KMSDRM lock.
+signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+signal.signal(signal.SIGINT,  _handle_shutdown_signal)
 
 # --- STATIC CONFIG ---
 DESKTOP_IP = "192.168.2.8"
 PORT = "5555"
+
+
 
 def prepare_system():
     subprocess.run("sudo killall -q -9 rpicam-vid rpicam-still 2>/dev/null", shell=True)
@@ -47,11 +81,23 @@ def prepare_system():
 
 def start_stream():
     print(f"3. Connecting to Desktop at {DESKTOP_IP}:{PORT}...")
+    # 2028x1520 picks the IMX477's "2028x1520 [40.01 fps - (0, 0)/4056x3040 crop]"
+    # sensor mode. The crop region of (0,0)/4056x3040 means it's the FULL sensor 
+    # 2x2-binned down - every photosite is contributing, no hidden window. 
+    # That's critical for alignment: a smaller mode like 1280x720 puts the 
+    # sensor into a cropped readout (typically 2028x1080's (0,440)/4056x2160 
+    # window, then software-scaled), so the operator would be aligning 
+    # against a frame that doesn't match what real captures will see.
+    # 
+    # 30 fps was chosen rather than the mode's 40 fps max so the H.264 
+    # encoder has comfortable headroom on the Pi 4 - alignment doesn't 
+    # need maximum framerate, just smoothness for the human eye.
+    # 
     # --intra 1: Every frame is a keyframe (Zero latency seeking)
     # --inline: Keeps headers in every packet
     cmd = [
         "sudo", "rpicam-vid", "-t", "0", "--inline", 
-        "--width", "1280", "--height", "720",
+        "--width", "2028", "--height", "1520",
         "--framerate", "30", "--codec", "h264", 
         "--profile", "baseline", "--intra", "1", "--inline",
         "-o", f"tcp://{DESKTOP_IP}:{PORT}"
@@ -129,7 +175,10 @@ def run():
 
     print("\n✅ ALIGNMENT TOOL LIVE.")
     running = True
-    while running:
+    # Loop exits on either: 'q' on the physical keyboard (sets running=False) 
+    # OR a signal from outside (sets _shutdown_requested via the handler).
+    # Both paths fall through to the same cleanup below.
+    while running and not _shutdown_requested:
         for ev in pygame.event.get():
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_q: running = False
         ctx.clear(0,0,0); vao.render(); pygame.display.flip()
