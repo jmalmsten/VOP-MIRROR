@@ -174,7 +174,7 @@ body {
 }
 
 /* ===========================================================
- * Page navigation (slice 6 - Calibration page introduction)
+ * Page navigation (Calibration page introduction)
  *
  * Two buttons in the vop-header switch between Main and
  * Calibration pages. The buttons toggle .page-active between
@@ -216,10 +216,27 @@ body {
 }
 
 /* Page section default: hidden. Only the one with .page-active
- * is shown. This is simpler than maintaining mutual exclusion
- * in JS - we just toggle .page-active and let CSS do the rest. */
+ * is shown. */
 .page-section {
     display: none;
+}
+
+/* When a page section is active, it becomes a grid container with
+ * the same column layout .container used to provide directly. This
+ * is necessary because the Main page's children (.preview-area,
+ * .controls-area, .sheets-area) declare grid-column and grid-row
+ * positions that only resolve correctly when their direct parent
+ * is a grid. Before page-navigation, those children were direct
+ * children of .container; now they're nested one level deeper
+ * inside #page_main, so #page_main must carry the grid contract.
+ *
+ * Using the same grid-template-columns as .container (1fr 420px)
+ * means the layout inside the active page is byte-identical to
+ * pre-page-nav behaviour. */
+.page-section.page-active {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 20px;
 }
 
 .page-section.page-active {
