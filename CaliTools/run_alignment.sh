@@ -90,4 +90,6 @@ setsid nohup "$PYTHON_BIN" "$APP_SCRIPT" </dev/null >"$LOG_FILE" 2>&1 &
 ALIGN_PID=$!
 echo ""
 echo "Alignment tool PID: $ALIGN_PID"
-echo "If you need to kill it from SSH:  sudo kill $ALIGN_PID"
+echo "To kill from SSH:"
+echo "  sudo kill $ALIGN_PID         # by PID - use 'kill', NOT 'pkill'"
+echo "  sudo pkill -f vop_setup_align  # by pattern - safer if you forget the PID"
