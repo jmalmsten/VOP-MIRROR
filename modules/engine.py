@@ -1145,7 +1145,7 @@ def run_persistent_engine():
                     # who want hard per-mean-saturation protection,
                     # but for the normal case we trust the
                     # target_high to be the soft upper bound.
-                    clip_threshold = float(job_data.get('clip_threshold', 1.5))9))
+                    clip_threshold = float(job_data.get('clip_threshold', 1.5))
 
                     # Defensive: target_low must be < target_high or
                     # convergence is impossible. We don't crash here -
