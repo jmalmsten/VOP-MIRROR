@@ -433,16 +433,17 @@ def measure_noise_floor(buffer_file, static_dir):
         dummy = buffer_file.replace(".dng", ".jpg")
         if os.path.exists(dummy): os.remove(dummy)
 
-def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
+def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05,
+                              return_dict=False):
     """
     Centre-weighted brightness measurement for calibration routines.
 
     Reads the DNG captured by the camera, demosaics it via rawpy, takes
     a small square region at the geometric centre of the frame, and
-    returns the mean of all three channels normalised to [0.0, 1.0].
-    Also writes a JPG preview of the full capture (with a green
-    rectangle showing the measurement region) to probe_live.jpg so the
-    Calibration page can display what was actually measured.
+    computes brightness metrics on it. Also writes a JPG preview of
+    the full capture (with a green rectangle showing the measurement
+    region) to probe_live.jpg so the Calibration page can display what
+    was actually measured.
 
     Args:
         buffer_file    : str. Path to the DNG file just written by
@@ -458,12 +459,35 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
                          which is small enough to avoid corner
                          vignetting and large enough to average out
                          per-pixel noise.
+        return_dict    : bool. When False (default), returns the mean
+                         brightness as a float. When True, returns a
+                         dict with mean, per_channel_max, and
+                         channel_maxes - the per-channel info ACB
+                         needs to detect single-channel saturation.
+
+                         The dict form is opt-in rather than the
+                         default because most callers (the manual
+                         "Single Measurement" button, a future
+                         exposure-preview helper, anything else that
+                         just wants "how bright was this?") only need
+                         the scalar. ACB is the unusual caller that
+                         needs to reason about channels separately.
 
     Returns:
-        float in [0.0, 1.0]. The mean brightness of the centre patch
-        averaged across R, G, B. 1.0 means saturated; 0.0 means pure
-        black. NOT clipped against the noise floor - calibration wants
-        the raw sensor response, not a noise-corrected value.
+        If return_dict is False:
+            float in [0.0, 1.0] - the mean brightness across R, G, B.
+        If return_dict is True:
+            dict with keys:
+                'mean'             : float, mean across R, G, B in [0,1]
+                'per_channel_max'  : float, max(R_max, G_max, B_max) in
+                                     [0,1]. THIS is the metric ACB
+                                     should chase - it goes to 1.0 the
+                                     moment any single channel clips.
+                'channel_maxes'    : tuple of (r_max, g_max, b_max),
+                                     each in [0,1]. Diagnostic; ACB
+                                     logs these so the user can see
+                                     which channel hit the ceiling
+                                     first (= WB diagnosis hint).
 
     Notes for future-me:
         Earlier versions of this function used cv2.imread on the DNG,
@@ -475,15 +499,25 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
         gamma=(1,1), no_auto_bright=True, output_bps=16, which gives
         properly demosaiced linear 16-bit RGB.
     """
-    # Defensive: missing DNG returns a sentinel high value so the
-    # caller treats this as "near saturation, back off" rather than
-    # "way too dark, push exposure longer" - safer in the ACB loop.
+    # Defensive fallback values. We construct them once here so that
+    # any of the early-return paths below can hand back consistent
+    # shapes. Sentinel value is 1.0 ("near saturation, back off")
+    # because that's the safer direction for ACB to misread - a false
+    # "low" reading would push the convergence loop toward even longer
+    # exposures and waste time chasing a doomed capture.
+    fallback_scalar = 1.0
+    fallback_dict = {
+        'mean': 1.0,
+        'per_channel_max': 1.0,
+        'channel_maxes': (1.0, 1.0, 1.0),
+    }
+
     if not os.path.exists(buffer_file):
-        return 1.0
+        return fallback_dict if return_dict else fallback_scalar
 
     try:
         # Strictly linear 16-bit extraction. Identical posture to
-        # measure_noise_floor: gamma=(1,1) means no tonemap, 
+        # measure_noise_floor: gamma=(1,1) means no tonemap,
         # no_auto_bright disables rawpy's automatic exposure
         # correction (we want raw measurements, not "what looks
         # nice"), output_bps=16 preserves full sensor precision.
@@ -492,7 +526,7 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
                                   output_bps=16)
 
         # Patch hot pixels before measurement so a single stuck pixel
-        # in the metering region doesn't drag the mean upward and
+        # in the metering region doesn't drag any metric upward and
         # confuse ACB's "are we near saturation?" decision.
         rgb = apply_hot_pixel_patch(rgb, static_dir)
 
@@ -501,20 +535,37 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
         # square on any aspect ratio.
         h, w = rgb.shape[:2]
         side = int(min(h, w) * patch_fraction)
-        # Safety clamp - production captures are huge so this is
-        # belt-and-braces, not a real concern.
         side = max(1, side)
         cy, cx = h // 2, w // 2
         half = side // 2
 
-        # Mean across R, G, B of the centre patch, normalised to
-        # [0, 1]. We use mean rather than 99.9-percentile (which
-        # measure_noise_floor uses) because the relevant question
-        # here is "what is the typical brightness?" not "where is
-        # the noise ceiling?". A flat white patch should have a
-        # very narrow distribution; mean is fine.
         patch = rgb[cy - half : cy + half, cx - half : cx + half]
-        brightness = float(patch.mean()) / 65535.0
+
+        # Mean across all pixels and all channels - the "typical
+        # brightness" metric for the manual readout.
+        mean_brightness = float(patch.mean()) / 65535.0
+
+        # Per-channel maxes. patch.shape is (side, side, 3) in RGB
+        # order. We take the max over the spatial dimensions for
+        # each channel separately, because for the saturation
+        # question we don't care about average channel brightness -
+        # we care about whether ANY pixel in the channel hit the
+        # ceiling.
+        #
+        # We use max rather than 99.9-percentile here (contrast with
+        # measure_noise_floor's 99.9-percentile) because saturation
+        # on the imaged side of the calibration is a yes/no question
+        # and a single saturated outlier IS the signal we're looking
+        # for: it tells ACB that this channel can't take any more
+        # exposure without clipping further pixels next iteration.
+        # The metering patch is small enough (~75x75 px on the HQ
+        # camera at 1520x2028 with the 0.05 patch_fraction) that hot
+        # pixels are the only thing that would skew the per-channel
+        # max - and we patched those out above.
+        r_max = float(patch[:, :, 0].max()) / 65535.0
+        g_max = float(patch[:, :, 1].max()) / 65535.0
+        b_max = float(patch[:, :, 2].max()) / 65535.0
+        per_channel_max = max(r_max, g_max, b_max)
 
         # --- PREVIEW GENERATION ---
         # Convert to 8-bit BGR for the JPG write. Same shape /
@@ -525,22 +576,21 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
         # Burn a bright green rectangle around the measured region.
         # This matches the noise-crusher preview style and gives the
         # user visual confirmation of where the measurement happened.
-        # The Calibration page can rely on this overlay being baked
-        # into the JPG and not need to draw its own.
         cv2.rectangle(img_8bit, (cx - half, cy - half),
                       (cx + half, cy + half), (0, 255, 0), 2)
         cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img_8bit)
 
-        return brightness
+        if return_dict:
+            return {
+                'mean': mean_brightness,
+                'per_channel_max': per_channel_max,
+                'channel_maxes': (r_max, g_max, b_max),
+            }
+        return mean_brightness
 
     except Exception as e:
-        # Match measure_noise_floor's failure mode: log and return a
-        # safe fallback rather than crashing the engine. For
-        # calibration the safe fallback is "looks saturated, back
-        # off" (1.0) so a glitched capture doesn't push ACB toward
-        # ever-longer exposures.
         print(f"[VOP WARNING] Peak Measurement Error: {e}")
-        return 1.0
+        return fallback_dict if return_dict else fallback_scalar
     finally:
         # Cleanup, same as measure_noise_floor.
         if os.path.exists(buffer_file):
@@ -548,7 +598,6 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
         dummy = buffer_file.replace(".dng", ".jpg")
         if os.path.exists(dummy):
             os.remove(dummy)
-
 def apply_hot_pixel_patch(img_16bit, static_dir):
     """
     Reads the hot pixel map and replaces defective pixels with the median of their neighbors.

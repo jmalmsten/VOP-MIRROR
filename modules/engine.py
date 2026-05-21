@@ -1106,6 +1106,185 @@ def run_persistent_engine():
 
                     log_audit(f">>> SINGLE MEASUREMENT: {brightness:.6f} at {exposure_s:.3f}s <<<")
 
+                elif task == 'measure_peak_white':
+                    # Calibration page: "ACB" (Auto Calibrate for
+                    # Brackets) button. Bisection-with-doubling-
+                    # bootstrap search for the exposure time that lands
+                    # the projection monitor's max-white capture at
+                    # near-but-not-over per-channel sensor saturation.
+                    #
+                    # Algorithm shape:
+                    #   1. Capture at initial exposure guess.
+                    #   2. If per-channel max < target_low: too dark,
+                    #      double exposure. If > target_high: too
+                    #      bright, halve. Repeat until we bracket
+                    #      (one undershoot AND one overshoot seen).
+                    #      This is the "doubling-bootstrap" phase -
+                    #      it converges fast even when the initial
+                    #      guess is wildly off.
+                    #   3. Once bracketed, switch to bisection: try
+                    #      the midpoint of the bracket, replace
+                    #      whichever bound it passed.
+                    #   4. Stop on convergence (in target range), OR
+                    #      on max_iterations (safety net), whichever
+                    #      comes first.
+                    #
+                    # We use per-channel max rather than mean because
+                    # any single channel clipping is real data loss
+                    # in BRK captures. See measure_centre_brightness
+                    # docs for the cyan-capture cautionary tale.
+                    initial_exposure = float(job_data.get('initial_exposure_s', 1.0))
+                    target_low = float(job_data.get('target_low', 0.85))
+                    target_high = float(job_data.get('target_high', 0.97))
+                    max_iterations = int(job_data.get('max_iterations', 6))
+
+                    # Defensive: target_low must be < target_high or
+                    # convergence is impossible. We don't crash here -
+                    # log and clamp - because the targets come from
+                    # the user via the UI and we don't want a typo to
+                    # take down the engine. Clamping to a known-safe
+                    # range lets the user see "ACB still ran somehow"
+                    # in the preview and figure out what they did.
+                    if target_low >= target_high:
+                        log_audit(f"ACB | Invalid targets ({target_low}, {target_high}), clamping to defaults")
+                        target_low, target_high = 0.85, 0.97
+
+                    # Capture the WB values used for this calibration.
+                    # We stamp these into calibration.json so future
+                    # readers (and future-me) can see what conditions
+                    # t_peak was measured under. If the user changes
+                    # WB without recalibrating, the stale stamp is
+                    # the only clue that t_peak no longer matches
+                    # current sensor behaviour.
+                    awb_r = float(job_data.get('awb_r', 1.0))
+                    awb_b = float(job_data.get('awb_b', 1.0))
+                    gain = float(job_data.get('gain', 1.0))
+                    cam_res = job_data.get('cam_res', '2028x1520')
+
+                    log_audit(
+                        f"ACB | Start | initial={initial_exposure:.3f}s "
+                        f"target=[{target_low:.2f}, {target_high:.2f}] "
+                        f"max_iter={max_iterations} "
+                        f"WB=(R={awb_r:.2f}, B={awb_b:.2f})"
+                    )
+
+                    # Convergence state. The bracket bounds start as
+                    # None - we don't know either one until we've
+                    # actually overshot/undershot. Once both are
+                    # populated, we're in bisection phase.
+                    low_bound = None    # exposure we know is too low (per_channel_max < target_low)
+                    high_bound = None   # exposure we know is too high (per_channel_max > target_high)
+                    current_exposure = initial_exposure
+                    last_measurement = None
+                    converged = False
+
+                    # The single capture-and-measure routine, lifted
+                    # into a closure so the iteration loop stays
+                    # readable. Returns the dict form of
+                    # measure_centre_brightness so we have access to
+                    # per_channel_max as well as the per-channel
+                    # diagnostic values.
+                    def _capture_and_measure(exp_s):
+                        ctx.screen.use()
+                        ctx.clear(1.0, 1.0, 1.0, 1.0)
+                        pygame.display.flip()
+
+                        total_ms = exp_s * 1000.0
+                        buf_f = "/tmp/vop_acb_buf.dng"
+                        cam_proc = hw.trigger_capture(
+                            buf_f,
+                            total_ms + hw.PRIME_WAIT_MS,
+                            gain, awb_r, awb_b, cam_res,
+                        )
+                        hw.wait_for_sensor_prime()
+                        time.sleep(total_ms / 1000.0)
+                        cam_proc.wait()
+
+                        return cutil.measure_centre_brightness(
+                            buf_f, static_dir, return_dict=True
+                        )
+
+                    for iteration in range(1, max_iterations + 1):
+                        m = _capture_and_measure(current_exposure)
+                        last_measurement = m
+                        pcm = m['per_channel_max']
+                        r, g, b = m['channel_maxes']
+
+                        log_audit(
+                            f"ACB | Iter {iteration}/{max_iterations} | "
+                            f"exp={current_exposure:.4f}s | "
+                            f"per_ch_max={pcm:.4f} | "
+                            f"channels=(R={r:.3f}, G={g:.3f}, B={b:.3f})"
+                        )
+
+                        # Convergence check first - if we've landed
+                        # in the target window, we're done regardless
+                        # of which phase we were in.
+                        if target_low <= pcm <= target_high:
+                            converged = True
+                            log_audit(f"ACB | Converged at {current_exposure:.4f}s "
+                                      f"(per_ch_max={pcm:.4f}) after {iteration} iters")
+                            break
+
+                        # Update bracket bounds based on which side
+                        # of target we landed on. Each side has its
+                        # own next-step logic (doubling/halving vs
+                        # bisection) depending on whether the OTHER
+                        # bound is known yet.
+                        if pcm < target_low:
+                            # Too dark. Move low_bound up to the
+                            # current exposure (we know it's still
+                            # too dark, so any further work happens
+                            # ABOVE this point).
+                            low_bound = current_exposure
+                            if high_bound is None:
+                                # No upper bracket yet - keep
+                                # doubling to find one.
+                                current_exposure = current_exposure * 2.0
+                            else:
+                                # We have both bounds - bisect.
+                                current_exposure = (low_bound + high_bound) / 2.0
+                        else:
+                            # Too bright (pcm > target_high). Move
+                            # high_bound down.
+                            high_bound = current_exposure
+                            if low_bound is None:
+                                # No lower bracket yet - keep halving.
+                                current_exposure = current_exposure / 2.0
+                            else:
+                                current_exposure = (low_bound + high_bound) / 2.0
+
+                    # Loop ended either by convergence (break) or by
+                    # exhausting max_iterations. Both write a result
+                    # to calibration.json - the converged flag tells
+                    # the user (and any future automation) which
+                    # happened.
+                    if not converged:
+                        log_audit(
+                            f"ACB | DID NOT CONVERGE after {max_iterations} iters. "
+                            f"Last exposure: {current_exposure:.4f}s, "
+                            f"per_ch_max: {last_measurement['per_channel_max']:.4f}. "
+                            f"Result written but flagged as non-converged."
+                        )
+
+                    cstore.save(static_dir, {
+                        't_peak': current_exposure,
+                        't_peak_meta': {
+                            'converged': converged,
+                            'per_channel_max': last_measurement['per_channel_max'],
+                            'channel_maxes': list(last_measurement['channel_maxes']),
+                            'iterations_used': iteration,
+                            'target_low': target_low,
+                            'target_high': target_high,
+                            'awb_r': awb_r,
+                            'awb_b': awb_b,
+                            'gain': gain,
+                        }
+                    })
+
+                    log_audit(f">>> T_PEAK: {current_exposure:.6f}s "
+                              f"(converged={converged}) <<<")
+                
                 elif task == 'map_hot_pixels':
                     probe_f = float(job_data.get('probe_frame', 1))
                     st = timeline.get_state(probe_f)
