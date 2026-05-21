@@ -23,22 +23,134 @@
 #
 ###########################################################################
 
-Calibration page template.
+Calibration page.
 
-Hosts the Peak White calibration controls for BRK mode (T_peak and
-optional black-floor measurement). Future calibrations will live
-here too: white-balance card calibration, full LUT calibration,
-flat-field / uneven-screen mapping, and migration of the existing
-noise crusher / hot-pixel mapper / framing tools currently on the
-Main page.
+Hosts the Peak White calibration controls for BRK mode.
 
-For now (slice 6 part 1), this is a placeholder so the page-nav
-scaffolding has something to navigate TO. Slice 6 part 2 will
-add the actual Peak White section.
+Future calibrations will live here too: white-balance card calibration,
+full LUT calibration, flat-field/uneven-screen mapping, and migration
+of the noise crusher / hot-pixel mapper / framing tools currently on
+the Main page.
+
+Layout: 2-column grid inherited from .page-section.page-active.
+  Left column  = preview window (showing the most recent capture)
+  Right column = measurement controls + current calibration readout
 
 All styling lives in static/style.css per project convention.
+No JS event handlers here - those are wired up by slice 7 in main.js.
 -->
 
-<h3>Calibration</h3>
-<p>Peak White calibration controls coming next. This page is
-intentionally empty for now while page-navigation is being verified.</p>
+<!-- LEFT COLUMN: preview window.
+     Mirrors the Main page's .preview-area in structure so the user's
+     mental model carries over - both pages put the captured image
+     on the left. The probe_live.jpg path is shared with Main; the
+     engine writes to one path and either page can display it. -->
+<div class="preview-area cal-preview-area">
+    <img id="cal_probe_img" alt="Calibration Capture Preview">
+</div>
+
+<!-- RIGHT COLUMN: measurement controls + readout. -->
+<div class="cal-controls-area">
+
+    <!-- Peak White section. The main calibration routine: find the
+         exposure time at which the projection monitor's max white
+         lands at the user's target brightness range. -->
+    <div class="group-box">
+        <div class="group-title">Peak White</div>
+
+        <!-- Status indicator. Simple "Ready" / "Measuring" text.
+             Slice 7 updates this based on /status polling. -->
+        <div class="cal-status-row">
+            <span class="cal-status-label">Status:</span>
+            <span id="cal_status_text" class="cal-status-text">Ready</span>
+        </div>
+
+        <!-- Exposure Time field.
+             Editable for manual override. The ACB button writes its
+             converged result here; the Single Measurement button uses
+             whatever value is here as its exposure. -->
+        <div class="input-row spaced">
+            <div class="c-box">
+                <label>Exposure Time (s)</label>
+                <input type="number" id="cal_exposure_s" step="0.001" value="1.0"
+                       title="Exposure time in seconds. ACB writes its converged T_peak here on success. Single Measurement uses this value directly.">
+            </div>
+        </div>
+
+        <!-- Single Measurement row.
+             Button + colour-coded brightness readout. Pairs naturally
+             with the Exposure Time field above - they're the manual
+             counterpart to the ACB automation below. -->
+        <div class="input-row spaced">
+            <button type="button" class="mini-btn" id="cal_single_btn"
+                    title="Capture once at the exposure time above. Result shown to the right.">SINGLE MEASUREMENT</button>
+            <span id="cal_single_result" class="cal-readout">--</span>
+        </div>
+
+        <hr class="section-divider">
+
+        <!-- ACB controls.
+             Auto-converge T_peak via bisection-with-doubling-bootstrap.
+             The four parameters control the search bounds and the
+             convergence target. -->
+        <div class="constants-zone cal-acb-params">
+            <div class="const-group">
+                <label>Initial Exposure (s)</label>
+                <input type="number" id="cal_acb_initial" step="0.001" value="1.0"
+                       title="Starting exposure for the ACB search. ACB will double/halve from here until bracketed.">
+            </div>
+            <div class="const-group">
+                <label>Target Low</label>
+                <input type="number" id="cal_acb_target_low" step="0.01" value="0.94"
+                       title="Minimum mean brightness for convergence. Lower values = darker T_peak.">
+            </div>
+            <div class="const-group">
+                <label>Target High</label>
+                <input type="number" id="cal_acb_target_high" step="0.01" value="0.98"
+                       title="Maximum mean brightness for convergence. Higher values = brighter T_peak (closer to clipping).">
+            </div>
+            <div class="const-group">
+                <label>Max Iterations</label>
+                <input type="number" id="cal_acb_max_iter" step="1" value="10"
+                       title="Safety cap on the ACB search loop. 10 is plenty in practice.">
+            </div>
+        </div>
+
+        <!-- ACB trigger + black-floor checkbox.
+             The checkbox is opt-in: enabling it makes ACB run one
+             extra capture at T_peak with a black target after
+             convergence, persisting the noise floor to calibration.json
+             under black_floor_at_t_peak. Slice 7 handles the
+             two-step sequencing. -->
+        <div class="input-row spaced cal-acb-trigger-row">
+            <button type="button" class="action-btn" id="cal_acb_btn"
+                    title="Auto Calibrate for Brackets. Runs ACB and persists T_peak on convergence.">ACB</button>
+            <label class="cal-black-checkbox" title="After ACB converges, run one additional capture at T_peak with a black target. Stores the noise floor as black_floor_at_t_peak in calibration.json.">
+                <input type="checkbox" id="cal_include_black" checked>
+                Include black level measurement
+            </label>
+        </div>
+    </div>
+
+    <!-- Current calibration state readout.
+         Pulled from /calibration_state and refreshed by slice 7's
+         JS after each measurement. This is where the user sees
+         "what's the current T_peak the engine will use for BRK?". -->
+    <div class="group-box">
+        <div class="group-title">Current Calibration</div>
+        <div class="cal-readout-grid">
+            <div class="cal-readout-label">T_peak (s):</div>
+            <div class="cal-readout-value" id="cal_readout_t_peak">--</div>
+
+            <div class="cal-readout-label">Black floor:</div>
+            <div class="cal-readout-value" id="cal_readout_black_floor">--</div>
+
+            <div class="cal-readout-label">Last measured at WB:</div>
+            <div class="cal-readout-value" id="cal_readout_wb">--</div>
+
+            <div class="cal-readout-label">Converged:</div>
+            <div class="cal-readout-value" id="cal_readout_converged">--</div>
+        </div>
+    </div>
+
+</div>
