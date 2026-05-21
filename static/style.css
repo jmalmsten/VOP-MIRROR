@@ -234,6 +234,18 @@ body {
  * means the layout inside the active page is byte-identical to
  * pre-page-nav behaviour. */
 .page-section.page-active {
+    /* Span both columns of the outer .container grid, same as
+     * .vop-header does at the top of the container. Without this,
+     * the page wrapper auto-places into a single column and any
+     * sibling element (notably the cheat-sheet) drops into the
+     * adjacent column instead of onto a new row below. */
+    grid-column: 1 / -1;
+
+    /* Inside, this page wrapper is itself a grid that recreates
+     * the column layout .container was providing directly before
+     * page-nav. .preview-area / .controls-area / .sheets-area
+     * declare grid-column and grid-row, so their direct parent
+     * has to be a grid with the matching template. */
     display: grid;
     grid-template-columns: 1fr 420px;
     gap: 20px;
