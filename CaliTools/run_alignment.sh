@@ -62,6 +62,33 @@ echo "Stopping the main VOP service so KMSDRM is free..."
 # it again afterwards with `sudo systemctl start vop`.
 sudo systemctl stop vop
 
+# ---------------------------------------------------------
+# CLEAR ZOMBIE ALIGNMENT PROCESSES
+# ---------------------------------------------------------
+# Previous runs may have left an alignment tool detached and running 
+# (that's exactly what setsid+nohup do - survive their parent shell).
+# If one is still alive it'll be holding both KMSDRM and the camera 
+# lock, which makes the new instance fail in confusing ways:
+#   - "Device or resource busy" from libcamera (camera taken)
+#   - new pygame.set_mode() hangs or fails (KMSDRM taken)
+#   - operator sees stale alignment targets on the screen and thinks 
+#     the new tool started but is broken
+# 
+# Killing first makes this script safe to re-run without thinking 
+# about cleanup. -9 (SIGKILL) is used rather than the polite SIGTERM 
+# because we don't care about clean shutdown of the OLD instance - 
+# its job is over - and a stuck signal handler shouldn't be able 
+# to block the new instance from starting.
+echo "Clearing any leftover alignment processes..."
+sudo pkill -9 -f vop_setup_align 2>/dev/null
+sudo pkill -9 -f rpicam-vid       2>/dev/null
+
+# Give the kernel a moment to release the camera and KMSDRM after 
+# the SIGKILL. Without this brief sleep, the new rpicam-vid can 
+# start before the V4L2 device has fully released, and we hit 
+# "Device or resource busy" all over again.
+sleep 1
+
 echo "Launching alignment tool detached from this SSH session..."
 echo "  Log:   $LOG_FILE"
 echo "  Quit:  press 'q' on the Pi's attached keyboard (NOT over SSH)"

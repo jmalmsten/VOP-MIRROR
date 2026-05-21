@@ -122,11 +122,11 @@ def start_stream(retry_seconds=30):
     # need smooth motion, and lower fps lets the encoder spend more 
     # bits per frame (better detail at the same bitrate).
     cmd = [
-        "sudo", "rpicam-vid", "-t", "0", "--inline",
-        "--mode", "2028:1520:12:P",
-        "--width", "1440", "--height", "1080",
-        "--framerate", "10", "--codec", "h264",
-        "--profile", "baseline", "--intra", "1",
+        "sudo", "rpicam-vid", "-t", "0",
+        "--nopreview",
+        "--width", "2028", "--height", "1520",
+        "--framerate", "30",
+        "--codec", "mjpeg",
         "-o", f"tcp://{DESKTOP_IP}:{PORT}"
     ]
     
