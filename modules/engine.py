@@ -1073,7 +1073,7 @@ def run_persistent_engine():
                     buf_f = "/tmp/vop_peak_buf.dng"
                     cam_proc = hw.trigger_capture(
                         buf_f,
-                        total_ms + hw.PRIME_WAIT_MS,
+                        total_ms,
                         job_data.get('gain', 1.0),
                         job_data.get('awb_r', 1.0),
                         job_data.get('awb_b', 1.0),
@@ -1193,7 +1193,7 @@ def run_persistent_engine():
                         buf_f = "/tmp/vop_acb_buf.dng"
                         cam_proc = hw.trigger_capture(
                             buf_f,
-                            total_ms + hw.PRIME_WAIT_MS,
+                            total_ms,
                             gain, awb_r, awb_b, cam_res,
                         )
                         hw.wait_for_sensor_prime()

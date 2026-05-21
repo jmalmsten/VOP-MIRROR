@@ -39,6 +39,22 @@ import os
 # This dictates both the Python sleep timer and the libcamera pre-capture delay.
 PRIME_WAIT_MS = 1500 
 
+# IMPORTANT: the `total_ms` parameter is the actual shutter time in
+# milliseconds — it is passed directly into libcamera's --shutter flag
+# (after the us conversion on the next line). It does NOT include any
+# prime-wait overhead. Callers that need to also wait for sensor prime
+# should call wait_for_sensor_prime() separately; do NOT add
+# PRIME_WAIT_MS to this argument or you will get an exposure that is
+# 1.5 seconds longer than intended.
+#
+# Several pre-existing callers (measure_noise, the old engine code,
+# possibly others) do add PRIME_WAIT_MS here. That's a pre-existing
+# bug pattern: their captures are 1.5s longer than the audit log
+# claims. For measure_noise this is benign-ish (it just gives a
+# slightly higher noise-floor reading, which is conservative).
+# For ACB / single-peak-measurement and any future calibration
+# routine where exposure precision matters, do NOT add PRIME_WAIT_MS.
+
 def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x1520"):
     """
     Executes rpicam-still in an independent parallel process.
