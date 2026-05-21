@@ -1231,57 +1231,65 @@ def run_persistent_engine():
 
                         # Decision tree (in priority order):
                         #
-                        #   1. Clipping (pcm >= clip_threshold)? Hard
-                        #      back off, period - data already being
-                        #      lost in the brightest channel.
-                        #   2. pcm < target_low? Too dark - the
-                        #      brightest channel still has lots of
-                        #      room to grow; push exposure up.
-                        #   3. target_low <= pcm < clip_threshold AND
-                        #      pcm <= target_high? Converged. The
-                        #      brightest channel is parked safely
-                        #      below clipping.
-                        #   4. pcm > target_high but < clip_threshold?
-                        #      Acceptable upper zone - still safely
-                        #      below clipping but brighter than the
-                        #      user's "comfort zone". This is also
-                        #      converged - we've found the brightest
-                        #      usable exposure.
+                        #   1. mean above clip_threshold? Hard back
+                        #      off - the entire patch is saturated,
+                        #      not just one channel. This is genuine
+                        #      "too bright". Clip threshold default
+                        #      is high (1.5) so this rarely fires; it
+                        #      exists for the pathological case where
+                        #      something has gone very wrong upstream.
+                        #   2. mean < target_low? Too dark - push
+                        #      exposure up.
+                        #   3. mean > target_high? Too bright - back
+                        #      off (but no clipping, just over-target).
+                        #   4. Otherwise: converged. Mean is in the
+                        #      target range.
                         #
-                        # NOTE on the target metric: previous versions
-                        # of this loop used `mean` (average across
-                        # all channels). That doesn't work when the
-                        # screen/camera has a strong WB tilt - the
-                        # dim channels drag the mean below any
-                        # reasonable target_low value even when the
-                        # bright channel is near clipping. Per-channel
-                        # max (= the 99th percentile of the brightest
-                        # channel) is the metric that actually
-                        # constrains T_peak. It's the value that
-                        # defines "is any channel losing data?", and
-                        # T_peak is exactly the exposure where this
-                        # value is just below the clip threshold.
+                        # Per-channel clipping is intentionally NOT a
+                        # stop condition. The reasoning: on a screen
+                        # with a WB-tilted white point (i.e. all
+                        # consumer LCDs, including yours), the
+                        # brightest channel saturates first when the
+                        # screen is displaying max white. That's a
+                        # property of the screen, not data loss in
+                        # any meaningful sense - the user can't make
+                        # the screen brighter, and BRK brackets are
+                        # going to display source slices that map to
+                        # the screen's available range regardless. We
+                        # log per-channel clipping for diagnostic
+                        # purposes so the user can see WB tilt at a
+                        # glance, but it does not affect convergence.
                         #
-                        # The implication: target_low and target_high
-                        # now describe the desired per_channel_max
-                        # range (e.g. 0.85 - 0.95), not the desired
-                        # mean range. Defaults should be set
-                        # accordingly.
-                        if pcm >= clip_threshold:
+                        # If a user genuinely wants ACB to back off
+                        # at the first per-channel clip (e.g. for a
+                        # custom calibration scenario where the screen
+                        # white point has somehow been pre-balanced),
+                        # they can set clip_threshold to something
+                        # like 0.99 manually. Default is 1.5 = "never
+                        # fires for normal hardware."
+                        if mean_b >= clip_threshold:
                             is_too_bright = True
-                            log_audit(f"ACB | Iter {iteration}: CLIPPING "
-                                      f"(per_ch_max={pcm:.4f} >= {clip_threshold})")
-                        elif pcm < target_low:
+                            log_audit(f"ACB | Iter {iteration}: MEAN CLIPPING "
+                                      f"(mean={mean_b:.4f} >= {clip_threshold})")
+                        elif mean_b < target_low:
                             is_too_bright = False
+                        elif mean_b > target_high:
+                            is_too_bright = True
                         else:
-                            # pcm is in [target_low, clip_threshold).
-                            # Converged - the brightest channel is
-                            # in the safe-and-useful zone.
                             converged = True
+                            clipped_channels = [
+                                ch for ch, v in zip('RGB', (r, g, b))
+                                if v >= 0.99
+                            ]
+                            clip_note = (
+                                f" (info: {','.join(clipped_channels)} "
+                                f"at-or-above 0.99)"
+                                if clipped_channels else ""
+                            )
                             log_audit(
                                 f"ACB | Converged at {current_exposure:.4f}s "
-                                f"(per_ch_max={pcm:.4f}, mean={mean_b:.4f}) "
-                                f"after {iteration} iters"
+                                f"(mean={mean_b:.4f}, per_ch_max={pcm:.4f}) "
+                                f"after {iteration} iters{clip_note}"
                             )
                             break
 
