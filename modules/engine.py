@@ -1136,7 +1136,7 @@ def run_persistent_engine():
                     initial_exposure = float(job_data.get('initial_exposure_s', 1.0))
                     target_low = float(job_data.get('target_low', 0.85))
                     target_high = float(job_data.get('target_high', 0.97))
-                    max_iterations = int(job_data.get('max_iterations', 6))
+                    max_iterations = int(job_data.get('max_iterations', 10))
 
                     # Per-channel clip threshold. Any channel max >=
                     # this counts as "clipping" and forces ACB to back
@@ -1229,32 +1229,58 @@ def run_persistent_engine():
                             f"channels=(R={r:.3f}, G={g:.3f}, B={b:.3f})"
                         )
 
-                        # Decision tree, in priority order:
-                        #   1. Any channel clipping? Back off, period.
-                        #      The mean might be in target range but
-                        #      data is already being lost - this is
-                        #      the hard "too bright" condition.
-                        #   2. Mean below target_low? Too dark.
-                        #   3. Mean above target_high (but not clipping)?
-                        #      We have headroom but the patch is overall
-                        #      brighter than the user wanted. Back off
-                        #      gently - the shadow brackets will benefit
-                        #      from more headroom anyway.
-                        #   4. Otherwise: converged. Mean in range AND
-                        #      no clipping. T_peak is the right exposure.
+                        # Decision tree (in priority order):
+                        #
+                        #   1. Clipping (pcm >= clip_threshold)? Hard
+                        #      back off, period - data already being
+                        #      lost in the brightest channel.
+                        #   2. pcm < target_low? Too dark - the
+                        #      brightest channel still has lots of
+                        #      room to grow; push exposure up.
+                        #   3. target_low <= pcm < clip_threshold AND
+                        #      pcm <= target_high? Converged. The
+                        #      brightest channel is parked safely
+                        #      below clipping.
+                        #   4. pcm > target_high but < clip_threshold?
+                        #      Acceptable upper zone - still safely
+                        #      below clipping but brighter than the
+                        #      user's "comfort zone". This is also
+                        #      converged - we've found the brightest
+                        #      usable exposure.
+                        #
+                        # NOTE on the target metric: previous versions
+                        # of this loop used `mean` (average across
+                        # all channels). That doesn't work when the
+                        # screen/camera has a strong WB tilt - the
+                        # dim channels drag the mean below any
+                        # reasonable target_low value even when the
+                        # bright channel is near clipping. Per-channel
+                        # max (= the 99th percentile of the brightest
+                        # channel) is the metric that actually
+                        # constrains T_peak. It's the value that
+                        # defines "is any channel losing data?", and
+                        # T_peak is exactly the exposure where this
+                        # value is just below the clip threshold.
+                        #
+                        # The implication: target_low and target_high
+                        # now describe the desired per_channel_max
+                        # range (e.g. 0.85 - 0.95), not the desired
+                        # mean range. Defaults should be set
+                        # accordingly.
                         if pcm >= clip_threshold:
                             is_too_bright = True
                             log_audit(f"ACB | Iter {iteration}: CLIPPING "
                                       f"(per_ch_max={pcm:.4f} >= {clip_threshold})")
-                        elif mean_b < target_low:
+                        elif pcm < target_low:
                             is_too_bright = False
-                        elif mean_b > target_high:
-                            is_too_bright = True
                         else:
+                            # pcm is in [target_low, clip_threshold).
+                            # Converged - the brightest channel is
+                            # in the safe-and-useful zone.
                             converged = True
                             log_audit(
                                 f"ACB | Converged at {current_exposure:.4f}s "
-                                f"(mean={mean_b:.4f}, per_ch_max={pcm:.4f}) "
+                                f"(per_ch_max={pcm:.4f}, mean={mean_b:.4f}) "
                                 f"after {iteration} iters"
                             )
                             break
