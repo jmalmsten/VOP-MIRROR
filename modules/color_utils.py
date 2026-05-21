@@ -437,86 +437,117 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05):
     """
     Centre-weighted brightness measurement for calibration routines.
 
-    Reads the DNG captured by the camera, demosaics it to RGB, takes a
-    small square region at the geometric centre of the frame, and
+    Reads the DNG captured by the camera, demosaics it via rawpy, takes
+    a small square region at the geometric centre of the frame, and
     returns the mean of all three channels normalised to [0.0, 1.0].
-    Also writes a JPG preview of the full capture to probe_live.jpg
-    so the Calibration page can display what was actually measured.
+    Also writes a JPG preview of the full capture (with a green
+    rectangle showing the measurement region) to probe_live.jpg so the
+    Calibration page can display what was actually measured.
 
     Args:
         buffer_file    : str. Path to the DNG file just written by
                          hw.trigger_capture(). Same convention as
                          measure_noise_floor.
         static_dir     : str. Path to the static/ directory. Used for
-                         the probe_live.jpg write and (eventually,
-                         when hot_pixel_patch is loaded) the hot pixel
-                         JSON path.
+                         the probe_live.jpg write and (via
+                         apply_hot_pixel_patch) the hot pixel JSON
+                         path.
         patch_fraction : float in (0, 1]. Side length of the centre
                          square as a fraction of the smaller image
                          dimension. Default 0.05 = a 5%-side square,
                          which is small enough to avoid corner
                          vignetting and large enough to average out
-                         per-pixel noise. Roughly half the size of the
-                         overlay box drawn in the UI - the overlay is
-                         deliberately larger than the metering region
-                         so the user has visual wiggle room when
-                         positioning the camera against the white
-                         patch on screen.
+                         per-pixel noise.
 
     Returns:
         float in [0.0, 1.0]. The mean brightness of the centre patch
         averaged across R, G, B. 1.0 means saturated; 0.0 means pure
-        black. NOT clipped against the noise floor - calibration
-        wants the raw sensor response, not a noise-corrected value.
+        black. NOT clipped against the noise floor - calibration wants
+        the raw sensor response, not a noise-corrected value.
+
+    Notes for future-me:
+        Earlier versions of this function used cv2.imread on the DNG,
+        which returns raw Bayer pattern data (not demosaiced RGB).
+        That caused readings to come back at roughly 1/4 of the actual
+        sensor response because three out of every four positions in
+        each "channel" are zeros from the other Bayer colours. The
+        correct path - matching measure_noise_floor - is rawpy with
+        gamma=(1,1), no_auto_bright=True, output_bps=16, which gives
+        properly demosaiced linear 16-bit RGB.
     """
-    # We use cv2 for DNG read consistency with measure_noise_floor
-    # and the rest of color_utils.py. The 16-bit linear image we get
-    # back from cv2.imread on the DNG is in BGR order; the centre
-    # measurement is channel-symmetric so we don't bother reordering.
-    img = cv2.imread(buffer_file, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        # Defensive: if the DNG didn't make it to disk (capture failed,
-        # libcamera glitch, etc.), return a sentinel high value so the
-        # caller treats this as "near saturation, back off". This is
-        # safer than returning 0.0 (which ACB would read as "way too
-        # dark, double the exposure") and accidentally pushing the
-        # exposure into an even longer doomed capture.
+    # Defensive: missing DNG returns a sentinel high value so the
+    # caller treats this as "near saturation, back off" rather than
+    # "way too dark, push exposure longer" - safer in the ACB loop.
+    if not os.path.exists(buffer_file):
         return 1.0
 
-    # cv2 returns shape (H, W, 3) for an RGB DNG. We want the centre
-    # patch as a fraction of min(H, W) so it stays square even on
-    # non-square sensor output.
-    h, w = img.shape[:2]
-    side = int(min(h, w) * patch_fraction)
-    # Guarantee at least 1 pixel even on weirdly tiny test images;
-    # production captures are 2028x1520 so this clamp is a safety
-    # net rather than a normal case.
-    side = max(1, side)
-    cy, cx = h // 2, w // 2
-    half = side // 2
+    try:
+        # Strictly linear 16-bit extraction. Identical posture to
+        # measure_noise_floor: gamma=(1,1) means no tonemap, 
+        # no_auto_bright disables rawpy's automatic exposure
+        # correction (we want raw measurements, not "what looks
+        # nice"), output_bps=16 preserves full sensor precision.
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True,
+                                  output_bps=16)
 
-    # Extract the centre square. dtype here is uint16 because the
-    # raw DNG path is 16-bit-per-channel.
-    patch = img[cy - half : cy + half, cx - half : cx + half]
+        # Patch hot pixels before measurement so a single stuck pixel
+        # in the metering region doesn't drag the mean upward and
+        # confuse ACB's "are we near saturation?" decision.
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
 
-    # Normalise to [0, 1] float for the brightness scalar. We divide
-    # by 65535.0 explicitly - some sensor pipelines write into a
-    # smaller value range than the full uint16, but for the Pi HQ
-    # at the DNG stage the full range is the right denominator.
-    brightness = float(patch.mean()) / 65535.0
+        # rawpy returns shape (H, W, 3) in RGB order. The centre
+        # patch is sized as a fraction of min(H, W) so it stays
+        # square on any aspect ratio.
+        h, w = rgb.shape[:2]
+        side = int(min(h, w) * patch_fraction)
+        # Safety clamp - production captures are huge so this is
+        # belt-and-braces, not a real concern.
+        side = max(1, side)
+        cy, cx = h // 2, w // 2
+        half = side // 2
 
-    # Write a JPG preview of the full capture so the Calibration page
-    # can show it. We deliberately do not draw the metering region
-    # overlay here - that overlay is drawn by the frontend on top of
-    # the displayed JPG, so it can stay in sync with any future
-    # changes to patch_fraction without re-running the capture.
-    # We also drop to 8-bit and BGR-to-RGB-convert-on-write style
-    # similar to other preview writers in this module; the JPG is
-    # for human eyes, not subsequent measurement.
-    preview = (img.astype(np.float32) / 65535.0 * 255.0).clip(0, 255).astype(np.uint8)
-    cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), preview)
+        # Mean across R, G, B of the centre patch, normalised to
+        # [0, 1]. We use mean rather than 99.9-percentile (which
+        # measure_noise_floor uses) because the relevant question
+        # here is "what is the typical brightness?" not "where is
+        # the noise ceiling?". A flat white patch should have a
+        # very narrow distribution; mean is fine.
+        patch = rgb[cy - half : cy + half, cx - half : cx + half]
+        brightness = float(patch.mean()) / 65535.0
 
-    return brightness
+        # --- PREVIEW GENERATION ---
+        # Convert to 8-bit BGR for the JPG write. Same shape /
+        # bit-depth conversion measure_noise_floor uses.
+        img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        img_8bit = (img_bgr / 256.0).astype(np.uint8)
+
+        # Burn a bright green rectangle around the measured region.
+        # This matches the noise-crusher preview style and gives the
+        # user visual confirmation of where the measurement happened.
+        # The Calibration page can rely on this overlay being baked
+        # into the JPG and not need to draw its own.
+        cv2.rectangle(img_8bit, (cx - half, cy - half),
+                      (cx + half, cy + half), (0, 255, 0), 2)
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img_8bit)
+
+        return brightness
+
+    except Exception as e:
+        # Match measure_noise_floor's failure mode: log and return a
+        # safe fallback rather than crashing the engine. For
+        # calibration the safe fallback is "looks saturated, back
+        # off" (1.0) so a glitched capture doesn't push ACB toward
+        # ever-longer exposures.
+        print(f"[VOP WARNING] Peak Measurement Error: {e}")
+        return 1.0
+    finally:
+        # Cleanup, same as measure_noise_floor.
+        if os.path.exists(buffer_file):
+            os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy):
+            os.remove(dummy)
 
 def apply_hot_pixel_patch(img_16bit, static_dir):
     """
