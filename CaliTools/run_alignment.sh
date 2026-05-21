@@ -97,20 +97,20 @@ echo "Note: this SSH session will stay alive. The tool is running on VT7."
 echo "After you quit the tool, restart the VOP service with:"
 echo "  sudo systemctl start vop"
 
-# The detachment recipe:
-#   - setsid: starts the process in a new session, so it has no 
-#     controlling terminal at all. This is what actually prevents 
-#     the chvt-kicks-SSH problem - if the process has no controlling 
-#     TTY, switching VTs can't kill an SSH session that doesn't 
-#     share one with it.
-#   - nohup: ignore SIGHUP, so if SSH does drop, the tool keeps 
-#     running rather than dying with the parent shell.
-#   - </dev/null: detach stdin so the process can't try to read 
-#     from a TTY that's about to go away.
-#   - >"$LOG_FILE" 2>&1: redirect both stdout and stderr to the log.
-#   - &: background, so this script returns immediately and the 
-#     SSH session gets its prompt back.
-setsid nohup "$PYTHON_BIN" "$APP_SCRIPT" </dev/null >"$LOG_FILE" 2>&1 &
+# We use plain nohup + & here, NOT setsid. Earlier versions of 
+# this script used `setsid nohup ... &` to fully detach the new 
+# process into its own session - but on some Pi OS / SDL combos 
+# that disturbed the SSH pty's terminal flags (ONLCR specifically), 
+# leaving the user's shell with newlines that no longer carriage-return. 
+# Symptoms: text marches diagonally across the screen, input is 
+# invisible, only `reset` recovers the terminal.
+# 
+# The session-detach we actually need (so SIGHUP from SSH disconnect 
+# doesn't kill the alignment tool) is now done by the Python script 
+# itself via os.setsid() before it does anything else. That way the 
+# shell never touches its own session state, and the alignment tool 
+# still ends up detached from the SSH pty.
+nohup "$PYTHON_BIN" "$APP_SCRIPT" </dev/null >"$LOG_FILE" 2>&1 &
 
 # Capture the PID and report it so the user can `kill` it from 
 # SSH if they ever can't get to the physical keyboard.

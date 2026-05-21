@@ -35,6 +35,31 @@ import moderngl, pygame
 import signal
 
 # ---------------------------------------------------------
+# PROCESS DETACHMENT
+# ---------------------------------------------------------
+# Detach from the parent shell's session and controlling TTY by 
+# becoming a session leader ourselves. After this call:
+#   - We have our own session and process group
+#   - We no longer have a controlling TTY (so chvt 7 later in 
+#     prepare_system() can't yank our SSH parent out from under us)
+#   - SIGHUP from SSH disconnect won't propagate to us
+# 
+# This replaces what `setsid` in the launcher shell used to do. 
+# Moving it into Python avoids the pty-flags-mangling side effect 
+# that bash-side setsid was causing on the operator's SSH session.
+# 
+# os.setsid() will raise PermissionError if we're already a session 
+# leader (which can happen if launched some other way) - we treat 
+# that as already-detached, not a problem.
+try:
+    os.setsid()
+except (OSError, PermissionError):
+    # Already detached or running interactively from a terminal that 
+    # has us as a session leader for some other reason. Either way, 
+    # nothing to do here.
+    pass
+
+# ---------------------------------------------------------
 # CLEAN SHUTDOWN HANDLING
 # ---------------------------------------------------------
 # Module-level flag the render loop polls each iteration. We use a 
