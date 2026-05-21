@@ -545,26 +545,34 @@ def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05,
         # brightness" metric for the manual readout.
         mean_brightness = float(patch.mean()) / 65535.0
 
-        # Per-channel maxes. patch.shape is (side, side, 3) in RGB
-        # order. We take the max over the spatial dimensions for
-        # each channel separately, because for the saturation
-        # question we don't care about average channel brightness -
-        # we care about whether ANY pixel in the channel hit the
-        # ceiling.
+        # 99th percentile per channel rather than raw max.
         #
-        # We use max rather than 99.9-percentile here (contrast with
-        # measure_noise_floor's 99.9-percentile) because saturation
-        # on the imaged side of the calibration is a yes/no question
-        # and a single saturated outlier IS the signal we're looking
-        # for: it tells ACB that this channel can't take any more
-        # exposure without clipping further pixels next iteration.
-        # The metering patch is small enough (~75x75 px on the HQ
-        # camera at 1520x2028 with the 0.05 patch_fraction) that hot
-        # pixels are the only thing that would skew the per-channel
-        # max - and we patched those out above.
-        r_max = float(patch[:, :, 0].max()) / 65535.0
-        g_max = float(patch[:, :, 1].max()) / 65535.0
-        b_max = float(patch[:, :, 2].max()) / 65535.0
+        # Raw .max() is one hot pixel away from being wrong: a single
+        # sensor pixel stuck at 65535 inside the metering patch makes
+        # every measurement return per_channel_max=1.0 regardless of
+        # actual screen brightness. ACB can't converge against a
+        # constant signal - it bisects forever and the algorithm has
+        # no way to recover.
+        #
+        # 99th percentile rejects the top 1% of pixels per channel,
+        # which is roughly 56 pixels on a 75x75 patch (the size we
+        # get from patch_fraction=0.05 on a 2028x1520 capture). That
+        # is more than enough to mask out unmapped hot pixels while
+        # still firing immediately when real clipping happens, since
+        # real clipping affects thousands of pixels at once - the
+        # 99th percentile saturates almost as fast as the absolute
+        # max when the screen genuinely whites out.
+        #
+        # Compare measure_noise_floor which uses 99.9th percentile
+        # for similar reasons; ACB uses the slightly tighter 99th
+        # because the noise crusher wants to be conservative about
+        # what counts as "noise" (more outliers ignored = lower
+        # crush level = more cleanup) while ACB wants to be liberal
+        # about what counts as "clipping" (fewer outliers ignored =
+        # detect real saturation sooner).
+        r_max = float(np.percentile(patch[:, :, 0], 99)) / 65535.0
+        g_max = float(np.percentile(patch[:, :, 1], 99)) / 65535.0
+        b_max = float(np.percentile(patch[:, :, 2], 99)) / 65535.0
         per_channel_max = max(r_max, g_max, b_max)
 
         # --- PREVIEW GENERATION ---
