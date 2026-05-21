@@ -251,9 +251,6 @@ body {
     gap: 20px;
 }
 
-.page-section.page-active {
-    display: block;
-}
 
 
 /* ###################### HEADER AND STATUS ############################ */
