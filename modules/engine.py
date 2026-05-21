@@ -1138,14 +1138,14 @@ def run_persistent_engine():
                     target_high = float(job_data.get('target_high', 0.97))
                     max_iterations = int(job_data.get('max_iterations', 10))
 
-                    # Per-channel clip threshold. Any channel max >=
-                    # this counts as "clipping" and forces ACB to back
-                    # off regardless of mean brightness. 0.99 default
-                    # leaves a tiny safety margin against the absolute
-                    # ceiling at 1.0 - sensors and measurement both have
-                    # noise, so 0.99 is a safer "no clipping"
-                    # definition than 1.0 exactly.
-                    clip_threshold = float(job_data.get('clip_threshold', 0.99))
+                    # Clip threshold is now applied to MEAN, not
+                    # per-channel max. Default 1.5 means "effectively
+                    # never fires" - the safety net is preserved as
+                    # a config knob for users with calibrated screens
+                    # who want hard per-mean-saturation protection,
+                    # but for the normal case we trust the
+                    # target_high to be the soft upper bound.
+                    clip_threshold = float(job_data.get('clip_threshold', 1.5))9))
 
                     # Defensive: target_low must be < target_high or
                     # convergence is impossible. We don't crash here -
