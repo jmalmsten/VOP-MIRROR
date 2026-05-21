@@ -98,15 +98,35 @@ def start_stream(retry_seconds=30):
     Returns the live Popen handle once a connection has stuck, or 
     None if all retries failed (caller should treat as fatal).
     """
-    # 2028x1520 sensor mode (full 4:3 sensor, 2x2 binned). See the 
-    # IMX477 mode table - this is the only video-rate mode that 
-    # sees the entire sensor area without cropping. 30 fps gives 
-    # the H.264 encoder comfortable headroom under the 40 fps cap.
+    # Pipeline: 
+    #   IMX477 sensor at 2028x1520 (full sensor, 2x2 binned)
+    #     -> ISP bicubic downscale to 1440x1080
+    #     -> hardware H.264 encoder (well under its 1080p ceiling)
+    #     -> TCP MPEG-TS stream
+    # 
+    # --mode 2028:1520:12:P explicitly selects the full-frame 4:3 
+    # sensor mode. Without it, libcamera's auto-selection looks at 
+    # --width/--height to choose the sensor mode, and would pick a 
+    # cropped mode that doesn't see the entire sensor area.
+    # 
+    # --width 1440 --height 1080 then tells the ISP to downscale the 
+    # sensor's 2028x1520 output to 1440x1080 (4:3 preserved) using 
+    # bicubic filtering. This keeps the input to the H.264 encoder 
+    # under its 1920x1080 hardware limit.
+    # 
+    # End result: leDesktop receives a 4:3 H.264 stream showing the 
+    # entire camera frame, ~1.44 MP - plenty for visual focus and 
+    # alignment work, well within the Pi 4's encoder bandwidth.
+    # 
+    # 10 fps is intentional: alignment is a visual task that doesn't 
+    # need smooth motion, and lower fps lets the encoder spend more 
+    # bits per frame (better detail at the same bitrate).
     cmd = [
-        "sudo", "rpicam-vid", "-t", "0", "--inline", 
-        "--width", "2028", "--height", "1520",
-        "--framerate", "30", "--codec", "h264", 
-        "--profile", "baseline", "--intra", "1", "--inline",
+        "sudo", "rpicam-vid", "-t", "0", "--inline",
+        "--mode", "2028:1520:12:P",
+        "--width", "1440", "--height", "1080",
+        "--framerate", "10", "--codec", "h264",
+        "--profile", "baseline", "--intra", "1",
         "-o", f"tcp://{DESKTOP_IP}:{PORT}"
     ]
     
@@ -115,38 +135,19 @@ def start_stream(retry_seconds=30):
     # tight. 1-second sleep between attempts gives the desktop side a 
     # human-friendly window to be started, without making the operator 
     # wait noticeably once ffplay IS up.
-    #
-    # We rebuild Popen each attempt because once a Popen has terminated 
-    # there's no "restart" - we need a fresh process. This is fine; the 
-    # rpicam-vid startup cost is small.
     deadline = time.time() + retry_seconds
     attempt = 0
     while time.time() < deadline:
         attempt += 1
         print(f"3. Connecting to Desktop at {DESKTOP_IP}:{PORT}... (attempt {attempt})")
         proc = subprocess.Popen(cmd)
-        
-        # Give rpicam-vid up to 1.5s to either die (TCP refused) or 
-        # stay alive (TCP accepted, stream started). 1.5s comfortably 
-        # covers the libcamera init time we see in alignment.log 
-        # (~0.06s of INFO lines before "failed to start output streaming"), 
-        # with margin for slower SD card / cold cache scenarios.
         time.sleep(1.5)
-        
         if _stream_proc_alive(proc):
-            # Process is still running 1.5s in - that means rpicam-vid 
-            # successfully opened the TCP connection AND the camera, 
-            # and is now streaming frames. We're good.
             print(f"   Connected on attempt {attempt}.")
             return proc
-        
-        # Process exited - almost certainly because the desktop ffplay 
-        # listener wasn't up. Sleep briefly and try again.
         print(f"   No listener yet, retrying...")
         time.sleep(1.0)
     
-    # Total budget exhausted. Caller decides what to do; we just 
-    # return None so the failure path is explicit.
     print(f"ERROR: could not establish stream to {DESKTOP_IP}:{PORT} within {retry_seconds}s")
     return None
 
