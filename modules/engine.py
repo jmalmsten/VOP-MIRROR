@@ -1340,7 +1340,105 @@ def run_persistent_engine():
 
                     log_audit(f">>> T_PEAK: {current_exposure:.6f}s "
                               f"(converged={converged}) <<<")
-                
+                              
+                elif task == 'measure_peak_black':
+                    # Calibration page: "Include black level
+                    # measurement" checkbox companion to ACB. Captures
+                    # at a supplied exposure time (intended to be the
+                    # T_peak that ACB just converged on) but with the
+                    # projection monitor showing pure black instead of
+                    # full white. The captured centre-patch mean tells
+                    # us the noise floor BRK shadow brackets will sit
+                    # on top of at T_peak exposures.
+                    #
+                    # We pass exposure_s as a parameter rather than
+                    # reading t_peak from calibration.json directly.
+                    # Two reasons:
+                    #   1. Looser coupling - this task does not need
+                    #      to know what "T_peak" means as a concept,
+                    #      it just measures black at whatever exposure
+                    #      it is given.
+                    #   2. Future flexibility - lets us re-use the
+                    #      same task for any future calibration that
+                    #      wants to know the noise floor at a specific
+                    #      exposure time (e.g. a "what does black
+                    #      look like at MY normal SSS exposures?"
+                    #      diagnostic).
+                    # The frontend sequencer is responsible for
+                    # pulling the just-measured t_peak from
+                    # calibration.json after ACB completes and
+                    # passing it here.
+                    exposure_s = float(job_data.get('exposure_s', 1.0))
+                    total_ms = exposure_s * 1000.0
+
+                    awb_r = float(job_data.get('awb_r', 1.0))
+                    awb_b = float(job_data.get('awb_b', 1.0))
+                    gain = float(job_data.get('gain', 1.0))
+                    cam_res = job_data.get('cam_res', '2028x1520')
+
+                    log_audit(
+                        f"Calibration | Peak Black Measurement | "
+                        f"exp={exposure_s:.4f}s | "
+                        f"WB=(R={awb_r:.2f}, B={awb_b:.2f})"
+                    )
+
+                    # Draw black across the entire projection monitor.
+                    # Same approach as measure_noise - we clear the
+                    # framebuffer to (0, 0, 0) and let the panel
+                    # produce whatever its physical "black" actually
+                    # is. That's the measurement we want: what does
+                    # the camera see when the screen is doing its
+                    # darkest? Any stray room light, panel backlight
+                    # bleed, sensor dark current at this exposure
+                    # time - it all rolls into this one number.
+                    ctx.screen.use()
+                    ctx.clear(0.0, 0.0, 0.0, 1.0)
+                    pygame.display.flip()
+
+                    buf_f = "/tmp/vop_acb_black_buf.dng"
+                    cam_proc = hw.trigger_capture(
+                        buf_f,
+                        total_ms,
+                        gain, awb_r, awb_b, cam_res,
+                    )
+                    hw.wait_for_sensor_prime()
+                    time.sleep(total_ms / 1000.0)
+                    cam_proc.wait()
+
+                    # We want the dict form so we have per-channel
+                    # info in the audit log - lets the user see if
+                    # one channel has a noticeably hotter dark current
+                    # than the others, which is a useful diagnostic
+                    # for sensor warmup or stray-light issues.
+                    m = cutil.measure_centre_brightness(
+                        buf_f, static_dir, return_dict=True
+                    )
+                    floor = m['mean']
+                    r, g, b = m['channel_maxes']
+
+                    log_audit(
+                        f"ACB | Black floor at {exposure_s:.4f}s: "
+                        f"mean={floor:.6f} | "
+                        f"channels=(R={r:.4f}, G={g:.4f}, B={b:.4f})"
+                    )
+
+                    # Persist. We merge into the existing
+                    # calibration.json - the t_peak block already
+                    # written by ACB stays untouched, and we add
+                    # the black floor info alongside.
+                    cstore.save(static_dir, {
+                        'black_floor_at_t_peak': floor,
+                        'black_floor_meta': {
+                            'exposure_s': exposure_s,
+                            'mean': floor,
+                            'channel_maxes': list(m['channel_maxes']),
+                            'awb_r': awb_r,
+                            'awb_b': awb_b,
+                            'gain': gain,
+                        }
+                    })
+
+                    log_audit(f">>> BLACK FLOOR: {floor:.6f} at {exposure_s:.4f}s <<<")
                 elif task == 'map_hot_pixels':
                     probe_f = float(job_data.get('probe_frame', 1))
                     st = timeline.get_state(probe_f)
