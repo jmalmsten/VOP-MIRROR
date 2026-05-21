@@ -1138,6 +1138,15 @@ def run_persistent_engine():
                     target_high = float(job_data.get('target_high', 0.97))
                     max_iterations = int(job_data.get('max_iterations', 6))
 
+                    # Per-channel clip threshold. Any channel max >=
+                    # this counts as "clipping" and forces ACB to back
+                    # off regardless of mean brightness. 0.99 default
+                    # leaves a tiny safety margin against the absolute
+                    # ceiling at 1.0 - sensors and measurement both have
+                    # noise, so 0.99 is a safer "no clipping"
+                    # definition than 1.0 exactly.
+                    clip_threshold = float(job_data.get('clip_threshold', 0.99))
+
                     # Defensive: target_low must be < target_high or
                     # convergence is impossible. We don't crash here -
                     # log and clamp - because the targets come from
@@ -1164,6 +1173,7 @@ def run_persistent_engine():
                     log_audit(
                         f"ACB | Start | initial={initial_exposure:.3f}s "
                         f"target=[{target_low:.2f}, {target_high:.2f}] "
+                        f"clip={clip_threshold:.2f} "
                         f"max_iter={max_iterations} "
                         f"WB=(R={awb_r:.2f}, B={awb_b:.2f})"
                     )
@@ -1208,52 +1218,62 @@ def run_persistent_engine():
                         m = _capture_and_measure(current_exposure)
                         last_measurement = m
                         pcm = m['per_channel_max']
+                        mean_b = m['mean']
                         r, g, b = m['channel_maxes']
 
                         log_audit(
                             f"ACB | Iter {iteration}/{max_iterations} | "
                             f"exp={current_exposure:.4f}s | "
+                            f"mean={mean_b:.4f} | "
                             f"per_ch_max={pcm:.4f} | "
                             f"channels=(R={r:.3f}, G={g:.3f}, B={b:.3f})"
                         )
 
-                        # Convergence check first - if we've landed
-                        # in the target window, we're done regardless
-                        # of which phase we were in.
-                        if target_low <= pcm <= target_high:
+                        # Decision tree, in priority order:
+                        #   1. Any channel clipping? Back off, period.
+                        #      The mean might be in target range but
+                        #      data is already being lost - this is
+                        #      the hard "too bright" condition.
+                        #   2. Mean below target_low? Too dark.
+                        #   3. Mean above target_high (but not clipping)?
+                        #      We have headroom but the patch is overall
+                        #      brighter than the user wanted. Back off
+                        #      gently - the shadow brackets will benefit
+                        #      from more headroom anyway.
+                        #   4. Otherwise: converged. Mean in range AND
+                        #      no clipping. T_peak is the right exposure.
+                        if pcm >= clip_threshold:
+                            is_too_bright = True
+                            log_audit(f"ACB | Iter {iteration}: CLIPPING "
+                                      f"(per_ch_max={pcm:.4f} >= {clip_threshold})")
+                        elif mean_b < target_low:
+                            is_too_bright = False
+                        elif mean_b > target_high:
+                            is_too_bright = True
+                        else:
                             converged = True
-                            log_audit(f"ACB | Converged at {current_exposure:.4f}s "
-                                      f"(per_ch_max={pcm:.4f}) after {iteration} iters")
+                            log_audit(
+                                f"ACB | Converged at {current_exposure:.4f}s "
+                                f"(mean={mean_b:.4f}, per_ch_max={pcm:.4f}) "
+                                f"after {iteration} iters"
+                            )
                             break
 
-                        # Update bracket bounds based on which side
-                        # of target we landed on. Each side has its
-                        # own next-step logic (doubling/halving vs
-                        # bisection) depending on whether the OTHER
-                        # bound is known yet.
-                        if pcm < target_low:
-                            # Too dark. Move low_bound up to the
-                            # current exposure (we know it's still
-                            # too dark, so any further work happens
-                            # ABOVE this point).
-                            low_bound = current_exposure
-                            if high_bound is None:
-                                # No upper bracket yet - keep
-                                # doubling to find one.
-                                current_exposure = current_exposure * 2.0
-                            else:
-                                # We have both bounds - bisect.
-                                current_exposure = (low_bound + high_bound) / 2.0
-                        else:
-                            # Too bright (pcm > target_high). Move
-                            # high_bound down.
+                        # Bracket update. Same math as before, just
+                        # driven by the is_too_bright flag from the
+                        # decision tree above.
+                        if is_too_bright:
                             high_bound = current_exposure
                             if low_bound is None:
-                                # No lower bracket yet - keep halving.
                                 current_exposure = current_exposure / 2.0
                             else:
                                 current_exposure = (low_bound + high_bound) / 2.0
-
+                        else:
+                            low_bound = current_exposure
+                            if high_bound is None:
+                                current_exposure = current_exposure * 2.0
+                            else:
+                                current_exposure = (low_bound + high_bound) / 2.0
                     # Loop ended either by convergence (break) or by
                     # exhausting max_iterations. Both write a result
                     # to calibration.json - the converged flag tells
@@ -1271,11 +1291,13 @@ def run_persistent_engine():
                         't_peak': current_exposure,
                         't_peak_meta': {
                             'converged': converged,
+                            'mean': last_measurement['mean'],
                             'per_channel_max': last_measurement['per_channel_max'],
                             'channel_maxes': list(last_measurement['channel_maxes']),
                             'iterations_used': iteration,
                             'target_low': target_low,
                             'target_high': target_high,
+                            'clip_threshold': clip_threshold,
                             'awb_r': awb_r,
                             'awb_b': awb_b,
                             'gain': gain,
