@@ -63,7 +63,7 @@ CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 # The Flask server writes JSON payloads here; engine.py polls this file to execute commands
 COMMAND_FILE = "/tmp/vop_cmd.json" 
 
-VOP_VERSION ="0.6.5"
+VOP_VERSION ="0.10.0"
 
 # Initialize required directory structure on boot if missing
 PRORES_DIR = os.path.join(BASE_DIR, "ProRes")

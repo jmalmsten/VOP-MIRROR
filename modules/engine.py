@@ -50,6 +50,11 @@ import vop_math as vmath
 import camera_hardware as hw
 import color_utils as cutil
 import graphics_utils as gfx
+# Calibration store for hardware-calibration values (T_peak, black
+# floor at T_peak, future LUT data, etc.). See modules/calibration_store.py
+# for the IPC / engine-busy convention notes that apply to all
+# calibration tasks dispatched through this engine.
+import calibration_store as cstore
 
 # Force Pygame to bypass X11 and use the hardware framebuffer directly
 os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
@@ -1025,6 +1030,82 @@ def run_persistent_engine():
                     noise_val = cutil.measure_noise_floor(buf_f, static_dir)
                     log_audit(f">>> RECOMMENDED BLACK CLIP: {noise_val:.6f} <<<")
                 
+                elif task == 'single_peak_measurement':
+                    # Calibration page: "Single Measurement" button.
+                    # Show a synthetic white patch on the projection
+                    # monitor, capture once at the user-supplied
+                    # exposure time, measure centre brightness, and
+                    # write the result to calibration.json under a
+                    # transient key the frontend reads to colour-code
+                    # the readout.
+                    #
+                    # Unlike measure_noise this task does not consult
+                    # the timeline - exposure time comes straight from
+                    # the request payload, because the Calibration page
+                    # is decoupled from any job's keyframes. The user
+                    # is asking "what does the sensor see at X seconds
+                    # right now?", not "what would the sensor see for
+                    # frame N of my current job?".
+                    exposure_s = float(job_data.get('exposure_s', 1.0))
+                    total_ms = exposure_s * 1000.0
+
+                    log_audit(f"Calibration | Single Peak Measurement | {exposure_s:.3f}s")
+
+                    # Draw the synthetic white patch on the projection
+                    # monitor. We use ctx.clear with full-white because
+                    # it's the simplest correct way to drive the panel
+                    # to its true maximum output. A full-screen flat
+                    # field is also intentional: it removes any
+                    # uncertainty about which screen region we're
+                    # actually measuring. The centre-patch limiting
+                    # happens on the sensor side (see
+                    # measure_centre_brightness), not the screen side.
+                    ctx.screen.use()
+                    ctx.clear(1.0, 1.0, 1.0, 1.0)
+                    pygame.display.flip()
+
+                    # Capture using the same trigger pattern as
+                    # measure_noise. PRIME_WAIT_MS is added by
+                    # trigger_capture's caller convention (the
+                    # measure_noise task adds it the same way) - this
+                    # accounts for libcamera's startup window before
+                    # the sensor is actually integrating photons.
+                    buf_f = "/tmp/vop_peak_buf.dng"
+                    cam_proc = hw.trigger_capture(
+                        buf_f,
+                        total_ms + hw.PRIME_WAIT_MS,
+                        job_data.get('gain', 1.0),
+                        job_data.get('awb_r', 1.0),
+                        job_data.get('awb_b', 1.0),
+                        job_data.get('cam_res', '2028x1520'),
+                    )
+                    hw.wait_for_sensor_prime()
+                    time.sleep(total_ms / 1000.0)
+                    cam_proc.wait()
+
+                    # Centre-weighted brightness in [0.0, 1.0]. This
+                    # writes probe_live.jpg as a side effect, so the
+                    # frontend's preview window will refresh with the
+                    # capture once polling sees status return to idle.
+                    brightness = cutil.measure_centre_brightness(buf_f, static_dir)
+
+                    # Persist the result. We write it under a transient
+                    # key (last_single_measurement) rather than t_peak
+                    # because a single-shot measurement is *not* a
+                    # commitment that this exposure should become the
+                    # stored T_peak - only ACB writes t_peak. The
+                    # frontend reads last_single_measurement to colour-
+                    # code its readout, but does not auto-populate the
+                    # exposure-time field from it.
+                    cstore.save(static_dir, {
+                        'last_single_measurement': {
+                            'exposure_s': exposure_s,
+                            'brightness': brightness,
+                        }
+                    })
+
+                    log_audit(f">>> SINGLE MEASUREMENT: {brightness:.6f} at {exposure_s:.3f}s <<<")
+
                 elif task == 'map_hot_pixels':
                     probe_f = float(job_data.get('probe_frame', 1))
                     st = timeline.get_state(probe_f)

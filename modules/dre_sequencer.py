@@ -118,24 +118,6 @@ def sequence_frame(source_16bpc, steps=DEFAULT_STEPS, gamma=DEFAULT_GAMMA):
     if steps < 2:
         raise ValueError(f"dre_sequencer requires steps>=2, got {steps}.")
 
-# Input validation. We fail loud here because a quietly-wrong dtype
-    # would produce output that *looks* okay but doesn't actually encode
-    # 16-bit range - which would be very hard to debug from the captured
-    # results alone.
-    if source_16bpc.dtype != np.uint16:
-        raise TypeError(
-            f"dre_sequencer expects a uint16 source, got {source_16bpc.dtype}. "
-            f"(If you passed a uint8 frame, the DRE encoding will not work - "
-            f"check the ingestion pixel format and TextureManager paths.)"
-        )
-    # Shape validation. Must be (H, W, 3).
-    if source_16bpc.ndim != 3 or source_16bpc.shape[2] != 3:
-        raise ValueError(
-            f"dre_sequencer expects shape (H, W, 3), got {source_16bpc.shape}."
-        )
-    if steps < 2:
-        raise ValueError(f"dre_sequencer requires steps>=2, got {steps}.")
-
     # Normalize source to [0.0, 1.0] in float32. The whole step calculation
     # below is easier in normalized space - we map back to 0..255 uint8 at
     # the very end. float32 has plenty of headroom for the multiply-and-
