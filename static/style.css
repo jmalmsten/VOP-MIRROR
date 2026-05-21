@@ -173,6 +173,58 @@ body {
     border-bottom:      1px solid var(--border-color); 
 }
 
+/* ===========================================================
+ * Page navigation (slice 6 - Calibration page introduction)
+ *
+ * Two buttons in the vop-header switch between Main and
+ * Calibration pages. The buttons toggle .page-active between
+ * the two top-level page divs (#page_main and #page_calibration).
+ * Pages without .page-active are hidden via display: none.
+ *
+ * Future pages (Config, Help, etc.) follow the same pattern:
+ * add a button, a top-level div with .page-section, and a
+ * showPage() case.
+ * =========================================================== */
+
+.page-nav {
+    display: flex;
+    gap: 0.5em;
+}
+
+.page-nav-btn {
+    /* Default appearance: dim, indicating "not active". */
+    background: #2a2a2a;
+    color: #888;
+    border: 1px solid #444;
+    padding: 0.4em 1em;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.95em;
+}
+
+.page-nav-btn:hover {
+    color: #ccc;
+    border-color: #666;
+}
+
+.page-nav-btn.active {
+    /* Active page's button stands out so the user always knows
+     * which page they're on. */
+    background: #1a4a1a;
+    color: #cfc;
+    border-color: #4a8a4a;
+}
+
+/* Page section default: hidden. Only the one with .page-active
+ * is shown. This is simpler than maintaining mutual exclusion
+ * in JS - we just toggle .page-active and let CSS do the rest. */
+.page-section {
+    display: none;
+}
+
+.page-section.page-active {
+    display: block;
+}
 
 
 /* ###################### HEADER AND STATUS ############################ */
