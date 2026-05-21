@@ -89,8 +89,35 @@ def run():
     prepare_system()
     stream_proc = start_stream()
     pygame.init()
+    
+    # ---------------------------------------------------------
+    # DISPLAY RESOLUTION DISCOVERY
+    # ---------------------------------------------------------
+    # Same EDID-via-pygame handshake the main engine uses. Pulls the 
+    # connected panel's native resolution from KMS so the alignment 
+    # targets render at the actual corner pixels - not a fictional 
+    # 1920x1080 grid scaled by the GPU into the real frame.
+    #
+    # This matters specifically for alignment because the corner 
+    # crosshairs and center spoke pattern only land correctly when 
+    # rendered at native resolution. Even a small scaler-induced 
+    # offset would make the camera-to-screen alignment slightly off, 
+    # which defeats the whole point of this tool.
+    #
+    # Note: this query is done BEFORE the set_mode() try block below, 
+    # not nested inside it - so the except clauses match cleanly and 
+    # the rest of run() stays at one indentation level.
     try:
-        pygame.display.set_mode((1920, 1080), pygame.OPENGL | pygame.FULLSCREEN)
+        sizes = pygame.display.get_desktop_sizes()
+        SCREEN_W, SCREEN_H = sizes[0] if sizes else (1920, 1080)
+    except (AttributeError, pygame.error):
+        SCREEN_W, SCREEN_H = 1920, 1080
+    print(f"Alignment tool: using {SCREEN_W}x{SCREEN_H} from EDID")
+    
+    # Now the original set_mode try block, unchanged except for 
+    # using SCREEN_W/SCREEN_H instead of hardcoded 1920/1080.
+    try:
+        pygame.display.set_mode((SCREEN_W, SCREEN_H), pygame.OPENGL | pygame.FULLSCREEN)
         pygame.mouse.set_visible(False)
         ctx = moderngl.create_context(require=300)
     except Exception as e:

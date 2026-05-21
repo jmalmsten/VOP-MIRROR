@@ -144,8 +144,61 @@ def run_persistent_engine():
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 0)
     
-    WIDTH, HEIGHT = 1920, 1080
+    # ---------------------------------------------------------
+    # DISPLAY RESOLUTION DISCOVERY (EDID handshake)
+    # ---------------------------------------------------------
+    # pygame.display.get_desktop_sizes() returns one (w, h) tuple per 
+    # connected display, sourced from the kernel's KMS view of each 
+    # panel's EDID. Works before set_mode() and without a window.
+    #
+    # We pick index [0] because the VOP only ever has one HDMI panel 
+    # attached (HDMI-0). If someone runs it on a Pi with two panels 
+    # connected, [0] is still the right one as long as HDMI-0 is 
+    # populated - the kernel enumerates in port order.
+    #
+    # Fallback to 1920x1080 covers two edge cases:
+    #   1. EDID read failure (rare - flaky HDMI cable, panel powered
+    #      off at boot). KMS reports an empty list, we keep going on 
+    #      the legacy default rather than crashing the daemon.
+    #   2. Older pygame/SDL where get_desktop_sizes() isn't present.
+    #      Shouldn't happen on current Pi OS but the try/except 
+    #      costs us nothing.
+    try:
+        desktop_sizes = pygame.display.get_desktop_sizes()
+        if desktop_sizes:
+            WIDTH, HEIGHT = desktop_sizes[0]
+            log_audit(f"Display detected via EDID: {WIDTH}x{HEIGHT}")
+        else:
+            WIDTH, HEIGHT = 1920, 1080
+            log_audit("EDID returned no displays - falling back to 1920x1080")
+    except (AttributeError, pygame.error) as e:
+        WIDTH, HEIGHT = 1920, 1080
+        log_audit(f"EDID query failed ({e}) - falling back to 1920x1080")
     
+    # ---------------------------------------------------------
+    # PUBLISH RESOLUTION FOR vop.py
+    # ---------------------------------------------------------
+    # Engine is the only process that can detect the panel resolution 
+    # (it holds the KMSDRM lock). vop.py needs to know it for:
+    #   - calculate_static_fit_scale() / Fit FOV / Fill FOV math
+    #   - the NO LATENT placeholder dimensions
+    # 
+    # We write a small JSON file at boot. vop.py reads it lazily 
+    # (cached after first read - the value never changes mid-session,
+    # since changing the panel requires a full reboot anyway).
+    #
+    # Same on-disk-IPC pattern the COMMAND_FILE already uses - keeps 
+    # the daemon architecture single-paradigm.
+    DISPLAY_INFO_FILE = "/tmp/vop_display.json"
+    try:
+        with open(DISPLAY_INFO_FILE, 'w') as f:
+            json.dump({'width': WIDTH, 'height': HEIGHT}, f)
+    except OSError as e:
+        # Non-fatal: vop.py will fall back to 1920x1080 if it can't 
+        # read this file. Worst case is slightly-off Fit/Fill math 
+        # on non-1080p panels, which the user can correct manually.
+        log_audit(f"Could not publish display info: {e}")
+
     # ---------------------------------------------------------
     # PERSISTENT HARDWARE INITIALIZATION
     # We grab the KMSDRM lock here once. We never let it go.
@@ -1567,7 +1620,11 @@ def run_persistent_engine():
             ctx.clear(0.0, 0.0, 0.0, 1.0)
 
             mvp = np.eye(4, dtype='f4')
-            mvp[0, 0] = 0.4 * asp_logo / (1920/1080)
+            # The trailing divisor is the SCREEN aspect, used to counter the
+            # NDC stretch that happens on non-square screens. Reading from 
+            # WIDTH/HEIGHT (set during EDID discovery) keeps the logo 
+            # correctly-proportioned on any panel - 16:9, 3:2, UHD, etc.
+            mvp[0, 0] = 0.4 * asp_logo / (WIDTH / HEIGHT)
             mvp[1, 1] = 0.4
             mvp[3, 0] = idle_x
             mvp[3, 1] = idle_y

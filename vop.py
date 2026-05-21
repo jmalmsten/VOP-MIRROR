@@ -176,6 +176,45 @@ def count_source_frames(directory):
     valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
     return len([f for f in os.listdir(directory) if f.lower().endswith(valid_exts)])
 
+# ---------------------------------------------------------
+# DISPLAY RESOLUTION ACCESSOR
+# ---------------------------------------------------------
+# The engine detects the panel resolution at boot (via EDID through
+# pygame.display.get_desktop_sizes()) and writes it to this file.
+# We read once and cache - the value can't change at runtime since
+# the panel is hot-plug-but-not-really on the Pi 4 HDMI port; you
+# need a reboot to renegotiate anyway.
+#
+# Module-level cache rather than a class because vop.py is already
+# heavily module-scoped (Flask routes, globals, etc.) and a single
+# resolution doesn't justify a new abstraction.
+DISPLAY_INFO_FILE = "/tmp/vop_display.json"
+_display_size_cache = None
+
+def get_display_size():
+    """
+    Returns (width, height) of the projection monitor. Reads the 
+    engine's published JSON on first call, caches thereafter.
+    
+    Falls back to (1920, 1080) if the file is missing - happens 
+    transiently during the brief window after vop.py boots but 
+    before the engine has written its first display info. Any 
+    affected request will get correct math on the next call once 
+    the engine has come up.
+    """
+    global _display_size_cache
+    if _display_size_cache is not None:
+        return _display_size_cache
+    try:
+        with open(DISPLAY_INFO_FILE, 'r') as f:
+            info = json.load(f)
+            _display_size_cache = (int(info['width']), int(info['height']))
+            return _display_size_cache
+    except (OSError, ValueError, KeyError):
+        # Don't cache the fallback - we want to retry on the next 
+        # call in case the engine has just come up. The transient 
+        # window is small but worth handling cleanly.
+        return (1920, 1080)
 
 def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit", screen_width=1920, screen_height=1080):
     """
@@ -530,7 +569,14 @@ def calculate_fit():
         aspect = float(data.get('aspect_ratio', 1.777))
         mode = data.get('mode', 'fit')      # 'fit' or 'fill'
         
-        req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode)
+        # Pull the live panel dimensions so frustum-bounds math matches 
+        # what the engine is actually rendering into. Without this, Fit/Fill 
+        # FOV would compute against a fictional 1920x1080 frustum and the 
+        # button would set the user a few degrees off on a 3:2 or UHD panel.
+        screen_w, screen_h = get_display_size()
+        req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode,
+                                               screen_width=screen_w,
+                                               screen_height=screen_h)
         return jsonify({"status": "ok", "scale": req_scale})
     except Exception as e:
         print(f"[VOP SERVER] Fit Calc Error: {e}")
@@ -665,11 +711,12 @@ def cam_probe():
     if not os.path.exists(latent_file):
         print(f"[VOP SERVER] CAM PROBE: no latent at frame {frame_num} - writing placeholder")
         try:
-            # Match Proj Probe's dimensions (1920x1080) so the placeholder
-            # scales identically in the preview panel. The probe_img CSS
-            # uses object-fit:contain so source dimensions don't really
-            # affect display size, but matching keeps things tidy.
-            ph_w, ph_h = 1920, 1080
+            # Match Proj Probe's actual dimensions so the placeholder 
+            # scales identically in the preview panel. The probe_img CSS 
+            # uses object-fit:contain so source dimensions don't really 
+            # affect display size, but matching keeps things tidy and 
+            # makes the placeholder layout look right at any panel size.
+            ph_w, ph_h = get_display_size()
 
             # Background: very dark gray (BGR), close to --bg-panel from
             # style.css. Pure black would be visually indistinguishable
