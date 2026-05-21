@@ -41,6 +41,7 @@ import socket
 import time
 import numpy as np  # for 16-bit → 8-bit reduction in /cam_probe
 from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
+import calibration_store as cstore
 
 # Append the modules directory to the system path for local imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
@@ -796,6 +797,76 @@ def lab_invert():
     # Dispatches the mathematical 16-bit negative inversion process
     dispatch_engine('lab_invert', request.json)
     return jsonify({"status": "started"})
+
+@app.route('/single_peak_measurement', methods=['POST'])
+def single_peak_measurement():
+    # Calibration page: "Single Measurement" button.
+    #
+    # Dispatches a single capture at the supplied exposure time,
+    # measuring centre-patch brightness against a synthetic white
+    # patch. Result lands in calibration.json under the
+    # last_single_measurement key.
+    #
+    # Fire-and-forget. Frontend polls /status to detect completion
+    # and then GETs /calibration_state to read the new measurement.
+    # See the IPC-busy-state convention notes in
+    # modules/calibration_store.py for how the polling works.
+    dispatch_engine('single_peak_measurement', request.json)
+    return jsonify({"status": "started"})
+
+
+@app.route('/measure_peak_white', methods=['POST'])
+def measure_peak_white():
+    # Calibration page: "ACB" (Auto Calibrate for Brackets) button.
+    #
+    # Runs the bisection-with-doubling-bootstrap search for T_peak -
+    # the exposure time at which the projection monitor's synthetic
+    # white lands at the user-defined target brightness range. On
+    # convergence, persists t_peak (and metadata) to calibration.json.
+    #
+    # This task is potentially long-running (up to max_iterations
+    # camera captures, each taking 4-5 seconds including libcamera
+    # overhead). Fire-and-forget like the other measurement routes;
+    # the frontend will see /status flip to "rendering" for the
+    # duration and back to "idle" on completion.
+    dispatch_engine('measure_peak_white', request.json)
+    return jsonify({"status": "started"})
+
+
+@app.route('/measure_peak_black', methods=['POST'])
+def measure_peak_black():
+    # Calibration page: "Include black level measurement" checkbox
+    # companion to ACB.
+    #
+    # Single capture at the supplied exposure time (intended to be
+    # the just-measured T_peak) with the projection monitor showing
+    # synthetic black. Persists black_floor_at_t_peak to
+    # calibration.json.
+    #
+    # The frontend sequencer is responsible for calling this AFTER
+    # /measure_peak_white completes, with the exposure_s parameter
+    # set to whatever t_peak the ACB run produced. We don't chain
+    # them automatically server-side because the user might want
+    # to run them independently (e.g. re-measuring black floor
+    # without re-running ACB, to check sensor drift between job
+    # runs).
+    dispatch_engine('measure_peak_black', request.json)
+    return jsonify({"status": "started"})
+
+
+@app.route('/calibration_state', methods=['GET'])
+def calibration_state():
+    # Returns the current contents of calibration.json as a normalised
+    # JSON dict. Frontend uses this to populate the Calibration page's
+    # readouts after each measurement task completes.
+    #
+    # Wrapping this in a route (rather than serving calibration.json
+    # as a static file) gives us a stable contract: always a dict,
+    # never a 404 on missing-file. The static_dir global is the
+    # same path the engine writes to via cstore.save() - so what's
+    # written by the engine is exactly what we read here.
+    static_dir = os.path.join(BASE_DIR, "static")
+    return jsonify(cstore.load(static_dir))
 
 @app.route('/panic', methods=['POST'])
 def panic():
