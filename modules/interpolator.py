@@ -95,19 +95,47 @@ class Timeline:
         elif self.mode == 'sss':
             prefix = "sss_"
         elif self.mode == 'dre':
-            # DRE mode (Dynamic Range Extender, issue #169). The exposure 
-            # sheet schema is intentionally minimal: frame number, exposure 
-            # time, DRE step count, and per-keyframe projector/camera gels. 
-            # No spatial transforms, no smear start/stop, no JK printer 
-            # columns - the frame is held stationary while luminance is 
+            # DRE mode (Dynamic Range Extender, issue #169). The exposure
+            # sheet schema is intentionally minimal: frame number, exposure
+            # time, DRE step count, and per-keyframe projector/camera gels.
+            # No spatial transforms, no smear start/stop, no JK printer
+            # columns - the frame is held stationary while luminance is
             # animated by the engine's DRE path.
             prefix = "dre_"
+        elif self.mode == 'brk':
+            # BRK mode (Bracketed exposures) - STUB.
+            #
+            # The full BRK schema parses per-layer GATE/CAM/STP and
+            # per-layer POS/ROT (as comma-separated text strings).
+            # That parser doesn't exist yet - it lands in a future
+            # slice along with the engine-side BRK render path.
+            #
+            # Until then, BRK mode produces a VALID but EMPTY Timeline.
+            # That is enough for the engine to not crash, but the
+            # engine's render dispatch is responsible for refusing to
+            # actually render anything BRK-related until the full
+            # implementation lands. See engine.py's mode dispatch
+            # sites where we early-return on timeline.mode == 'brk'.
+            #
+            # We set prefix here for consistency (so the loop below
+            # has SOMETHING to work with), but the early-return guard
+            # immediately below ensures the parser never actually
+            # walks any BRK keyframes.
+            prefix = "brk_"
+            row_ids = set()
+            # Empty timeline: no tracks populated. Anything downstream
+            # that tries to evaluate get_state() on this timeline will
+            # see all tracks empty and behave as "no keyframes".
+            # The engine should not be evaluating get_state for BRK
+            # anyway - it should be early-returning before reaching
+            # any state evaluation.
+            return
         else:
             raise ValueError(
                 f"Unknown smear_mode '{self.mode}' in job data. "
-                f"Expected one of: SSS, MDS, DRE."
+                f"Expected one of: SSS, MDS, DRE, BRK."
             )
-        
+
         row_ids = set()
         for k in job_data.keys():
             if k.startswith(prefix + "f"):

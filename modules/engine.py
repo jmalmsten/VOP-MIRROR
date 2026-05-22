@@ -319,19 +319,23 @@ def run_persistent_engine():
             def render_world(frame_num, t_norm, is_preview=False):
                 """
                 Renders one composite frame to the HDMI screen.
-                
-                Three optical layers stack multiplicatively:
-                  PASS 1: BP1 rendered into bp1_fbo
-                  PASS 2: BP2 rendered into bp2_fbo
-                  PASS 3: PM rendered to the screen
-                  PASS 4: bp1_tex multiplied over the screen
-                  PASS 5: bp2_tex multiplied over the screen
-                
-                Multiplication is commutative so the order of the two BP 
-                blends doesn't affect output. PM always renders to screen 
-                directly because the projector gel (PG) filter color is 
-                applied to it - that's the bulb's tint, not a mask.
+                ...
                 """
+                # BRK mode stub: refuse to render. The Timeline is empty
+                # for BRK (see interpolator.py BRK case) and the render
+                # path here would crash on get_state(). Until BRK is
+                # implemented in a future slice, render a black frame
+                # and return - the user will see black in the preview
+                # window with no crash. The log message is rate-limited
+                # by the engine's audit system so it doesn't spam.
+                if timeline.mode == 'brk':
+                    ctx.screen.use()
+                    ctx.clear(0.0, 0.0, 0.0, 1.0)
+                    pygame.display.flip()
+                    log_audit("BRK mode is not yet implemented in the render path. "
+                              "Rendering black frame.")
+                    return
+
                 if timeline.mode == 'mds':
                     st = timeline.get_mds_state(float(frame_num), t_norm)
                 else:
@@ -475,7 +479,20 @@ def run_persistent_engine():
                 if timeline.mode == 'dre':
                     return execute_dre_exposure(frame_num, is_preview=is_preview,
                                                 is_comp_preview=is_comp_preview)
-                
+
+                # BRK mode stub: refuse to execute exposures. Until
+                # the BRK sequencer and merger land in a future slice,
+                # there's no way to actually run a BRK frame. We log
+                # and bail. The engine returns to idle and the user
+                # sees no progress in the GUI, which is the right
+                # UX for "this mode does not work yet" - the heartbeat
+                # never advances, and the user can switch back to a
+                # working mode without anything being broken.
+                if timeline.mode == 'brk':
+                    log_audit("BRK mode exposures are not yet implemented. "
+                              "Skipping frame.")
+                    return
+
                 st = timeline.get_state(frame_num)
                 smr_ms = float(st['exp']) * 1000.0
                 total_ms = smr_ms + 1000.0
