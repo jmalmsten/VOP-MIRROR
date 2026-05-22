@@ -1433,30 +1433,88 @@ hr.section-divider {
 }
 
 /* ===========================================================
-   BRK MODE: per-job constants visibility
+   BRK MODE: per-job constants in the sheet header
    ===========================================================
-   The .brk-constants class marks controls that are meaningful
-   only when smear_mode is BRK (bracket_count, bracket_stops,
-   and any future BRK-only knobs). Default = hidden. When
-   <body> gets the .brk-mode class (added by JS in
-   toggleSheetVisibility), all .brk-constants elements become
-   visible.
+   Container for bracket_count + bracket_stops, sitting between
+   the "Exposure Sheet" title (left) and Smear Mode selector
+   (right) inside .sheet-header. Hidden by default via the
+   .brk-constants class it also carries; revealed when body
+   has .brk-mode. ============================================ */
 
-   Using body.brk-mode rather than a per-element toggle keeps
-   the JS simple: one classList.toggle on body covers any
-   number of .brk-constants elements added in the future,
-   wherever they sit in the DOM. =========================== */
-.brk-constants {
-    display: none;
+.brk-sheet-settings {
+    /* Display value here is the visible-state default. The
+       .brk-constants rule above sets display:none until the
+       body.brk-mode selector overrides it back. The cascade
+       order is: .brk-constants (none) -> body.brk-mode
+       .brk-constants (revert), and the revert here picks up
+       this flex layout. */
+    display:            flex;
+    align-items:        center;
+    gap:                15px;
 }
-body.brk-mode .brk-constants {
-    /* Restore whatever display the element type naturally has.
-       const-group elements are styled as block flex containers
-       elsewhere in this stylesheet; reverting to "" lets the
-       browser fall back to the inherited rule rather than
-       hard-coding "block" or "flex" here (which could fight
-       the .const-group flex layout). For the <hr> case, "block"
-       is the natural default and matches the surrounding
-       section dividers. */
-    display: revert;
+
+.brk-setting {
+    /* Each setting is a vertical stack: small accent label on
+       top, input below. Mirrors the visual rhythm of
+       .mode-control but consumes less horizontal space because
+       we have two of them side by side. */
+    display:            flex;
+    flex-direction:     column;
+    align-items:        flex-start;
+    gap:                3px;
+}
+
+.brk-setting label {
+    /* Same label styling as .mode-control label so the three
+       header children (title, BRK settings, mode control)
+       read as a unified row. */
+    color:              var(--color-accent);
+    font-size:          0.7em;
+    font-weight:        bold;
+    text-transform:     uppercase;
+}
+
+.brk-setting select,
+.brk-setting input {
+    /* Slightly tighter input styling than .mode-control select
+       (which is a single dominant control); the BRK settings
+       are supporting controls so they get a less attention-
+       grabbing treatment. */
+    background:         var(--bg-input);
+    border:             1px solid var(--border-color);
+    color:              var(--text-primary);
+    padding:            3px 8px;
+    border-radius:      var(--radius-small);
+    font-size:          0.85em;
+}
+
+.brk-setting input[type="number"] {
+    /* Number input gets a tighter width since values are
+       short (0.25 - 4.0). Without this, browsers default to
+       a wide field that misaligns visually with the select. */
+    width:              60px;
+}
+
+/* ===========================================================
+   BRK CONSTANTS VISIBILITY
+   ===========================================================
+   Elements tagged .brk-constants are mode-scoped: they exist
+   in the DOM unconditionally (so their values are gathered
+   by collectParams() and persisted to current_job.json
+   regardless of active mode), but they're only VISIBLE when
+   smear_mode is BRK.
+
+   The visibility hook is body.brk-mode, set/cleared by
+   toggleSheetVisibility() in main.js. Driving visibility from
+   a body class rather than per-element JS lets multiple
+   .brk-constants elements share one toggle. =============== */
+.brk-constants {
+    display:            none;
+}
+
+body.brk-mode .brk-sheet-settings.brk-constants {
+    /* The sheet-header settings panel uses flex to lay out
+       its two child controls side by side. See the
+       .brk-sheet-settings rule above for the layout details. */
+    display:            flex;
 }
