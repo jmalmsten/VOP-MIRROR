@@ -268,12 +268,16 @@
                             <!-- Frame-locked modes: nothing moves during
                                  exposure; instead, what's DISPLAYED on the
                                  projection screen varies between sub-captures.
-                                 DRE varies luminance to extend tonal range;
-                                 BRK captures bracketed slices to work around
-                                 the screen's 8bpc bottleneck. -->
+                                 DRE varies luminance to extend tonal range.
+                                 BRK (Bracketed) is wired up in the
+                                 frontend code but not yet exposed here -
+                                 it crashes the engine because the
+                                 interpolator and render path don't know
+                                 about it yet. The dropdown option will be
+                                 re-added in a future slice after the
+                                 engine plumbing lands. -->
                             <optgroup label="Frame-locked">
                                 <option value="DRE">DRE (Experimental)</option>
-                                <option value="BRK">BRK (Bracketed)</option>
                             </optgroup>
                         </select>
                     </div>
