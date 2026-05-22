@@ -1431,3 +1431,32 @@ hr.section-divider {
     justify-content:    flex-end;
     gap:                10px;
 }
+
+/* ===========================================================
+   BRK MODE: per-job constants visibility
+   ===========================================================
+   The .brk-constants class marks controls that are meaningful
+   only when smear_mode is BRK (bracket_count, bracket_stops,
+   and any future BRK-only knobs). Default = hidden. When
+   <body> gets the .brk-mode class (added by JS in
+   toggleSheetVisibility), all .brk-constants elements become
+   visible.
+
+   Using body.brk-mode rather than a per-element toggle keeps
+   the JS simple: one classList.toggle on body covers any
+   number of .brk-constants elements added in the future,
+   wherever they sit in the DOM. =========================== */
+.brk-constants {
+    display: none;
+}
+body.brk-mode .brk-constants {
+    /* Restore whatever display the element type naturally has.
+       const-group elements are styled as block flex containers
+       elsewhere in this stylesheet; reverting to "" lets the
+       browser fall back to the inherited rule rather than
+       hard-coding "block" or "flex" here (which could fight
+       the .const-group flex layout). For the <hr> case, "block"
+       is the natural default and matches the surrounding
+       section dividers. */
+    display: revert;
+}

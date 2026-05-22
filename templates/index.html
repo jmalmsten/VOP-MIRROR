@@ -244,6 +244,49 @@
                             <button class="mini-btn danger" onclick="nukeHotPixels()">NUKE MAP</button>
                             <span id="hp_result_txt"></span>
                         </div>
+                        <!-- BRK MODE PER-JOB CONSTANTS
+                             Hidden by default via the .brk-constants
+                             class (see static/style.css). Made visible
+                             from JS in toggleSheetVisibility() when
+                             smear_mode is BRK.
+
+                             bracket_count: number of bracketed captures
+                             per frame. The Peak bracket maps the top of
+                             the 16bpc source range to screen white; each
+                             additional shadow bracket maps a slice
+                             bracket_stops further down the source range.
+                             1 = just the peak shot (sanity check
+                             against SSS Peak with one frame). 3 is the
+                             practical sweet spot for most material.
+                             7 is the deep-shadow extreme - useful for
+                             very low-key sources.
+
+                             bracket_stops: distance between adjacent
+                             brackets, measured in photographic stops
+                             (1 stop = factor of 2 in source space).
+                             0.25 = quarter-stop, very fine. 1.0 = the
+                             default, one full stop between brackets.
+                             4.0 = aggressive coverage with few brackets
+                             but big precision gaps. 0.25 increments
+                             match standard photographic quarter-stop
+                             convention. -->
+                        <hr class="section-divider brk-constants">
+                        <div class="const-group brk-constants" title="BRK MODE ONLY. Number of bracketed captures per frame.">
+                            <label>Bracket Count</label>
+                            <select id="bracket_count" onchange="triggerSync()">
+                                <option value="1">1 (Peak only)</option>
+                                <option value="2">2</option>
+                                <option value="3" selected>3 (default)</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7 (deep shadows)</option>
+                            </select>
+                        </div>
+                        <div class="const-group brk-constants" title="BRK MODE ONLY. Distance between brackets in photographic stops. 1 stop = factor of 2 in source space.">
+                            <label>Bracket Stops</label>
+                            <input type="number" id="bracket_stops" value="1.0" min="0.25" max="4.0" step="0.25" onchange="triggerSync()">
+                        </div>
                         <div></div>
                     </div>
                 </div>

@@ -9,6 +9,8 @@
     "coord_scale": "1.0",
     "image": "",
     "smear_mode": "SSS",
+    "bracket_count": "3",
+    "bracket_stops": "1.0",
     "rot_order": "XYZ",
     "par_x": "1.0",
     "par_y": "1.0",

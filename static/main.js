@@ -85,6 +85,17 @@ function toggleSheetVisibility() {
     const sssWrap = document.getElementById('sss_wrapper');
     const dreWrap = document.getElementById('dre_wrapper');
     const brkWrap = document.getElementById('brk_wrapper');
+    // BRK MODE BODY CLASS
+    //
+    // Drives the visibility of any element with the
+    // .brk-constants class (currently bracket_count and
+    // bracket_stops in the Hardware Constants column). See
+    // static/style.css for the matching rule. Done via a body
+    // class rather than per-element classList toggles so that
+    // future BRK-only controls added anywhere in the DOM are
+    // covered automatically - just add .brk-constants to them
+    // and they're picked up for free.
+    document.body.classList.toggle('brk-mode', currentMode === 'BRK');
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
     if (dreWrap) dreWrap.style.display = (currentMode === 'DRE') ? 'block' : 'none';
