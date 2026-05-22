@@ -53,20 +53,29 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMode = modeSelect.value;
         toggleSheetVisibility();
         
+        // MODE SWITCH HANDLER
+        //
+        // Non-destructive: switching modes only updates which sheet is
+        // visible and which mode the engine will dispatch on. The other
+        // modes' keyframe rows stay in the DOM (hidden via wrapper
+        // display:none) and their values stay in current_job.json
+        // keyed by their mode prefix (mds_*, sss_*, dre_*, brk_*).
+        // So switching SSS -> MDS -> SSS is round-trip-safe: your SSS
+        // keyframes are still there when you come back.
+        //
+        // The earlier version of this handler popped a confirm() and
+        // wiped sheet bodies on OK. Browsers suppress repeated confirms
+        // on the same page after the first one, which made the dropdown
+        // un-switchable (the suppressed confirm returns false, the
+        // cancel branch fired, and 'this.value = currentMode' snapped
+        // the dropdown back). The destructive model was also wrong on
+        // its own terms - there's no reason mode switching needs to be
+        // a one-way operation. Nuke Job already exists for the
+        // "I want a clean slate" use case.
         modeSelect.addEventListener('change', function(e) {
-            if (confirm("Switching modes is destructive. All keyframing will be thrown out. Are you sure you want to continue?")) {
-                currentMode = this.value;
-                document.getElementById('mds_sheet_body').innerHTML = '';
-                document.getElementById('sss_sheet_body').innerHTML = '';
-                document.getElementById('dre_sheet_body').innerHTML = '';
-                mdsMasterCount = 0;
-                sssMasterCount = 0;
-                dreMasterCount = 0;
-                toggleSheetVisibility();
-                triggerSync();
-            } else {
-                this.value = currentMode; // Revert dropdown if cancelled
-            }
+            currentMode = this.value;
+            toggleSheetVisibility();
+            triggerSync();
         });
     }
 });
