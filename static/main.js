@@ -34,6 +34,14 @@ let local_sync_ts = 0;
 let mdsMasterCount = 0;
 let sssMasterCount = 0;
 let dreMasterCount = 0;
+// BRK keyframe counter. Same role as dreMasterCount / sssMasterCount:
+// incremented on add, used as the suffix in input IDs (brk_f1, brk_f2...).
+// Not decremented on delete - if a user deletes row 3 of 5, the
+// remaining rows keep IDs 1,2,4,5 and the next add becomes 6. That's
+// fine because IDs only need uniqueness, not contiguity. Rehydration
+// from saved jobs scans for highest-numbered ID and rebuilds enough
+// rows to cover it.
+let brkMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
 let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
@@ -67,13 +75,14 @@ function toggleSheetVisibility() {
     const mdsWrap = document.getElementById('mds_wrapper');
     const sssWrap = document.getElementById('sss_wrapper');
     const dreWrap = document.getElementById('dre_wrapper');
+    const brkWrap = document.getElementById('brk_wrapper');
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
     if (dreWrap) dreWrap.style.display = (currentMode === 'DRE') ? 'block' : 'none';
-    // DRE-specific Probe row controls. Only visible in DRE mode because the 
-    // DRE-step preview toggle makes no sense for SSS/MDS jobs.
-    const dreProbe = document.getElementById('dre_probe_controls');
-    if (dreProbe) dreProbe.style.display = (currentMode === 'DRE') ? 'inline-block' : 'none';
+    // BRK mode wrapper. Same toggle pattern as the existing three.
+    // The inline style.display pattern is a pre-existing convention
+    // in this function; cleanup is filed for the niggles pass.
+    if (brkWrap) brkWrap.style.display = (currentMode === 'BRK') ? 'block' : 'none';
 }
 
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
@@ -442,6 +451,101 @@ function reindexMDS() {
     });
 }
 
+// addBRKKeyframe adds one row to the BRK exposure sheet.
+//
+// Field naming convention mirrors SSS/MDS where the column maps to
+// an existing concept (POS, ROT, GATE, CAM, STP, gels) so the
+// engine's spatial-transform and JK-printer parsing can reuse the
+// existing code paths once the engine-side BRK mode branch is in
+// place (slice 12). The fields that DON'T map to existing concepts
+// (per-job bracket_count and bracket_stops) are not per-keyframe;
+// those land in the Hardware Constants section in slice 9.
+//
+// Fields per keyframe:
+//   brk_f<n>                   frame number
+//   brk_pm_gate<n>             PM JK gate frame number
+//   brk_pm_cam<n>              PM JK camera index
+//   brk_pm_stp<n>              PM JK step
+//   brk_bp1_gate<n>            BP1 JK gate frame
+//   brk_bp1_cam<n>             BP1 JK camera index
+//   brk_bp1_stp<n>             BP1 JK step
+//   brk_bp2_gate<n>            BP2 JK gate frame
+//   brk_bp2_cam<n>             BP2 JK camera index
+//   brk_bp2_stp<n>             BP2 JK step
+//   brk_pm_pos<n>              PM position (X,Y,Z as "x,y,z" string)
+//   brk_pm_rot<n>              PM rotation (Pitch,Roll,Yaw)
+//   brk_bp1_pos<n>             BP1 position
+//   brk_bp1_rot<n>             BP1 rotation
+//   brk_bp2_pos<n>             BP2 position
+//   brk_bp2_rot<n>             BP2 rotation
+//   brk_c<n>_hex               projector gel color
+//   brk_cg<n>_hex              camera gel color
+//
+// The universal collectParams() walks all <input>/<select> elements
+// and uses their IDs as JSON keys, so any new BRK field added here
+// is automatically included in the saved job state - no separate
+// serializer to maintain.
+function addBRKKeyframe() {
+    brkMasterCount++;
+    const idx = brkMasterCount;
+
+    // Suggest a frame number one ahead of the last keyframe. Matches
+    // the SSS/MDS/DRE adders' affordance - users almost always want
+    // sequential frames.
+    const existingRows = document.querySelectorAll('.brk-keyframe-row');
+    let suggestedFrame = 1;
+    if (existingRows.length > 0) {
+        const lastFrameInput = existingRows[existingRows.length - 1]
+            .querySelector('input[id^="brk_f"]');
+        if (lastFrameInput) {
+            suggestedFrame = (parseInt(lastFrameInput.value) || 0) + 1;
+        }
+    }
+
+    const row = document.createElement('div');
+    row.className = 'sheet-row brk-keyframe-row';
+    row.innerHTML = `
+        <div>${idx}</div>
+        <div><input type="number" id="brk_f${idx}" value="${suggestedFrame}" min="1"></div>
+
+        <div class="pm-jk-cell"><input type="number" class="jk-input" id="brk_pm_gate${idx}" value="1" min="1"></div>
+        <div class="pm-jk-cell"><input type="number" class="jk-input" id="brk_pm_cam${idx}" value="1" min="1"></div>
+        <div class="pm-jk-cell"><input type="number" class="jk-input" id="brk_pm_stp${idx}" value="1" min="1"></div>
+
+        <div class="bp1-jk-cell"><input type="number" class="jk-input bp1-input" id="brk_bp1_gate${idx}" value="1" min="1"></div>
+        <div class="bp1-jk-cell"><input type="number" class="jk-input bp1-input" id="brk_bp1_cam${idx}" value="1" min="1"></div>
+        <div class="bp1-jk-cell"><input type="number" class="jk-input bp1-input" id="brk_bp1_stp${idx}" value="1" min="1"></div>
+
+        <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_gate${idx}" value="1" min="1"></div>
+        <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_cam${idx}" value="1" min="1"></div>
+        <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_stp${idx}" value="1" min="1"></div>
+
+        <div class="pm-spatial-cell"><input type="text" id="brk_pm_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="pm-spatial-cell"><input type="text" id="brk_pm_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>
+
+        <div class="bp1-spatial-cell"><input type="text" class="bp1-input" id="brk_bp1_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="bp1-spatial-cell"><input type="text" class="bp1-input" id="brk_bp1_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>
+
+        <div class="bp2-spatial-cell"><input type="text" class="bp2-input" id="brk_bp2_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="bp2-spatial-cell"><input type="text" class="bp2-input" id="brk_bp2_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>
+
+        <div><input type="color" id="brk_c${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
+        <div><input type="color" id="brk_cg${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
+
+        <div><button onclick="this.closest('.brk-keyframe-row').remove(); triggerSync();">×</button></div>
+    `;
+
+    // Wire every input/select in the new row to triggerSync on change,
+    // matching the other adders' behavior so editing feels uniform
+    // across modes.
+    row.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', triggerSync);
+    });
+
+    document.getElementById('brk_sheet_body').appendChild(row);
+    triggerSync();
+}
+
 // addDREKeyframe adds one row to the DRE exposure sheet.
 // 
 // Field naming convention mirrors SSS (so the interpolator parser 
@@ -686,7 +790,13 @@ setInterval(async () => {
             let maxMDS = 0;
             let maxSSS = 0;
 
-            // 1. Scan the imported parameters to find the highest keyframe index
+            // 1. Scan the imported parameters to find the highest keyframe index.
+            //
+            // NOTE: DRE is missing from this scan - pre-existing bug,
+            // filed for the niggles cleanup pass. Adding BRK in
+            // parallel with MDS/SSS here matches the convention but
+            // doesn't fix the DRE gap.
+            let maxBRK = 0;
             for (const key of Object.keys(st.params)) {
                 if (key.startsWith('mds_f')) {
                     const idx = parseInt(key.replace('mds_f', ''));
@@ -696,17 +806,35 @@ setInterval(async () => {
                     const idx = parseInt(key.replace('sss_f', ''));
                     if (idx > maxSSS) maxSSS = idx;
                 }
+                // Match brk_f<n> but NOT other brk_* fields. The leading
+                // 'brk_f' followed by a digit distinguishes the frame-
+                // number field from siblings like brk_pm_pos1.
+                if (/^brk_f\d/.test(key)) {
+                    const idx = parseInt(key.replace('brk_f', ''));
+                    if (idx > maxBRK) maxBRK = idx;
+                }
             }
 
             // 2. Clear out any existing rows to prevent duplicates
             document.getElementById('mds_sheet_body').innerHTML = '';
             document.getElementById('sss_sheet_body').innerHTML = '';
+            // Defensive existence check: brk_sheet_body only exists after
+            // slice 8 lands. Older clients reloading saved jobs without
+            // the new template would crash without this guard.
+            const brkBody = document.getElementById('brk_sheet_body');
+            if (brkBody) brkBody.innerHTML = '';
             mdsMasterCount = 0;
             sssMasterCount = 0;
+            brkMasterCount = 0;
 
             // 3. Dynamically build the exact number of empty HTML rows needed
             for (let i = 0; i < maxMDS; i++) addMDSKeyframe();
             for (let i = 0; i < maxSSS; i++) addSSSKeyframe();
+            // BRK rows only if the template loaded - older saved jobs
+            // running on pre-slice-8 clients shouldn't error here.
+            if (brkBody) {
+                for (let i = 0; i < maxBRK; i++) addBRKKeyframe();
+            }
 
             // 4. Now that the input fields exist, hydrate them with the saved values
             for (const [k, v] of Object.entries(st.params)) {

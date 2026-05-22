@@ -32,7 +32,7 @@
 <head>
     <meta charset="UTF-8">
     <title>VOP v0.10</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.13">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.14">
 </head>
 <body>
     VOP &copy; 2026 jmalmsten. 
@@ -255,9 +255,26 @@
                     <div class="mode-control">
                         <label>Smear Mode</label>
                         <select id="smear_mode">
-                            <option value="SSS" selected>SSS</option>
-                            <option value="MDS">MDS</option>
-                            <option value="DRE">DRE (Experimental)</option>
+                            <!-- Smear-enabled modes: the camera and projection
+                                 frame move during exposure, drawing motion blur
+                                 directly onto the latent. SSS keeps one source
+                                 still and smears the camera path; MDS smears
+                                 the source itself between keyframes. -->
+                            <optgroup label="Smear-enabled">
+                                <option value="SSS" selected>SSS</option>
+                                <option value="MDS">MDS</option>
+                            </optgroup>
+
+                            <!-- Frame-locked modes: nothing moves during
+                                 exposure; instead, what's DISPLAYED on the
+                                 projection screen varies between sub-captures.
+                                 DRE varies luminance to extend tonal range;
+                                 BRK captures bracketed slices to work around
+                                 the screen's 8bpc bottleneck. -->
+                            <optgroup label="Frame-locked">
+                                <option value="DRE">DRE (Experimental)</option>
+                                <option value="BRK">BRK (Bracketed)</option>
+                            </optgroup>
                         </select>
                     </div>
                 </div>
@@ -268,6 +285,9 @@
                 
                 <div class="sheet-container" id="sss_wrapper" style="display: none;">
                     {% include 'sections/sss-xsheet.html' %}
+                </div>
+                <div class="sheet-container" id="brk_wrapper" style="display: none;">
+                    {% include 'sections/brk-xsheet.html' %}
                 </div>
                 <div class="sheet-container" id="dre_wrapper" style="display: none;">
                     {% include 'sections/dre-xsheet.html' %}

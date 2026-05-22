@@ -1209,6 +1209,90 @@ body {
     display:            none;
 }
 
+/* --- BRK Sheet grid template ---
+ * Bracketed exposures mode. Structurally similar to SSS in column
+ * count but lacks SSS's smear-specific fields and DRE's INT/EXP/STEPS.
+ *
+ * Column groups (CSS variables) follow the same scheme as SSS/MDS so
+ * the eye-toggle (.layer-disabled-*) and video-presence (.has-*-video)
+ * classes hide columns identically when their corresponding layer is
+ * disabled or still-image-only.
+ *
+ * Spatial columns (POS/ROT) use larger fixed widths than SSS because
+ * BRK's spatial values are text inputs ("x,y,z") not numeric fields,
+ * and need more room to display comfortably.
+ */
+.brk-sheet {
+    --col-pm-jk:    ;
+    --col-bp1-jk:   ;
+    --col-bp2-jk:   ;
+    --col-pm-sp:    105px 105px;
+    --col-bp1-sp:   105px 105px;
+    --col-bp2-sp:   105px 105px;
+}
+
+.brk-sheet.has-pm-video:not(.layer-disabled-pm)   { --col-pm-jk:  45px 40px 40px; }
+.brk-sheet.has-bp1-video:not(.layer-disabled-bp1) { --col-bp1-jk: 45px 40px 40px; }
+.brk-sheet.has-bp2-video:not(.layer-disabled-bp2) { --col-bp2-jk: 45px 40px 40px; }
+
+.brk-sheet.layer-disabled-pm  { --col-pm-sp:  ; }
+.brk-sheet.layer-disabled-bp1 { --col-bp1-sp: ; }
+.brk-sheet.layer-disabled-bp2 { --col-bp2-sp: ; }
+
+.brk-header, .brk-keyframe-row {
+    display:                    grid;
+    grid-template-columns:      25px 50px
+                                var(--col-pm-jk) var(--col-bp1-jk) var(--col-bp2-jk)
+                                var(--col-pm-sp) var(--col-bp1-sp) var(--col-bp2-sp)
+                                35px 35px 30px;
+    /*                          #    FR
+                                PM-JK  BP1-JK BP2-JK
+                                PM-SP  BP1-SP BP2-SP
+                                PG    CG    [×] */
+    gap:                        5px;
+    align-items:                center;
+    margin-bottom:              5px;
+}
+
+/* Cell visibility for BRK mirrors the SSS/MDS rules. JK cells hide
+   when the layer lacks video OR when the layer is eye-disabled.
+   Spatial cells hide only on eye-disable. */
+.brk-sheet:not(.has-pm-video) .pm-jk-cell,
+.brk-sheet.layer-disabled-pm  .pm-jk-cell {
+    display:            none;
+}
+.brk-sheet:not(.has-bp1-video) .bp1-jk-cell,
+.brk-sheet.layer-disabled-bp1  .bp1-jk-cell {
+    display:            none;
+}
+.brk-sheet:not(.has-bp2-video) .bp2-jk-cell,
+.brk-sheet.layer-disabled-bp2  .bp2-jk-cell {
+    display:            none;
+}
+.brk-sheet.layer-disabled-pm  .pm-spatial-cell { display: none; }
+.brk-sheet.layer-disabled-bp1 .bp1-spatial-cell { display: none; }
+.brk-sheet.layer-disabled-bp2 .bp2-spatial-cell { display: none; }
+
+/* Add-row button. Reuses the existing .add-row layout and gives BRK
+ * its own visual accent so users can tell at a glance which mode's
+ * sheet they're looking at. The accent color choice matches BRK's
+ * "frame-locked, bracketed" character - same green as DRE because
+ * they're both frame-locked modes, but with a slightly different
+ * brightness so the two are distinguishable. */
+.brk-add-row {
+    margin-top:         10px;
+}
+
+.brk-add-btn {
+    background:         var(--tag-master-bg);
+    color:              var(--color-success);
+    border:             1px solid var(--color-success);
+    cursor:             pointer;
+    padding:            6px 12px;
+    font-family:        inherit;
+    font-size:          0.85em;
+}
+
 /* --- DRE Sheet grid template ---
  * Issue #169: Dynamic Range Extender mode.
  * DRE sheets are deliberately simpler than SSS/MDS - no JK printer 
