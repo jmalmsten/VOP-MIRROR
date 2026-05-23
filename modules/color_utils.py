@@ -319,6 +319,77 @@ def generate_comp_preview(buffer_file, static_dir, cam_mag_dir, frame_num,
 
     return True
 
+def dng_to_uint16_rgb(buffer_file, static_dir, black_clip=0.0):
+    """
+    Decode a camera DNG to a 16-bit linear RGB numpy array,
+    with hot-pixel patching and noise pedestal subtraction
+    applied. NO color gel, NO TIFF write, NO disk side
+    effects beyond reading buffer_file.
+
+    Args:
+        buffer_file : str. Path to a camera DNG file on disk
+                      (typically /tmp/vop_buf_*.dng or a
+                      BRK-specific per-bracket variant).
+        static_dir  : str. Path to the runtime static dir;
+                      passed through to apply_hot_pixel_patch
+                      which reads the defect map from there.
+        black_clip  : float, default 0.0. The pedestal value
+                      to subtract; defaults to 0.0 (no
+                      subtraction) for callers that want the
+                      raw decode without the SSS/MDS path's
+                      pedestal handling.
+
+    Returns:
+        numpy.ndarray, dtype=uint16, shape=(H, W, 3). In RGB
+        channel order (NOT BGR - matches what the camera
+        produces directly out of rawpy.postprocess, and what
+        brk_merger.merge() expects as input). The caller is
+        responsible for any further processing (gel tint,
+        BGR conversion for cv2.imwrite, etc.).
+
+        Returns None if buffer_file does not exist or rawpy
+        fails to decode it. Callers should check for None.
+
+    This is the DNG-decode-and-clean prefix of the SSS/MDS
+    pipeline that process_and_stack_latent_image runs.
+    Factoring it out lets the BRK execute path get N decoded
+    arrays for merging without writing N intermediate
+    latent TIFFs to disk.
+    """
+    if not os.path.exists(buffer_file):
+        return None
+
+    try:
+        # Identical postprocess parameters to process_and_stack_latent_image:
+        # gamma=(1,1)        - strictly linear, no display gamma applied
+        # no_auto_bright     - no automatic exposure compensation
+        # output_bps=16      - full 16-bit precision
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True, output_bps=16)
+
+        # Hot pixel patching (uses defect map from static_dir).
+        # Identical to process_and_stack_latent_image's call.
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+
+        # Pedestal subtraction. For BRK, black_clip is usually
+        # left at 0.0 because the merger's per-bracket weighting
+        # handles noise-floor masking implicitly - the deepest
+        # bracket's slice cut-off acts as the floor. But the
+        # parameter is exposed so callers that DO want pedestal
+        # subtraction (e.g. an SSS-style consumer that happens
+        # to want a decoded array) can opt in.
+        rgb = apply_pedestal(rgb, black_clip)
+
+        return rgb
+
+    except Exception as e:
+        # Return None on failure rather than raising. Mirrors
+        # process_and_stack_latent_image's silent-failure
+        # contract; the engine logs the failure via its own
+        # audit channel when None comes back.
+        print(f"[VOP WARNING] dng_to_uint16_rgb decode error for {buffer_file}: {e}")
+        return None
+
 def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
     if not os.path.exists(buffer_file): return False
 

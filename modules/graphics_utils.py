@@ -50,25 +50,69 @@ def init_render_pipeline():
     }
     """
     
+    # FRAGMENT SHADER
+    #
+    # Samples the bound texture, optionally applies a source-slice
+    # remap (BRK mode), optionally converts to grayscale, and
+    # multiplies by the per-frame filter color (PG*CG combined gel).
+    #
+    # The slice remap is bracketed-mode specific. When slice_active
+    # is true, the sampled texture color (assumed to represent a
+    # normalized 16bpc source value in [0..1]) is linearly mapped
+    # so that source value slice_low maps to screen 0.0 and
+    # source value slice_high maps to screen 1.0. Values outside
+    # [slice_low, slice_high] clip. This is what lets BRK use the
+    # 8-bit projection panel to show a fine slice of the 16bpc
+    # source range without losing precision to the panel's
+    # quantization.
+    #
+    # When slice_active is false (default), the remap is bypassed
+    # and tex_col passes through untouched. All non-BRK modes
+    # (SSS, MDS, DRE) rely on this default - they never set
+    # slice_active, so they get exactly the same fragment output
+    # they did before this uniform existed.
     frag = """
     #version 300 es
     precision mediump float;
     uniform sampler2D TexUnit;
     uniform vec3 filter_color;
-    uniform bool mono_mode; // <-- Added the uniform receiver
-    
+    uniform bool mono_mode;
+
+    // BRK source-slice remap uniforms.
+    // slice_active=false (default) bypasses the remap entirely,
+    // making the shader behave identically to the pre-BRK build.
+    // When true, slice_low / slice_high define the source range
+    // that gets stretched to fill screen [0..1].
+    uniform bool slice_active;
+    uniform float slice_low;
+    uniform float slice_high;
+
     in vec2 v_tex;
     out vec4 f_color;
-    
+
     void main() {
         vec4 tex_col = texture(TexUnit, v_tex);
-        
-        // <-- Convert to grayscale if the toggle is active
+
+        // BRK SOURCE-SLICE REMAP
+        // Active only when slice_active is set by the engine
+        // (BRK execute path); off in all other modes.
+        // Implemented per-channel because BRK source is RGB and
+        // each channel undergoes the same remap independently.
+        // The clamp at the end ensures pixels outside the slice
+        // clip cleanly to 0 or 1 rather than producing negatives
+        // or values >1 that would interact weirdly with the
+        // filter multiply below.
+        if (slice_active) {
+            float slice_width = slice_high - slice_low;
+            tex_col.rgb = clamp((tex_col.rgb - slice_low) / slice_width, 0.0, 1.0);
+        }
+
+        // MONOCHROME PATH (unchanged from before)
         if (mono_mode) {
             float gray = dot(tex_col.rgb, vec3(0.299, 0.587, 0.114));
             tex_col.rgb = vec3(gray);
         }
-        
+
         f_color = tex_col * vec4(filter_color, 1.0);
     }
     """
@@ -79,6 +123,24 @@ def init_render_pipeline():
     # Initialize the mono uniform to a safe default
     if 'mono_mode' in prog:
         prog['mono_mode'].value = False
+        
+    # BRK slice-remap uniforms: initialize to passthrough defaults
+    # so that any code path that doesn't explicitly set them
+    # behaves identically to the pre-BRK shader. The engine's
+    # BRK execute path will override these per-bracket. The
+    # 'in prog' guards protect against drivers that strip
+    # unused uniforms during shader compilation (unlikely with
+    # an `if (slice_active)` branch keeping them referenced,
+    # but defensive). If a uniform is missing, the default-
+    # behavior path (slice_active=false) still holds because
+    # missing uniforms in GLSL default to 0/false, which is
+    # exactly our passthrough configuration.
+    if 'slice_active' in prog:
+        prog['slice_active'].value = False
+    if 'slice_low' in prog:
+        prog['slice_low'].value = 0.0
+    if 'slice_high' in prog:
+        prog['slice_high'].value = 1.0
 
     verts = np.array([
         -1.0,  1.0, 0.0, 1.0,
