@@ -342,4 +342,20 @@ def _compute_weights(source_estimate, bracket, is_first, is_last):
         # numpy handles div-by-zero with infs, which would
         # propagate badly. Since overlap > 0 by construction
         # (it's OVERLAP_FRACTION * slice_width with both
-        # factors positive), no guard is actually
+        # factors positive), no guard is actually needed
+        # here in code.
+        weights[in_lower_taper] = (
+            (source_estimate[in_lower_taper] - taper_low_start) / overlap
+        )
+
+    # Upper taper: linear ramp from 1 at core_high to 0 at
+    # (core_high + overlap). Only relevant when is_first is
+    # False - peak bracket extends all the way to source top.
+    if not is_first:
+        taper_high_end = core_high + overlap  # equivalently: high
+        in_upper_taper = (source_estimate > core_high) & (source_estimate <= taper_high_end)
+        weights[in_upper_taper] = (
+            (taper_high_end - source_estimate[in_upper_taper]) / overlap
+        )
+
+    return weights
