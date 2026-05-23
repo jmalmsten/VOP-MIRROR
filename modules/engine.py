@@ -317,39 +317,7 @@ def run_persistent_engine():
             # the current job_data, timeline, and tex_mgr states.
             # ---------------------------------------------------------
 
-# ---------------------------------------------------------
-            # BRK MODE: shader slice-remap helpers
-            #
-            # The fragment shader has three uniforms that turn the
-            # 16bpc source-slice remap on (slice_active=true) and
-            # off (slice_active=false). When active, source values
-            # in [slice_low, slice_high] are stretched to fill
-            # screen [0..1]; values outside clip. The remap is what
-            # lets BRK use the 8-bit panel to show a fine slice
-            # of the source range without panel quantization loss.
-            #
-            # These helpers exist to enforce a hygiene rule: the
-            # slice MUST be cleared back to passthrough after every
-            # BRK bracket. If a BRK exposure leaves slice_active=true
-            # and the user then triggers an SSS exposure, the SSS
-            # render will get the BRK slice applied to it and
-            # produce silently-wrong output. Calling
-            # clear_slice_remap() at the end of any BRK code path
-            # is the explicit gate against this.
-            # ---------------------------------------------------------
-            def set_slice_remap(bracket_spec):
-                """
-                Activate the shader's source-slice remap for one
-                bracket. bracket_spec is a brk_sequencer.BracketSpec
-                whose slice_low_norm / slice_high_norm are written
-                to the matching uniforms.
-                """
-                if 'slice_active' in prog:
-                    prog['slice_active'].value = True
-                if 'slice_low' in prog:
-                    prog['slice_low'].value = float(bracket_spec.slice_low_norm)
-                if 'slice_high' in prog:
-                    prog['slice_high'].value = float(bracket_spec.slice_high_norm)
+
             def write_brk_no_preview_placeholder():
                 """
                 Write a placeholder JPG to static/probe_live.jpg that
@@ -453,66 +421,119 @@ def run_persistent_engine():
                     f"BRK preview placeholder written to {out_file} "
                     f"(no live preview available in BRK mode)."
                 )
-            def clear_slice_remap():
-                """
-                Reset the shader's source-slice remap to passthrough.
-                Call after every BRK bracket and at any point where
-                non-BRK rendering might follow. Idempotent - safe to
-                call even when the remap is already cleared.
-                """
-                if 'slice_active' in prog:
-                    prog['slice_active'].value = False
-                if 'slice_low' in prog:
-                    prog['slice_low'].value = 0.0
-                if 'slice_high' in prog:
-                    prog['slice_high'].value = 1.0
 
-            def render_world(frame_num, t_norm, is_preview=False):
+            def render_world(frame_num, t_norm, is_preview=False, bracket=None):
                 """
                 Renders one composite frame to the HDMI screen.
-                ...
-                """
-                # BRK mode: no live preview. BRK is a multi-capture
-                # mode - each frame is N separate camera exposures
-                # at different source slices, merged in CPU. There's
-                # no single "what does this look like" view that
-                # represents a BRK frame; previewing would require
-                # actually running a full bracket sequence, which
-                # is what the real exposure path does.
-                #
-                # Instead of black (which is ambiguous - the user
-                # can't tell if the engine is alive or hung), we
-                # clear to a recognizable dark grey. The audit log
-                # message is the source of truth; eventually the
-                # GUI should display a small "BRK: trigger
-                # exposure to see results" hint when in BRK mode,
-                # but that's a frontend polish item.
-                if timeline.mode == 'brk':
-                    ctx.screen.use()
-                    # Dark grey - 8% lightness, distinct from
-                    # exposure blackout (which is true 0.0).
-                    # Anyone troubleshooting will see "the screen
-                    # is grey, not black, so the engine is alive
-                    # and intentionally in a no-preview state."
-                    ctx.clear(0.08, 0.08, 0.08, 1.0)
-                    pygame.display.flip()
-                    bc = int(job_data.get('bracket_count', 3))
-                    bs = float(job_data.get('bracket_stops', 1.0))
-                    log_audit(
-                        f"BRK MODE preview: BRK mode has no live preview. "
-                        f"Trigger a real exposure to capture and merge "
-                        f"{bc} brackets at {bs} stops apart."
-                    )
-                    return
 
+                Handles all four modes (SSS, MDS, DRE, BRK) through
+                state-dispatch. The PM+BP1+BP2 multiplicative
+                compositing pipeline is identical across modes -
+                only the per-frame state lookup differs.
+
+                Args:
+                    frame_num : float / int. Timeline frame to render.
+                    t_norm    : float in [0.0, 1.0]. Time normaliser
+                                within the open-shutter window. For
+                                SSS/MDS this is the smear progress.
+                                For BRK and DRE the panel is held
+                                steady, so t_norm has no effect on
+                                the state evaluation - we still
+                                accept it for signature consistency
+                                with the existing callsites.
+                    is_preview: bool. When True, render with a dark-
+                                grey frustum-bounds background so the
+                                user can see the viewport edges
+                                clearly. False = true black (exposure
+                                blackout).
+                    bracket   : brk_sequencer.BracketSpec or None.
+                                When supplied, the fragment shader's
+                                source-slice remap is activated for
+                                this render: source values in
+                                [slice_low_norm, slice_high_norm]
+                                are stretched to fill screen [0..1].
+                                When None (default for SSS/MDS/DRE
+                                and for BRK preview-off), the remap
+                                is forced to passthrough.
+
+                Slice-uniform hygiene: this function ALWAYS leaves
+                the shader's slice uniforms in a defined state
+                after returning. Either passthrough (bracket=None
+                or no shader support) or the supplied bracket's
+                slice. Callers don't need to clean up after; the
+                next render_world call will set the uniforms again
+                from its own bracket argument.
+                """
+
+                # SHADER SLICE-UNIFORM SETUP
+                #
+                # Set the slice-remap uniforms at the top of the
+                # function based on the bracket argument. This used
+                # to be done via freestanding set_slice_remap /
+                # clear_slice_remap helpers, but those required
+                # callers to know about the hygiene rule (always
+                # clear after BRK). Folding the set/clear inline
+                # makes the rule unforgettable: every render_world
+                # invocation defines the slice state explicitly,
+                # so leaks across calls are impossible.
+                #
+                # The 'in prog' guards protect against drivers
+                # that may strip unreferenced uniforms during
+                # shader compilation. Unlikely but cheap.
+                if bracket is not None:
+                    if 'slice_active' in prog:
+                        prog['slice_active'].value = True
+                    if 'slice_low' in prog:
+                        prog['slice_low'].value = float(bracket.slice_low_norm)
+                    if 'slice_high' in prog:
+                        prog['slice_high'].value = float(bracket.slice_high_norm)
+                else:
+                    if 'slice_active' in prog:
+                        prog['slice_active'].value = False
+                    if 'slice_low' in prog:
+                        prog['slice_low'].value = 0.0
+                    if 'slice_high' in prog:
+                        prog['slice_high'].value = 1.0
+
+                # PER-FRAME STATE DISPATCH
+                #
+                # Each mode has its own state-lookup function. They
+                # all return the same dict shape (PM/BP1/BP2 pos+rot,
+                # local offsets, PG/CG gels) so the composite pass
+                # below is mode-agnostic.
+                #
+                # SSS evaluates two state lookups (start and end of
+                # the smear window) and interpolates by t_norm.
+                # MDS uses a dedicated function that mixes base state
+                # with per-keyframe start/stop offsets via t_norm.
+                # DRE and BRK are frame-locked - t_norm is ignored.
                 if timeline.mode == 'mds':
                     st = timeline.get_mds_state(float(frame_num), t_norm)
+                elif timeline.mode == 'brk':
+                    # BRK is frame-locked. The bracket-specific
+                    # slice-remap is handled above via the shader
+                    # uniforms; the spatial composite uses the
+                    # held keyframe state and ignores t_norm.
+                    st = timeline.get_brk_state(frame_num)
                 else:
+                    # SSS and DRE both use get_state.
+                    #
+                    # SSS: smear window centered on frame_num.
+                    # t_start/t_end straddle the shutter open
+                    # window; t_norm picks an instant within it.
+                    #
+                    # DRE: keyframes populate the SSS-shaped tracks
+                    # via the shared parser, so get_state returns
+                    # the correct held values. (There IS a separate
+                    # get_dre_state for the DRE-specific schema
+                    # fields - exp, dre_steps - but render_world
+                    # doesn't read those; they're consumed by
+                    # execute_dre_exposure directly. So DRE goes
+                    # through this branch unchanged.)
                     st_base = timeline.get_state(frame_num)
                     t_start = frame_num - (st_base['sd'] * st_base['ph'])
                     t_end = frame_num + (st_base['sd'] * (1.0 - st_base['ph']))
                     st = timeline.get_state(t_start + (t_end - t_start) * t_norm)
-
                 # ANAMORPHIC PAR FOR THIS RENDER
                 #
                 # Always use the real job PAR, even for previews. We used to
@@ -1279,13 +1300,6 @@ def run_persistent_engine():
                             f"/tmp/vop_brk_buf_{frame_num}_b{bracket.index}.dng"
                         )
 
-                        # Set the shader's slice-remap uniforms for
-                        # this bracket. The render_world call below
-                        # then composites PM+BP1+BP2 normally and
-                        # the shader applies the slice remap on top
-                        # at the fragment stage.
-                        set_slice_remap(bracket)
-
                         # Pre-cache the layer textures. Same as
                         # execute_exposure (SSS) - no-op if the
                         # textures are already warm in cache from
@@ -1347,29 +1361,21 @@ def run_persistent_engine():
                             missed_window = (elapsed > 500.0) and not frame_rendered
 
                             if in_window or missed_window:
-                                # render_world picks up the shader's
-                                # active slice-remap uniforms. BRK
-                                # is frame-locked so t_norm doesn't
-                                # vary across the open-shutter
-                                # window - we pass 0.5 (middle) as
-                                # a stable point. Note timeline.mode
-                                # is 'brk', so render_world's early
-                                # return for BRK fires - we need
-                                # a different code path here.
+                                # Render the PM+BP1+BP2 composite with
+                                # this bracket's source-slice remap
+                                # applied via the shader. render_world
+                                # handles slice-uniform setup and BRK
+                                # state lookup internally based on
+                                # the bracket argument and
+                                # timeline.mode respectively.
                                 #
-                                # Workaround: temporarily flip the
-                                # mode to 'sss' for the duration of
-                                # this render call. This is ugly
-                                # but localized; slice 13 should
-                                # add a render_brk_composite()
-                                # function that does the composite
-                                # directly without the mode check.
-                                saved_mode = timeline.mode
-                                timeline.mode = 'sss'
-                                try:
-                                    render_world(frame_num, 0.5, is_preview=False)
-                                finally:
-                                    timeline.mode = saved_mode
+                                # BRK is frame-locked, so t_norm
+                                # doesn't matter across the open-
+                                # shutter window - we pass 0.5
+                                # (middle) as a stable point.
+                                render_world(frame_num, 0.5,
+                                             is_preview=False,
+                                             bracket=bracket)
                                 frame_rendered = True
                             else:
                                 # Forced blackout outside the open-
@@ -1402,11 +1408,21 @@ def run_persistent_engine():
                         )
 
                 finally:
-                    # Critical hygiene: always clear the slice remap
-                    # so non-BRK rendering after this function isn't
-                    # affected. Wrapping in finally guarantees this
-                    # runs even if the per-bracket loop raised.
-                    clear_slice_remap()
+                    # Slice-remap hygiene used to require an explicit
+                    # clear here, because the per-bracket loop set
+                    # slice uniforms via a freestanding helper that
+                    # left them dirty after the loop ended. With
+                    # render_world now owning slice-uniform setup,
+                    # the next non-BRK render_world call (or any
+                    # render_world call with bracket=None) will
+                    # automatically clear the uniforms. No explicit
+                    # cleanup needed here.
+                    #
+                    # The try/finally is kept so the structure stays
+                    # the same in case future BRK additions (e.g.
+                    # per-bracket buffer cleanup on exception) need
+                    # to be added to this block. Empty pass for now.
+                    pass
 
                 # ---------- Decode all DNGs to uint16 arrays ----------
                 # cutil.dng_to_uint16_rgb returns the RGB uint16
