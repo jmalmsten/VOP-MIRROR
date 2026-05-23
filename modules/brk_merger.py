@@ -327,7 +327,26 @@ def _compute_weights(source_estimate, bracket, is_first, is_last):
 
     # Core region: weight 1.0 wherever source_estimate is
     # inside [core_low, core_high].
-    in_core = (source_estimate >= core_low) & (source_estimate <= core_high)
+    #
+    # Deepest-bracket asymmetry: when is_last is True, core_low
+    # equals slice_low (no lower taper because there's no
+    # shadower bracket to fade into). But a pixel captured at
+    # cap_norm=0 in the deepest bracket produces source_estimate
+    # exactly equal to slice_low - and that pixel carries NO
+    # information about source values below slice_low. Including
+    # such pixels in core (weight 1.0) lifts every true-black
+    # source pixel to slice_low_norm in the merged output. So
+    # for the deepest bracket we use a strict > comparison on
+    # the lower bound, leaving cap_norm=0 pixels with weight 0
+    # and (via the weight_sum=0 guard in merge()) producing
+    # final black output. Other brackets keep the inclusive >=
+    # behavior because their lower edge IS the upper end of
+    # an adjacent bracket's taper region, where information
+    # is real.
+    if is_last:
+        in_core = (source_estimate > core_low) & (source_estimate <= core_high)
+    else:
+        in_core = (source_estimate >= core_low) & (source_estimate <= core_high)
     weights[in_core] = 1.0
 
     # Lower taper: linear ramp from 0 at (core_low - overlap)
