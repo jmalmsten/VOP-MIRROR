@@ -316,24 +316,91 @@ def run_persistent_engine():
             # Defined inside the execution block so they securely inherit 
             # the current job_data, timeline, and tex_mgr states.
             # ---------------------------------------------------------
+
+# ---------------------------------------------------------
+            # BRK MODE: shader slice-remap helpers
+            #
+            # The fragment shader has three uniforms that turn the
+            # 16bpc source-slice remap on (slice_active=true) and
+            # off (slice_active=false). When active, source values
+            # in [slice_low, slice_high] are stretched to fill
+            # screen [0..1]; values outside clip. The remap is what
+            # lets BRK use the 8-bit panel to show a fine slice
+            # of the source range without panel quantization loss.
+            #
+            # These helpers exist to enforce a hygiene rule: the
+            # slice MUST be cleared back to passthrough after every
+            # BRK bracket. If a BRK exposure leaves slice_active=true
+            # and the user then triggers an SSS exposure, the SSS
+            # render will get the BRK slice applied to it and
+            # produce silently-wrong output. Calling
+            # clear_slice_remap() at the end of any BRK code path
+            # is the explicit gate against this.
+            # ---------------------------------------------------------
+            def set_slice_remap(bracket_spec):
+                """
+                Activate the shader's source-slice remap for one
+                bracket. bracket_spec is a brk_sequencer.BracketSpec
+                whose slice_low_norm / slice_high_norm are written
+                to the matching uniforms.
+                """
+                if 'slice_active' in prog:
+                    prog['slice_active'].value = True
+                if 'slice_low' in prog:
+                    prog['slice_low'].value = float(bracket_spec.slice_low_norm)
+                if 'slice_high' in prog:
+                    prog['slice_high'].value = float(bracket_spec.slice_high_norm)
+
+            def clear_slice_remap():
+                """
+                Reset the shader's source-slice remap to passthrough.
+                Call after every BRK bracket and at any point where
+                non-BRK rendering might follow. Idempotent - safe to
+                call even when the remap is already cleared.
+                """
+                if 'slice_active' in prog:
+                    prog['slice_active'].value = False
+                if 'slice_low' in prog:
+                    prog['slice_low'].value = 0.0
+                if 'slice_high' in prog:
+                    prog['slice_high'].value = 1.0
+
             def render_world(frame_num, t_norm, is_preview=False):
                 """
                 Renders one composite frame to the HDMI screen.
                 ...
                 """
-                # BRK mode stub: refuse to render. The Timeline is empty
-                # for BRK (see interpolator.py BRK case) and the render
-                # path here would crash on get_state(). Until BRK is
-                # implemented in a future slice, render a black frame
-                # and return - the user will see black in the preview
-                # window with no crash. The log message is rate-limited
-                # by the engine's audit system so it doesn't spam.
+                # BRK mode: no live preview. BRK is a multi-capture
+                # mode - each frame is N separate camera exposures
+                # at different source slices, merged in CPU. There's
+                # no single "what does this look like" view that
+                # represents a BRK frame; previewing would require
+                # actually running a full bracket sequence, which
+                # is what the real exposure path does.
+                #
+                # Instead of black (which is ambiguous - the user
+                # can't tell if the engine is alive or hung), we
+                # clear to a recognizable dark grey. The audit log
+                # message is the source of truth; eventually the
+                # GUI should display a small "BRK: trigger
+                # exposure to see results" hint when in BRK mode,
+                # but that's a frontend polish item.
                 if timeline.mode == 'brk':
                     ctx.screen.use()
-                    ctx.clear(0.0, 0.0, 0.0, 1.0)
+                    # Dark grey - 8% lightness, distinct from
+                    # exposure blackout (which is true 0.0).
+                    # Anyone troubleshooting will see "the screen
+                    # is grey, not black, so the engine is alive
+                    # and intentionally in a no-preview state."
+                    ctx.clear(0.08, 0.08, 0.08, 1.0)
                     pygame.display.flip()
-                    log_audit("BRK mode is not yet implemented in the render path. "
-                              "Rendering black frame.")
+                    bc = int(job_data.get('bracket_count', 3))
+                    bs = float(job_data.get('bracket_stops', 1.0))
+                    log_audit(
+                        f"BRK MODE preview: BRK mode has no live preview. "
+                        f"Trigger a real exposure to capture and merge "
+                        f"{bc} brackets at {bs} stops apart."
+                    )
                     return
 
                 if timeline.mode == 'mds':
@@ -480,18 +547,16 @@ def run_persistent_engine():
                     return execute_dre_exposure(frame_num, is_preview=is_preview,
                                                 is_comp_preview=is_comp_preview)
 
-                # BRK mode stub: refuse to execute exposures. Until
-                # the BRK sequencer and merger land in a future slice,
-                # there's no way to actually run a BRK frame. We log
-                # and bail. The engine returns to idle and the user
-                # sees no progress in the GUI, which is the right
-                # UX for "this mode does not work yet" - the heartbeat
-                # never advances, and the user can switch back to a
-                # working mode without anything being broken.
+                # BRK mode dispatch. Like DRE, BRK has a fundamentally
+                # different exposure shape than SSS/MDS: N separate
+                # camera captures per frame, each at a different
+                # source slice, merged in CPU. The dispatch goes
+                # before the get_state() call below so the SSS-
+                # flavoured state object isn't computed for a job
+                # that doesn't use those tracks.
                 if timeline.mode == 'brk':
-                    log_audit("BRK mode exposures are not yet implemented. "
-                              "Skipping frame.")
-                    return
+                    return execute_brk_exposure(frame_num, is_preview=is_preview,
+                                                is_comp_preview=is_comp_preview)
 
                 st = timeline.get_state(frame_num)
                 smr_ms = float(st['exp']) * 1000.0
@@ -898,6 +963,404 @@ def run_persistent_engine():
                 _finalize_capture(buf_f, frame_num, is_preview, is_comp_preview,
                                   st['cg'], black_clip)
 
+            def _finalize_brk_capture(merged_rgb, frame_num, cg_color, black_clip):
+                """
+                BRK-specific post-merger finalizer.
+
+                Parallel to _finalize_capture (which is the shared
+                post-DNG-decode path for SSS/MDS/DRE), but takes a
+                pre-decoded uint16 RGB array instead of a DNG file
+                path. The array comes from brk_merger.merge, which
+                produces a merged 16bpc reconstruction from the
+                per-bracket captures.
+
+                Pipeline applied here:
+                  1. Pedestal subtraction (apply_pedestal).
+                  2. Convert RGB -> BGR for cv2.imwrite.
+                  3. Apply camera-gel tint (cg_color, RGB->BGR
+                     swap to match the OpenCV order).
+                  4. Stack onto any existing latent for this
+                     frame (cv2.add, same as the SSS path).
+                  5. Write as TIFF using the job's tiff_compression
+                     setting.
+
+                Hot-pixel patching is NOT applied here because it
+                was already applied per-bracket during
+                cutil.dng_to_uint16_rgb. Doing it again would
+                patch already-patched defects, which is benign
+                (the defect map is sparse) but wasteful.
+
+                Args:
+                    merged_rgb : numpy.ndarray, uint16, (H, W, 3) RGB.
+                                 The merger's output.
+                    frame_num  : int. For the output filename.
+                    cg_color   : numpy.ndarray, (3,), float [0..1].
+                                 Camera gel in RGB. From
+                                 timeline.get_brk_state.
+                    black_clip : float. Job-level pedestal value.
+                """
+                try:
+                    # 1. Pedestal subtraction. Same call shape as
+                    # process_and_stack_latent_image so behavior
+                    # is consistent with SSS/MDS.
+                    img = cutil.apply_pedestal(merged_rgb, black_clip)
+
+                    # 2. RGB -> BGR for OpenCV.
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+                    # 3. Apply camera gel. Match
+                    # process_and_stack_latent_image's RGB->BGR
+                    # gel-component swap (cg_color is RGB-ordered
+                    # but img is now BGR).
+                    gel_bgr = np.array(
+                        [cg_color[2], cg_color[1], cg_color[0]],
+                        dtype=np.float32
+                    )
+                    img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+                    # 4. Stack onto existing latent if present.
+                    # cv2.add saturates at uint16 max (65535)
+                    # rather than wrapping, which is what we
+                    # want for accumulation.
+                    tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
+                    out_f = os.path.join(
+                        cam_mag_dir,
+                        f"latent_{str(frame_num).zfill(4)}.tif"
+                    )
+                    if os.path.exists(out_f):
+                        existing = cv2.imread(out_f, cv2.IMREAD_UNCHANGED)
+                        if existing is not None:
+                            img = cv2.add(img, existing.astype(np.uint16))
+
+                    # 5. Write the TIFF.
+                    cv2.imwrite(out_f, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+
+                except Exception as e:
+                    print(f"[VOP WARNING] _finalize_brk_capture error for frame {frame_num}: {e}")
+                    log_audit(
+                        f"BRK ERROR frame {frame_num}: finalize failed: {e}. "
+                        f"The merged array was computed but not written. "
+                        f"Check disk space and CamMag permissions."
+                    )                     
+
+            def execute_brk_exposure(frame_num, is_preview=False, is_comp_preview=False):
+                """
+                BRK / Bracketed-exposure path (issue: BRK mode).
+
+                Sibling of execute_exposure and execute_dre_exposure.
+                Unlike SSS/MDS (one camera capture per frame, motion
+                rendered during the open shutter) and DRE (one camera
+                capture per frame, multiple displayed steps within
+                the shutter), BRK runs N SEPARATE camera captures
+                per frame - one per bracket - and merges them on the
+                CPU after all captures complete.
+
+                Per-bracket flow:
+                  1. Set shader's slice-remap uniforms to this
+                     bracket's source range.
+                  2. Trigger camera for t_peak + pre/post roll.
+                  3. During the open-shutter window, render the
+                     usual PM+BP1+BP2 composite via render_world.
+                     The shader applies the slice remap, so the
+                     panel shows the source's [slice_low, slice_high]
+                     range stretched to full 0..1.
+                  4. Camera writes its DNG to a per-bracket path.
+
+                After all N brackets:
+                  5. Decode each DNG to uint16 RGB via
+                     cutil.dng_to_uint16_rgb.
+                  6. brk_merger.merge() fuses them into one uint16.
+                  7. _finalize_brk_capture writes the latent TIFF.
+
+                Preview semantics: when is_preview or is_comp_preview
+                is True, we'd ideally run the same bracket loop but
+                pipe the merged result to the preview JPG instead
+                of the CamMag. For slice 12b that's a complication
+                we don't need - the render-side dispatch (which is
+                what serves /preview) already early-returns with the
+                'no live preview' notice before reaching this
+                function. So this function is real-exposure-only.
+                The preview kwargs are kept for signature compat
+                with the dispatch site, but we log and bail if
+                either is true.
+                """
+                if is_preview or is_comp_preview:
+                    # See docstring. If we got here with a preview
+                    # flag, something dispatched wrong upstream.
+                    # Log and bail rather than do half-correct work.
+                    log_audit(
+                        f"BRK frame {frame_num}: execute_brk_exposure called with "
+                        f"preview={is_preview} comp_preview={is_comp_preview}. "
+                        f"BRK has no preview path (see render_world). Skipping."
+                    )
+                    return
+
+                # ---------- Read job config + calibration ----------
+                # bracket_count and bracket_stops live in job_data
+                # (per-job UI controls). t_peak lives in
+                # calibration.json (set by Peak White ACB
+                # calibration). All three are required - if any
+                # are missing, abort the frame and log clearly.
+                try:
+                    bracket_count = int(job_data.get('bracket_count', 3))
+                    bracket_stops = float(job_data.get('bracket_stops', 1.0))
+                except (ValueError, TypeError) as e:
+                    log_audit(
+                        f"BRK ERROR frame {frame_num}: malformed bracket_count "
+                        f"or bracket_stops in job_data: {e}. Aborting frame."
+                    )
+                    return
+
+                t_peak = cstore.get(static_dir, 't_peak', default=None)
+                if t_peak is None:
+                    log_audit(
+                        f"BRK ERROR frame {frame_num}: no t_peak in calibration.json. "
+                        f"Run Peak White ACB calibration first. Aborting frame."
+                    )
+                    return
+                t_peak = float(t_peak)
+
+                # ---------- Build the bracket schedule ----------
+                # The sequencer is pure-math; it can't fail unless
+                # we passed it out-of-range parameters, which the
+                # GUI clamps and the type-check above caught.
+                import brk_sequencer as brk_seq
+                try:
+                    brackets = brk_seq.compute_brackets(
+                        bracket_count, bracket_stops, t_peak
+                    )
+                except ValueError as e:
+                    log_audit(f"BRK ERROR frame {frame_num}: {e}. Aborting frame.")
+                    return
+
+                # Audit the bracket plan once at frame start - lets
+                # the user see exactly what's about to happen.
+                log_audit(
+                    f"BRK frame {frame_num}: {len(brackets)} brackets at "
+                    f"{bracket_stops} stops, t_peak={t_peak:.3f}s each. "
+                    f"Estimated total per frame: {len(brackets) * (t_peak + 1.0):.1f}s"
+                )
+                # Warn (don't abort) on extreme configurations - the
+                # user may have chosen these deliberately.
+                brk_seq.warn_if_extreme(brackets, log_fn=log_audit)
+
+                # ---------- Per-frame BRK state ----------
+                # get_brk_state currently returns just gels. POS/ROT
+                # and JK printer per-keyframe overrides land in
+                # slice 13; for slice 12b we use straight playheads
+                # (frame_num as PM playhead) and identity transforms.
+                brk_state = timeline.get_brk_state(frame_num)
+                pg_color = brk_state['pg']
+                cg_color = brk_state['cg']
+
+                black_clip = validate_black_clip(job_data.get('black_clip', 0.0))
+
+                # ---------- Per-bracket capture loop ----------
+                # Each bracket gets its own buffer path so the
+                # finalize step can read them all back independently.
+                # /tmp is fine - small files, cleared after merge.
+                captured_files = []
+                try:
+                    for bracket in brackets:
+                        bracket_buf = (
+                            f"/tmp/vop_brk_buf_{frame_num}_b{bracket.index}.dng"
+                        )
+
+                        # Set the shader's slice-remap uniforms for
+                        # this bracket. The render_world call below
+                        # then composites PM+BP1+BP2 normally and
+                        # the shader applies the slice remap on top
+                        # at the fragment stage.
+                        set_slice_remap(bracket)
+
+                        # Pre-cache the layer textures. Same as
+                        # execute_exposure (SSS) - no-op if the
+                        # textures are already warm in cache from
+                        # a prior bracket. After the first bracket
+                        # in this frame all subsequent ones hit
+                        # the cache, which is the big perf win.
+                        ph_pm  = timeline.calculate_playhead_at(frame_num, layer='pm')
+                        ph_bp1 = timeline.calculate_playhead_at(frame_num, layer='bp1')
+                        ph_bp2 = timeline.calculate_playhead_at(frame_num, layer='bp2')
+                        tex_mgr.load(ph_pm,  layer='pm')
+                        tex_mgr.load(ph_bp1, layer='bp1')
+                        tex_mgr.load(ph_bp2, layer='bp2')
+
+                        # Pre-exposure blackout. Forces the screen to
+                        # true black before the camera shutter opens.
+                        ctx.screen.use()
+                        ctx.clear(0.0, 0.0, 0.0, 1.0)
+                        ctx.finish()
+                        pygame.display.flip()
+
+                        # Camera trigger + pre-roll. Same shape as
+                        # SSS execute_exposure, with the same
+                        # 500ms pre-roll / 500ms post-roll envelope.
+                        # The "smr" window length here is t_peak
+                        # itself - BRK is frame-locked so the panel
+                        # is held steady for the full open-shutter
+                        # window.
+                        smr_ms = t_peak * 1000.0
+                        total_ms = smr_ms + 1000.0
+
+                        t_trigger = time.time()
+                        log_audit(
+                            f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] "
+                            f"BRK-EXPOSURE {frame_num}.b{bracket.index} | "
+                            f"Triggering libcamera, slice=[{bracket.slice_low_norm:.4f}, "
+                            f"{bracket.slice_high_norm:.4f}]"
+                        )
+                        cam_proc = hw.trigger_capture(
+                            bracket_buf, total_ms,
+                            job_data.get('gain', 1.0),
+                            job_data.get('awb_r', 1.0),
+                            job_data.get('awb_b', 1.0),
+                            job_data.get('cam_res', '2028x1520')
+                        )
+                        hw.wait_for_sensor_prime()
+                        anchor = time.time()
+
+                        # Render-during-shutter loop, identical to
+                        # SSS execute_exposure. Walks the open-
+                        # shutter window in real time, rendering
+                        # the composite during the in_window phase
+                        # and forcing black outside it.
+                        frame_rendered = False
+                        while (time.time() - anchor) * 1000 < total_ms:
+                            pygame.event.pump()
+                            elapsed = (time.time() - anchor) * 1000
+
+                            in_window = 500.0 <= elapsed <= (500.0 + smr_ms)
+                            missed_window = (elapsed > 500.0) and not frame_rendered
+
+                            if in_window or missed_window:
+                                # render_world picks up the shader's
+                                # active slice-remap uniforms. BRK
+                                # is frame-locked so t_norm doesn't
+                                # vary across the open-shutter
+                                # window - we pass 0.5 (middle) as
+                                # a stable point. Note timeline.mode
+                                # is 'brk', so render_world's early
+                                # return for BRK fires - we need
+                                # a different code path here.
+                                #
+                                # Workaround: temporarily flip the
+                                # mode to 'sss' for the duration of
+                                # this render call. This is ugly
+                                # but localized; slice 13 should
+                                # add a render_brk_composite()
+                                # function that does the composite
+                                # directly without the mode check.
+                                saved_mode = timeline.mode
+                                timeline.mode = 'sss'
+                                try:
+                                    render_world(frame_num, 0.5, is_preview=False)
+                                finally:
+                                    timeline.mode = saved_mode
+                                frame_rendered = True
+                            else:
+                                # Forced blackout outside the open-
+                                # shutter window (same as SSS).
+                                ctx.screen.use()
+                                ctx.clear(0.0, 0.0, 0.0, 1.0)
+                                prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+                                prog['filter_color'].write(np.array([0.0, 0.0, 0.0], dtype='f4'))
+                                tex_mgr.white_tex.use(0)
+                                vao.render(moderngl.TRIANGLE_STRIP)
+
+                            ctx.finish()
+                            pygame.display.flip()
+
+                        # Post-exposure blackout for this bracket.
+                        ctx.screen.use()
+                        ctx.clear(0.0, 0.0, 0.0, 1.0)
+                        prog['mvp'].write(np.eye(4, dtype='f4').tobytes())
+                        prog['filter_color'].write(np.array([0.0, 0.0, 0.0], dtype='f4'))
+                        tex_mgr.white_tex.use(0)
+                        vao.render(moderngl.TRIANGLE_STRIP)
+                        ctx.finish()
+                        pygame.display.flip()
+
+                        cam_proc.wait()
+                        captured_files.append(bracket_buf)
+                        log_audit(
+                            f"[{datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]}] "
+                            f"BRK-EXPOSURE {frame_num}.b{bracket.index} | DNG saved."
+                        )
+
+                finally:
+                    # Critical hygiene: always clear the slice remap
+                    # so non-BRK rendering after this function isn't
+                    # affected. Wrapping in finally guarantees this
+                    # runs even if the per-bracket loop raised.
+                    clear_slice_remap()
+
+                # ---------- Decode all DNGs to uint16 arrays ----------
+                # cutil.dng_to_uint16_rgb returns the RGB uint16
+                # array with hot-pixel patch and pedestal applied.
+                # For BRK we leave pedestal at 0 (job's black_clip
+                # is for the *merged* result, not per-bracket - the
+                # merger's overlap-weight blend handles the noise
+                # floor implicitly).
+                log_audit(f"BRK frame {frame_num}: decoding {len(captured_files)} DNGs...")
+                arrays = []
+                for buf in captured_files:
+                    arr = cutil.dng_to_uint16_rgb(buf, static_dir, black_clip=0.0)
+                    if arr is None:
+                        log_audit(
+                            f"BRK ERROR frame {frame_num}: failed to decode {buf}. "
+                            f"Aborting frame."
+                        )
+                        # Clean up before bailing
+                        for b in captured_files:
+                            if os.path.exists(b):
+                                os.remove(b)
+                            jpg = b.replace('.dng', '.jpg')
+                            if os.path.exists(jpg):
+                                os.remove(jpg)
+                        return
+                    arrays.append(arr)
+
+                # ---------- Merge the brackets ----------
+                # brk_merger.merge is pure-numpy and validates its
+                # inputs (raises ValueError on shape/dtype mismatch).
+                # The output is a uint16 RGB (H,W,3) array - the
+                # merged latent in source-space.
+                import brk_merger
+                try:
+                    merged = brk_merger.merge(arrays, brackets)
+                except ValueError as e:
+                    log_audit(f"BRK ERROR frame {frame_num}: merger failed: {e}. Aborting.")
+                    for b in captured_files:
+                        if os.path.exists(b):
+                            os.remove(b)
+                    return
+
+                log_audit(
+                    f"BRK frame {frame_num}: merged. shape={merged.shape}, "
+                    f"dtype={merged.dtype}, min={merged.min()}, max={merged.max()}."
+                )
+
+                # ---------- Finalize: gel tint, latent write ----------
+                # _finalize_brk_capture is the BRK-specific
+                # post-merger pipeline (snippet 5). Bypasses
+                # process_and_stack_latent_image because that
+                # function expects a DNG-on-disk input; our merged
+                # array is already in memory.
+                _finalize_brk_capture(
+                    merged, frame_num, cg_color, black_clip
+                )
+
+                # ---------- Cleanup ----------
+                # Remove per-bracket DNGs and their JPG siblings.
+                # Each capture leaves both files; the JPG is a
+                # libcamera-side preview that we don't use.
+                for buf in captured_files:
+                    if os.path.exists(buf):
+                        os.remove(buf)
+                    jpg = buf.replace('.dng', '.jpg')
+                    if os.path.exists(jpg):
+                        os.remove(jpg)
 
             # ---------------------------------------------------------
             # TASK ROUTING & EXECUTION

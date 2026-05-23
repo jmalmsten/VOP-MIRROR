@@ -103,32 +103,60 @@ class Timeline:
             # animated by the engine's DRE path.
             prefix = "dre_"
         elif self.mode == 'brk':
-            # BRK mode (Bracketed exposures) - STUB.
+            # BRK mode (Bracketed exposures) - minimum-viable parser.
             #
-            # The full BRK schema parses per-layer GATE/CAM/STP and
-            # per-layer POS/ROT (as comma-separated text strings).
-            # That parser doesn't exist yet - it lands in a future
-            # slice along with the engine-side BRK render path.
+            # Reads per-keyframe frame numbers (brk_f<n>) and the two
+            # gel colors (brk_c<n>_hex / brk_cg<n>_hex), and stuffs
+            # them into self.brk_keyframes for get_brk_state() to
+            # consume. Per-layer JK printer columns and POS/ROT
+            # fields are NOT parsed yet - those land in slice 13.
+            # For slice 12 the engine uses straight-frame-number
+            # playheads and default identity transforms.
             #
-            # Until then, BRK mode produces a VALID but EMPTY Timeline.
-            # That is enough for the engine to not crash, but the
-            # engine's render dispatch is responsible for refusing to
-            # actually render anything BRK-related until the full
-            # implementation lands. See engine.py's mode dispatch
-            # sites where we early-return on timeline.mode == 'brk'.
-            #
-            # We set prefix here for consistency (so the loop below
-            # has SOMETHING to work with), but the early-return guard
-            # immediately below ensures the parser never actually
-            # walks any BRK keyframes.
-            prefix = "brk_"
-            row_ids = set()
-            # Empty timeline: no tracks populated. Anything downstream
-            # that tries to evaluate get_state() on this timeline will
-            # see all tracks empty and behave as "no keyframes".
-            # The engine should not be evaluating get_state for BRK
-            # anyway - it should be early-returning before reaching
-            # any state evaluation.
+            # Frame-locked semantics: BRK keyframes hold steady
+            # until the next keyframe. No smearing, no easing, no
+            # interpolation across keyframes. The keyframe at
+            # frame N applies from frame N onward until the
+            # keyframe at frame M > N (or to the end of the job
+            # if no later keyframe exists).
+            self.brk_keyframes = []
+            brk_row_ids = set()
+            for k in job_data.keys():
+                if k.startswith("brk_f"):
+                    idx = k.replace("brk_f", "")
+                    if idx.isdigit():
+                        brk_row_ids.add(idx)
+
+            for idx in sorted(brk_row_ids, key=int):
+                try:
+                    fnum = int(job_data.get(f"brk_f{idx}", 0))
+                except (ValueError, TypeError):
+                    # A malformed frame number disqualifies the
+                    # whole keyframe. Logged as a parse skip
+                    # rather than crashing the job - the user
+                    # is mid-edit, the next sync is probably
+                    # only a moment away.
+                    continue
+                pg_hex = job_data.get(f"brk_c{idx}_hex", "#ffffff")
+                cg_hex = job_data.get(f"brk_cg{idx}_hex", "#ffffff")
+                self.brk_keyframes.append({
+                    'frame': fnum,
+                    'pg': hex_to_rgb(pg_hex),
+                    'cg': hex_to_rgb(cg_hex),
+                })
+
+            # Sort by frame number so get_brk_state can do a
+            # simple "last keyframe with frame <= frame_num"
+            # search without re-sorting on every call.
+            self.brk_keyframes.sort(key=lambda kf: kf['frame'])
+
+            # The Timeline's existing track-based machinery
+            # (self.tracks, get_state, etc.) is intentionally
+            # left empty for BRK. BRK doesn't use tracks - it
+            # uses brk_keyframes via get_brk_state. The other
+            # modes' tracks-based state machinery is irrelevant
+            # to BRK and would just clutter the code path if
+            # populated with placeholders.
             return
         else:
             raise ValueError(
@@ -500,6 +528,89 @@ class Timeline:
             'pg': pg,
             'cg': cg,
         }
+
+    def get_brk_state(self, frame_num):
+        """
+        BRK mode per-frame state lookup.
+
+        Frame-locked semantics: returns the most recent keyframe
+        whose frame number is <= frame_num. If no keyframe
+        applies (frame_num is before the first keyframe, or no
+        keyframes exist at all), returns a sensible default
+        with white gels.
+
+        Unlike get_state / get_mds_state / get_dre_state, this
+        method does NOT consult self.tracks - BRK keyframes
+        live in self.brk_keyframes (populated by __init__'s BRK
+        branch). The tracks dict stays empty for BRK jobs by
+        design, and this method's existence is what shields
+        engine code from that fact: the engine just calls
+        get_brk_state(frame_num) and gets back the dict it
+        needs, same shape as get_dre_state for the gel keys.
+
+        Args:
+            frame_num : int. The frame number being captured.
+
+        Returns:
+            dict with keys:
+                'pg' : numpy.ndarray float, shape (3,). Projector
+                       gel color in RGB [0..1]. White by default.
+                'cg' : numpy.ndarray float, shape (3,). Camera
+                       gel color in RGB [0..1]. White by default.
+
+        Note: the per-bracket exposure time (t_peak) is NOT
+        returned here. The engine reads t_peak directly from
+        calibration.json at frame start - it's a job-global
+        hardware-calibration constant, not a per-keyframe
+        timeline value, so plumbing it through the timeline
+        state would be misleading about where it actually
+        comes from.
+        """
+        # Default state: identity gels, no tint.
+        # Used both when no keyframes exist (empty BRK job)
+        # and when frame_num is before the first keyframe.
+        # dtype='f4' matches what hex_to_rgb produces, so
+        # downstream code that does e.g. (pg * cg) gets a
+        # consistent float32 array regardless of whether the
+        # default or a real keyframe value was returned.
+        default_state = {
+            'pg': np.array([1.0, 1.0, 1.0], dtype='f4'),
+            'cg': np.array([1.0, 1.0, 1.0], dtype='f4'),
+        }
+
+        # brk_keyframes only exists when self.mode == 'brk'
+        # (the __init__ branch is what creates it). Using
+        # getattr with a default empty list means this method
+        # is safe to call even on a non-BRK Timeline - useful
+        # defensively, even though engine code only calls it
+        # for BRK jobs.
+        keyframes = getattr(self, 'brk_keyframes', [])
+        if not keyframes:
+            return default_state
+
+        # Walk forward through keyframes - the LAST one with
+        # frame <= frame_num wins. Linear scan because BRK
+        # jobs typically have a handful of keyframes (not the
+        # hundreds you'd see in a long SSS smear job), so the
+        # constant overhead of binary search isn't worth the
+        # added complexity. The list is sorted in __init__,
+        # so 'break on first too-late keyframe' is correct.
+        active = None
+        for kf in keyframes:
+            if kf['frame'] <= frame_num:
+                active = kf
+            else:
+                break
+
+        if active is None:
+            return default_state
+
+        return {
+            'pg': active['pg'],
+            'cg': active['cg'],
+        }
+
+    
 
     def get_default_state(self):
         return {
