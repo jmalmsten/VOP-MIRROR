@@ -350,7 +350,109 @@ def run_persistent_engine():
                     prog['slice_low'].value = float(bracket_spec.slice_low_norm)
                 if 'slice_high' in prog:
                     prog['slice_high'].value = float(bracket_spec.slice_high_norm)
+            def write_brk_no_preview_placeholder():
+                """
+                Write a placeholder JPG to static/probe_live.jpg that
+                explains why BRK has no live preview.
 
+                Called from each preview-task branch (preview /
+                cam_preview / comp_preview) when timeline.mode is
+                'brk'. Without this, the preview window in the GUI
+                would show whatever stale frame happened to be in
+                probe_live.jpg from a previous session - usually the
+                idle-screensaver framegrab or an old SSS/MDS preview.
+                That's misleading: it looks like a successful preview
+                returned the wrong content.
+
+                This writes a clean, intentional "no preview" frame
+                instead. The GUI doesn't need to special-case BRK -
+                it just refreshes probe_live.jpg as always, and the
+                user sees a clear message explaining the situation.
+
+                The placeholder is sized to match the camera's
+                typical preview output so the GUI layout doesn't
+                jump. Dark grey background matches the BRK render-
+                side stub's screen color, so the visual language is
+                consistent: "grey = BRK no-preview state".
+                """
+                # Match the typical camera preview shape so the GUI
+                # preview pane sizes consistently regardless of what
+                # mode the user just switched from.
+                cam_res_str = job_data.get('cam_res', '2028x1520')
+                try:
+                    cw_str, ch_str = cam_res_str.lower().split('x')
+                    ph_w, ph_h = int(cw_str), int(ch_str)
+                except (ValueError, AttributeError):
+                    ph_w, ph_h = 2028, 1520
+
+                # Dark-grey BGR canvas (cv2 uses BGR order). The
+                # 0.08 value matches what render_world clears the
+                # screen to for BRK preview - keeps the "grey =
+                # BRK" visual language consistent between the
+                # physical screen and the GUI preview pane.
+                bg_val = int(0.08 * 255)
+                canvas = np.full((ph_h, ph_w, 3), bg_val, dtype=np.uint8)
+
+                # Headline text. cv2.putText is crude but doesn't
+                # require any extra font dependencies, which matters
+                # on the Pi where we don't want to drag in PIL or
+                # similar just for placeholder rendering. The
+                # FONT_HERSHEY_DUPLEX face is the most legible of
+                # the built-in OpenCV fonts at moderate sizes.
+                bracket_count = int(job_data.get('bracket_count', 3))
+                bracket_stops = float(job_data.get('bracket_stops', 1.0))
+
+                lines = [
+                    "BRK MODE",
+                    "Live preview is not available",
+                    "in bracketed-exposure mode.",
+                    "",
+                    f"Configured: {bracket_count} brackets at "
+                    f"{bracket_stops} stops apart.",
+                    "",
+                    "Click EXECUTE SEQUENCE to capture",
+                    "and merge the bracketed exposure.",
+                ]
+
+                # Layout the text block roughly centered. We don't
+                # measure each line's width perfectly - good enough
+                # for a placeholder is good enough. Font scale is
+                # tied to canvas height so it stays legible across
+                # different cam_res values.
+                font = cv2.FONT_HERSHEY_DUPLEX
+                font_scale = max(0.8, ph_h / 900.0)
+                thickness = max(1, int(font_scale * 1.5))
+                line_h = int(50 * font_scale)
+                color = (220, 220, 220)  # near-white grey, BGR
+
+                # Vertical block start: top third of the canvas so
+                # the text reads naturally.
+                y = ph_h // 3
+                for line in lines:
+                    if line:
+                        # Crude horizontal centering: estimate the
+                        # text width via cv2.getTextSize, then offset
+                        # from the canvas center.
+                        (tw, th), _ = cv2.getTextSize(
+                            line, font, font_scale, thickness
+                        )
+                        x = (ph_w - tw) // 2
+                        cv2.putText(
+                            canvas, line, (x, y),
+                            font, font_scale, color, thickness,
+                            cv2.LINE_AA
+                        )
+                    y += line_h
+
+                # Write the placeholder. Same path the SSS/MDS
+                # preview pipeline writes to, so the GUI's polling
+                # of probe_live.jpg picks it up unchanged.
+                out_file = os.path.join(static_dir, "probe_live.jpg")
+                cv2.imwrite(out_file, canvas)
+                log_audit(
+                    f"BRK preview placeholder written to {out_file} "
+                    f"(no live preview available in BRK mode)."
+                )
             def clear_slice_remap():
                 """
                 Reset the shader's source-slice remap to passthrough.
@@ -1018,19 +1120,30 @@ def run_persistent_engine():
                     )
                     img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
 
-                    # 4. Stack onto existing latent if present.
-                    # cv2.add saturates at uint16 max (65535)
-                    # rather than wrapping, which is what we
-                    # want for accumulation.
+                    # 4. Write the latent TIFF unconditionally.
+                    #
+                    # Unlike SSS/MDS (where multiple Capture clicks on
+                    # the same frame are an INTENTIONAL workflow -
+                    # additive accumulation deepens the latent, mimicking
+                    # multiple physical exposures of one film frame),
+                    # BRK already produces its final 16bpc reconstruction
+                    # via the per-frame N-bracket merge. The merged
+                    # output IS the finished frame. Stacking it onto
+                    # a previous latent would mean each re-Capture
+                    # piles N brackets' worth of intensity onto whatever
+                    # was already there, saturating channels quickly.
+                    #
+                    # Trade-off: in BRK, re-running Capture on a frame
+                    # OVERWRITES the previous latent. If you want
+                    # additive bracketing across multiple takes, run
+                    # the takes separately and accumulate in post.
+                    # That matches BRK's "every frame is a discrete,
+                    # complete bracketed exposure" mental model.
                     tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
                     out_f = os.path.join(
                         cam_mag_dir,
                         f"latent_{str(frame_num).zfill(4)}.tif"
                     )
-                    if os.path.exists(out_f):
-                        existing = cv2.imread(out_f, cv2.IMREAD_UNCHANGED)
-                        if existing is not None:
-                            img = cv2.add(img, existing.astype(np.uint16))
 
                     # 5. Write the TIFF.
                     cv2.imwrite(out_f, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
@@ -1366,7 +1479,15 @@ def run_persistent_engine():
             # TASK ROUTING & EXECUTION
             # ---------------------------------------------------------
             try:
-                if task == 'preview':
+                if task == 'preview' and timeline.mode == 'brk':
+                    # BRK PROJ PROBE: no live preview path. Write a
+                    # clear placeholder to probe_live.jpg instead of
+                    # leaving the stale frame from a previous session
+                    # (which was the bug behavior: idle-screensaver
+                    # framegrab or old SSS preview content showing
+                    # up in the preview pane).
+                    write_brk_no_preview_placeholder()
+                elif task == 'preview':
                     # PROJ PROBE
                     # 1. Render the composite world to the HDMI screen at real PAR
                     #    (the override that used to force 1.0/1.0 here was
@@ -1528,9 +1649,25 @@ def run_persistent_engine():
                     cv2.imwrite(out_file, img_data)
                     pygame.display.flip()
                     
+                elif task == 'cam_preview' and timeline.mode == 'brk':
+                    # BRK CAM VIEW: same rationale as BRK PROJ PROBE.
+                    # No useful "single-frame preview" exists in BRK
+                    # because the merged latent only makes sense
+                    # after all N brackets have been captured. Write
+                    # the placeholder so the user sees clear feedback.
+                    write_brk_no_preview_placeholder()
                 elif task == 'cam_preview':
                     execute_exposure(float(job_data.get('probe_frame', 1)), is_preview=True)
 
+                elif task == 'comp_preview' and timeline.mode == 'brk':
+                    # BRK COMP VIEW: no preview path. Comp View
+                    # specifically shows "the new exposure composited
+                    # on top of the existing latent" - in BRK that
+                    # would require running a full bracket sequence
+                    # anyway, so the user is better off just using
+                    # EXECUTE SEQUENCE directly. Placeholder
+                    # explains the situation.
+                    write_brk_no_preview_placeholder()
                 elif task == 'comp_preview':
                     # Identical hardware path to cam_preview - smear-render the
                     # combined world while the camera captures - but route the
