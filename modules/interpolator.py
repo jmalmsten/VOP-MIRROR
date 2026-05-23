@@ -618,22 +618,51 @@ class Timeline:
 
     def _get_step_held(self, key, t, default=None):
         """
-        Step-hold (no interpolation) lookup. returns the value of the most recent
-        keyframe at or before t. Used for discrete inputs like CAM and STP that 
-        should HOLD their value between keyframes rather than smoothly transition.
+        Step-hold (no interpolation) lookup. Returns the value of the most
+        recent keyframe at or before t. If no keyframe applies (track is
+        empty OR t is before the first keyframe's frame number), returns
+        the supplied default.
 
-        Why not _get_val? _get_val does linear/cosine interpolation between
-        keyframes - correct for spatial values like position and rotation, but 
-        wrong for integer rate controls. If the user sets CAM:STP to 3:2 at
-        keyframe 1 and 1:1 at keyframe 5 we want a hard switch at frame 5,
-        not a gradual ease from 3:2 to 1:1
+        Used for:
+          - JK Optical Printer CAM/STP rate lookups inside
+            calculate_playhead_at, where the caller has already walked
+            backward to find an "anchor" keyframe and then forward-walks
+            looking up rates per frame.
+          - BRK frame-locked-hold lookups inside get_brk_state, where the
+            caller wants "the most recent BRK keyframe's value, or
+            defaults if no keyframe has fired yet."
+
+        Why not _get_val? _get_val does linear/cosine interpolation
+        between keyframes - correct for spatial values like position and
+        rotation IN SSS/MDS where smooth tweening is the intent, but
+        wrong for both integer rate controls (CAM/STP, where a 3:2 ->
+        1:1 transition should be a hard switch at the new keyframe) AND
+        for BRK's frame-locked-hold semantics (which is fundamentally
+        snap-and-stay, no tweening at all).
+
+        Semantics for t before the first keyframe: returns default.
+        This matters for BRK in particular - a job with a keyframe at
+        frame 5 should not retroactively apply that keyframe's values to
+        frames 1-4. Frame-locked-hold means "snaps into effect at the
+        keyframe's frame number," not "applies forward and backward."
         """
         track = self.tracks.get(key, [])
         if not track:
             return default
-        
-        # Walk forward; the last keyframe whose frame <= t wins.
-        val = track[0]['val'] if track[0]['val'] is not None else default
+
+        # Initialize to default, not to the first keyframe's value. If
+        # t is before any keyframe, the for-loop below never enters its
+        # update branch and we return default - the correct "no keyframe
+        # applies yet" answer.
+        #
+        # The previous version of this function initialized to
+        # track[0]['val'], which produced retroactive application: a
+        # query at t=1 against a track whose only keyframe was at t=5
+        # would return the t=5 keyframe's value. That was harmless for
+        # JK printer use (the only caller pre-BRK never queried before
+        # the anchor) but wrong as general step-hold semantics. The fix
+        # is loud here because BRK exposed the latent bug.
+        val = default
         for k in track:
             if k['f'] <= t:
                 if k['val'] is not None:
