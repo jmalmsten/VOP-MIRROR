@@ -492,8 +492,13 @@ function reindexMDS() {
 //   brk_bp2_gate<n>            BP2 JK gate frame
 //   brk_bp2_cam<n>             BP2 JK camera index
 //   brk_bp2_stp<n>             BP2 JK step
-//   brk_pm_pos<n>              PM position (X,Y,Z as "x,y,z" string)
-//   brk_pm_rot<n>              PM rotation (Pitch,Roll,Yaw)
+//   brk_p<n>                   PM position (X,Y,Z as "x,y,z" string)
+//                              (Naming matches SSS/MDS/DRE: PM is
+//                              the implicit default layer, so its
+//                              spatial fields drop the pm_ prefix.
+//                              Bipack layers get explicit bp1_ /
+//                              bp2_ prefixes below.)
+//   brk_r<n>                   PM rotation (Pitch,Roll,Yaw)
 //   brk_bp1_pos<n>             BP1 position
 //   brk_bp1_rot<n>             BP1 rotation
 //   brk_bp2_pos<n>             BP2 position
@@ -540,8 +545,8 @@ function addBRKKeyframe() {
         <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_cam${idx}" value="1" min="1"></div>
         <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_stp${idx}" value="1" min="1"></div>
 
-        <div class="pm-spatial-cell"><input type="text" id="brk_pm_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
-        <div class="pm-spatial-cell"><input type="text" id="brk_pm_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>
+        <div class="pm-spatial-cell"><input type="text" id="brk_p${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="pm-spatial-cell"><input type="text" id="brk_r${idx}" value="0,0,0" placeholder="p,r,y"></div>
 
         <div class="bp1-spatial-cell"><input type="text" class="bp1-input" id="brk_bp1_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
         <div class="bp1-spatial-cell"><input type="text" class="bp1-input" id="brk_bp1_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>

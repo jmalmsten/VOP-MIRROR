@@ -274,7 +274,13 @@ class Timeline:
             # aligned across all rows regardless of mode, which is what 
             # _get_val expects.
             self.tracks['dre_steps'].append({'f': f_val, 'val': require_float(f"{prefix}steps{idx}", 256.0)})
-            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
+            # BRK has no per-keyframe EXP field (uses t_peak from
+            # calibration instead). Pass a 1.0 fallback so a missing
+            # brk_exp<n> key doesn't trip require_float's strict-blank
+            # check. The 1.0 value goes into self.tracks['exp'] for
+            # shape consistency with the other modes but the engine
+            # never reads it for BRK (see execute_brk_exposure).
+            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key, fallback_if_unsubmitted=1.0)})
             self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
             self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
             
