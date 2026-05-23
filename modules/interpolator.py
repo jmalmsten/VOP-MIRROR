@@ -103,61 +103,38 @@ class Timeline:
             # animated by the engine's DRE path.
             prefix = "dre_"
         elif self.mode == 'brk':
-            # BRK mode (Bracketed exposures) - minimum-viable parser.
+            # BRK mode (Bracketed exposures).
             #
-            # Reads per-keyframe frame numbers (brk_f<n>) and the two
-            # gel colors (brk_c<n>_hex / brk_cg<n>_hex), and stuffs
-            # them into self.brk_keyframes for get_brk_state() to
-            # consume. Per-layer JK printer columns and POS/ROT
-            # fields are NOT parsed yet - those land in slice 13.
-            # For slice 12 the engine uses straight-frame-number
-            # playheads and default identity transforms.
+            # BRK keyframes populate self.tracks via the same
+            # shared parser loop as SSS / MDS / DRE - the BRK
+            # xsheet field names (brk_pm_pos<n>, brk_pm_gate<n>,
+            # brk_c<n>_hex, etc.) were designed to match the
+            # existing track-naming convention precisely so this
+            # works out of the box.
             #
-            # Frame-locked semantics: BRK keyframes hold steady
-            # until the next keyframe. No smearing, no easing, no
-            # interpolation across keyframes. The keyframe at
-            # frame N applies from frame N onward until the
-            # keyframe at frame M > N (or to the end of the job
-            # if no later keyframe exists).
-            self.brk_keyframes = []
-            brk_row_ids = set()
-            for k in job_data.keys():
-                if k.startswith("brk_f"):
-                    idx = k.replace("brk_f", "")
-                    if idx.isdigit():
-                        brk_row_ids.add(idx)
-
-            for idx in sorted(brk_row_ids, key=int):
-                try:
-                    fnum = int(job_data.get(f"brk_f{idx}", 0))
-                except (ValueError, TypeError):
-                    # A malformed frame number disqualifies the
-                    # whole keyframe. Logged as a parse skip
-                    # rather than crashing the job - the user
-                    # is mid-edit, the next sync is probably
-                    # only a moment away.
-                    continue
-                pg_hex = job_data.get(f"brk_c{idx}_hex", "#ffffff")
-                cg_hex = job_data.get(f"brk_cg{idx}_hex", "#ffffff")
-                self.brk_keyframes.append({
-                    'frame': fnum,
-                    'pg': hex_to_rgb(pg_hex),
-                    'cg': hex_to_rgb(cg_hex),
-                })
-
-            # Sort by frame number so get_brk_state can do a
-            # simple "last keyframe with frame <= frame_num"
-            # search without re-sorting on every call.
-            self.brk_keyframes.sort(key=lambda kf: kf['frame'])
-
-            # The Timeline's existing track-based machinery
-            # (self.tracks, get_state, etc.) is intentionally
-            # left empty for BRK. BRK doesn't use tracks - it
-            # uses brk_keyframes via get_brk_state. The other
-            # modes' tracks-based state machinery is irrelevant
-            # to BRK and would just clutter the code path if
-            # populated with placeholders.
-            return
+            # BRK-specific behaviour relative to the other modes:
+            #
+            #   - No per-keyframe EXP field. The exposure time is
+            #     governed by t_peak from calibration.json (a
+            #     job-global hardware value, not a timeline value).
+            #     require_float's fallback handles the missing
+            #     brk_exp<n> key - we set the default to 1.0 so
+            #     the track has a sane value even though the engine
+            #     never reads it.
+            #
+            #   - Frame-locked hold semantics across keyframes
+            #     instead of smooth or linear interpolation. The
+            #     engine reads BRK state via get_brk_state() (below
+            #     in this file), which uses step-hold lookup
+            #     against self.tracks - it returns the most recent
+            #     keyframe's values rather than interpolating
+            #     between adjacent ones.
+            #
+            # Everything else (POS, ROT, JK printer GATE/CAM/STP,
+            # per-bipack-layer fields, gels) flows through the
+            # shared parser unchanged. So this branch is just a
+            # one-liner: set the prefix and fall through.
+            prefix = "brk_"
         else:
             raise ValueError(
                 f"Unknown smear_mode '{self.mode}' in job data. "
@@ -533,81 +510,90 @@ class Timeline:
         """
         BRK mode per-frame state lookup.
 
-        Frame-locked semantics: returns the most recent keyframe
-        whose frame number is <= frame_num. If no keyframe
-        applies (frame_num is before the first keyframe, or no
-        keyframes exist at all), returns a sensible default
-        with white gels.
+        Frame-locked-hold semantics: returns the values of the
+        most recent keyframe whose frame number is <= frame_num.
+        No interpolation between keyframes - BRK keyframes are
+        discrete settings that snap into effect at their frame
+        number and stay until the next keyframe (or end of job).
+        This matches how a real optical printer holds a setup
+        while it cranks through frames at that setup, then
+        re-pegs for the next setup.
 
-        Unlike get_state / get_mds_state / get_dre_state, this
-        method does NOT consult self.tracks - BRK keyframes
-        live in self.brk_keyframes (populated by __init__'s BRK
-        branch). The tracks dict stays empty for BRK jobs by
-        design, and this method's existence is what shields
-        engine code from that fact: the engine just calls
-        get_brk_state(frame_num) and gets back the dict it
-        needs, same shape as get_dre_state for the gel keys.
+        Reads from self.tracks (populated by the shared parser
+        loop, same as SSS / MDS / DRE). Empty-tracks fallback
+        returns identity defaults so the engine can render a
+        BRK job that has no keyframes at all without crashing.
 
-        Args:
-            frame_num : int. The frame number being captured.
-
-        Returns:
-            dict with keys:
-                'pg' : numpy.ndarray float, shape (3,). Projector
-                       gel color in RGB [0..1]. White by default.
-                'cg' : numpy.ndarray float, shape (3,). Camera
-                       gel color in RGB [0..1]. White by default.
-
-        Note: the per-bracket exposure time (t_peak) is NOT
-        returned here. The engine reads t_peak directly from
-        calibration.json at frame start - it's a job-global
-        hardware-calibration constant, not a per-keyframe
-        timeline value, so plumbing it through the timeline
-        state would be misleading about where it actually
-        comes from.
+        Returns a dict with the same shape as get_state() /
+        get_dre_state() so downstream engine code can consume
+        BRK state without mode-specific branching at most
+        callsites:
+            'p'     : PM position (numpy vec3, default 0,0,-1.0)
+            'r'     : PM rotation (numpy vec3, default 0,0,0)
+            'bp1_p' : BP1 position
+            'bp1_r' : BP1 rotation
+            'bp2_p' : BP2 position
+            'bp2_r' : BP2 rotation
+            'lp', 'lr', 'lbp1_p', 'lbp1_r', 'lbp2_p', 'lbp2_r'
+                    : local-offset versions, all zero for BRK
+                      (no smear / no per-tick local motion)
+            'pg'    : projector gel (numpy float RGB, default
+                      identity white)
+            'cg'    : camera gel (numpy float RGB, default
+                      identity white)
+            'exp'   : exposure time. NOT used by the engine for
+                      BRK (engine reads t_peak from calibration
+                      instead), but populated so the state dict
+                      shape matches the other modes.
+            'sd', 'ph' : smear duration / playhead-phase. Defaults
+                      (1.0 / 0.5), unused by BRK but kept for
+                      shape consistency.
         """
-        # Default state: identity gels, no tint.
-        # Used both when no keyframes exist (empty BRK job)
-        # and when frame_num is before the first keyframe.
-        # dtype='f4' matches what hex_to_rgb produces, so
-        # downstream code that does e.g. (pg * cg) gets a
-        # consistent float32 array regardless of whether the
-        # default or a real keyframe value was returned.
-        default_state = {
-            'pg': np.array([1.0, 1.0, 1.0], dtype='f4'),
-            'cg': np.array([1.0, 1.0, 1.0], dtype='f4'),
-        }
+        # No keyframes parsed -> sane defaults so the engine
+        # can at least try to render. Matches get_state's and
+        # get_dre_state's empty-tracks short-circuit pattern.
+        if not any(self.tracks.values()):
+            return self.get_default_state()
 
-        # brk_keyframes only exists when self.mode == 'brk'
-        # (the __init__ branch is what creates it). Using
-        # getattr with a default empty list means this method
-        # is safe to call even on a non-BRK Timeline - useful
-        # defensively, even though engine code only calls it
-        # for BRK jobs.
-        keyframes = getattr(self, 'brk_keyframes', [])
-        if not keyframes:
-            return default_state
-
-        # Walk forward through keyframes - the LAST one with
-        # frame <= frame_num wins. Linear scan because BRK
-        # jobs typically have a handful of keyframes (not the
-        # hundreds you'd see in a long SSS smear job), so the
-        # constant overhead of binary search isn't worth the
-        # added complexity. The list is sorted in __init__,
-        # so 'break on first too-late keyframe' is correct.
-        active = None
-        for kf in keyframes:
-            if kf['frame'] <= frame_num:
-                active = kf
-            else:
-                break
-
-        if active is None:
-            return default_state
+        # Step-hold lookup for each track. _get_step_held is
+        # the existing helper used by calculate_playhead_at
+        # for JK printer CAM/STP, so we're reusing an
+        # already-tested code path. The pattern: pass the
+        # track name and frame_num, get back the most-recent
+        # keyframe's value (or the default if frame_num
+        # precedes all keyframes).
+        def hold(key, default):
+            v = self._get_step_held(key, frame_num, default=None)
+            return v if v is not None else default
 
         return {
-            'pg': active['pg'],
-            'cg': active['cg'],
+            # PM spatial
+            'p':  hold('pos', np.array([0, 0, -1.0], dtype='f4')),
+            'r':  hold('rot', np.array([0, 0,  0.0], dtype='f4')),
+            # BP1 spatial
+            'bp1_p': hold('bp1_pos', np.array([0, 0, -1.0], dtype='f4')),
+            'bp1_r': hold('bp1_rot', np.array([0, 0,  0.0], dtype='f4')),
+            # BP2 spatial
+            'bp2_p': hold('bp2_pos', np.array([0, 0, -1.0], dtype='f4')),
+            'bp2_r': hold('bp2_rot', np.array([0, 0,  0.0], dtype='f4')),
+            # Local-offset slots, always zero for BRK (no smear,
+            # no per-tick motion within an exposure).
+            'lp':     np.zeros(3, 'f4'),
+            'lr':     np.zeros(3, 'f4'),
+            'lbp1_p': np.zeros(3, 'f4'),
+            'lbp1_r': np.zeros(3, 'f4'),
+            'lbp2_p': np.zeros(3, 'f4'),
+            'lbp2_r': np.zeros(3, 'f4'),
+            # Gels
+            'pg': hold('pg', np.array([1, 1, 1], dtype='f4')),
+            'cg': hold('cg', np.array([1, 1, 1], dtype='f4')),
+            # Shape-consistency fields. The engine reads t_peak
+            # from calibration.json for BRK; 'exp' is here only
+            # so callsites that destructure state['exp'] don't
+            # KeyError when handed a BRK state dict.
+            'exp': float(hold('exp', 1.0)),
+            'sd':  float(hold('sd',  1.0)),
+            'ph':  float(hold('ph',  0.5)),
         }
 
     
