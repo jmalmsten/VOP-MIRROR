@@ -169,7 +169,7 @@ def main():
     brackets = brk_sequencer.compute_brackets(
         bracket_count=args.bracket_count,
         bracket_stops=args.bracket_stops,
-        t_peak_s=args.t_peak,
+        t_peak=args.t_peak,
     )
     for b in brackets:
         log(f"  bracket {b.index}: "
