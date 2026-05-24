@@ -1,53 +1,56 @@
-"""
+""""
 VOP Module:     brk_merger.py
 Description:    Bracketed-exposure frame merger for BRK mode.
 
                 Given N camera captures (uint16 (H,W,3) arrays)
                 and the BracketSpec list they correspond to, this
                 module produces one merged uint16 (H,W,3) array
-                that reconstructs the source's full 16bpc range.
+                that combines the brackets into a single linear-
+                gamma latent image.
 
-                Each capture encodes one slice of the source's
-                tonal range, remapped to fill screen 0..255 at
-                capture time. Inverting that remap turns each
-                capture back into a "view" of its source slice
-                in original 16bpc space. The N views are then
-                combined with cross-fade weights that smooth out
-                the seams between adjacent brackets - adjacent
-                brackets cover overlapping source ranges (see
-                OVERLAP_FRACTION below) and the overlap region
-                is where the weighted blend lives.
+                Algorithm: simple per-pixel float-precision average
+                of the captures, clipped and rounded back to uint16
+                at the end.
 
-                Algorithm shape:
-                  1. For each bracket, un-remap its capture into
-                     a "source-space view": a uint16 array where
-                     each pixel holds an estimate of the original
-                     source value, but only valid within that
-                     bracket's slice range.
-                  2. For each bracket, compute per-pixel weights
-                     based on where the bracket's source-space
-                     estimate falls relative to its slice's
-                     overlap regions. Pixels deep in the slice
-                     get weight 1.0; pixels in the overlap with
-                     an adjacent bracket get fractional weights
-                     that cross-fade to 0 at the slice edge.
-                  3. Combine the per-bracket views as a weighted
-                     average and emit the result as uint16.
+                Mental model: each bracket is one exposure of the
+                source through the projection monitor, with the
+                screen showing a different source-range slice for
+                each bracket. The deeper brackets amplify shadow
+                detail (by remapping a smaller source range to
+                fill the screen), but they also saturate quickly
+                for brighter source values. Averaging the captures
+                directly turns this into an additive-like merge
+                that:
+                  - keeps shadows clean (true-black source pixels
+                    average to black across all brackets);
+                  - preserves linear gamma (linear average of
+                    linear values is linear) so the result feeds
+                    correctly back into MDS/SSS for further
+                    exposure accumulation;
+                  - softly mixes brackets across the dynamic range
+                    without sharp seams (since all brackets always
+                    contribute, no per-bracket weighting needed).
 
-                No screen-response gamma correction is applied
-                here. The screen's actual response curve is a
-                future calibration concern (cf. the LUT
-                refinement noted in dre_sequencer.py). The
-                overlap-blend smooths most of that nonlinearity
-                out at the seam regions, which is the principal
-                source of visible artifact.
+                Earlier iterations of this module did weighted-
+                average reconstruction in source space via per-
+                bracket slice geometry. That approach introduced a
+                black floor at the deepest bracket's slice_low_norm
+                (any pixel below that value got reported as exactly
+                that value) and required complex weight curves that
+                were a source of bugs. The current simple average
+                trades off some mid-bright differentiation for
+                cleanliness; the trade is acceptable for current
+                screen calibration and is addressable later via
+                targeted highlight scaling once HDMI monitor LUT
+                calibration lands.
 
                 Numerical hygiene: all math runs in float32
                 internally. The uint16 cast happens only at the
                 very end, with a clip-to-range and a round-to-
                 nearest. This avoids the silent wraparound that
-                would occur if intermediate weighted sums went
-                even momentarily above 65535 or below 0.
+                would occur if intermediate sums went above 1.0
+                even momentarily, and preserves bit-accurate
+                rounding at the boundary.
 """
 ###########################################################################
 #
@@ -99,44 +102,59 @@ def merge(captures, brackets):
     """
     Merge N bracketed captures into one 16bpc latent array.
 
+    Algorithm: simple per-pixel average of the captures in float32,
+    clipped to [0, 1] and rounded to uint16 at the end. Linear gamma
+    is preserved end-to-end so the merged output remains a valid
+    latent image suitable for further accumulation via MDS/SSS exposure.
+
+    Each bracket's capture is one exposure of the source through the
+    projection monitor, with the screen showing a different source-range
+    slice per bracket. The brackets are NOT recombined in source space -
+    that approach (used in earlier iterations) introduced a black floor
+    at the deepest bracket's slice_low_norm because the bracket's slice
+    geometry assigned weight 1.0 to source estimates that were really
+    just "the bracket saw black, source is somewhere at or below my
+    slice's lower edge." Averaging captures directly sidesteps this:
+    a pixel where every bracket sees black averages to black, which
+    is the correct "I don't know what's down there" answer.
+
+    The trade-off is some loss of mid-bright differentiation - bright
+    patches that saturate the deeper brackets pull the average up
+    less aggressively than they should. This shows up as a slightly
+    compressed mid-bright range in the merged output. Acceptable
+    given the alternatives, and addressable later via screen
+    calibration / targeted highlight scaling (parked as a future
+    polish item).
+
     Args:
         captures : list of numpy.ndarray, each dtype=uint16,
                    shape=(H, W, 3). One per bracket, in the
                    same order as `brackets`. Captures are the
-                   raw camera output for each bracket - the
+                   raw camera output for each bracket; the
                    engine is responsible for any pre-processing
-                   (noise crusher, hot pixel mapping, gel
-                   adjustments) BEFORE handing them here.
-                   That way the merger stays focused on the
-                   bracket-merge math and doesn't duplicate
-                   work the existing post-capture pipeline
-                   already does.
+                   (hot pixel mapping, etc.) BEFORE handing
+                   them here.
         brackets : list of brk_sequencer.BracketSpec, same
                    length as captures, same ordering (peak-
-                   first). The merger reads slice_low_norm
-                   and slice_high_norm from each; other
-                   fields (index, exposure_s) are not used
-                   here but accepted unchanged for forward
-                   compatibility.
+                   first). Currently UNUSED by the merge math
+                   but accepted in the signature to preserve
+                   the engine's call site shape. May be
+                   reintroduced for targeted weighting in a
+                   future iteration.
 
     Returns:
-        numpy.ndarray, dtype=uint16, shape=(H, W, 3). The
-        merged frame in 16bpc source space. Suitable for
-        writing as a latent TIFF via the existing
-        process_and_stack_latent_image path (which already
-        accepts uint16 arrays).
+        numpy.ndarray, dtype=uint16, shape=(H, W, 3) in RGB
+        channel order (matching the captures' channel order
+        coming out of cutil.dng_to_uint16_rgb).
 
     Raises:
-        ValueError if captures and brackets disagree in
-        length, or if any capture has an unexpected dtype/
-        shape. Fail-loud at the boundary so a misaligned
-        engine-side data feed doesn't silently corrupt the
-        output.
+        ValueError if captures and brackets disagree in length,
+        or if any capture has an unexpected dtype/shape.
     """
     # Input validation. The engine should never call us with
-    # mismatched inputs but defensive checking here means a
-    # bug in the engine's bracket-collection loop surfaces
-    # as a clear exception, not as a silently-wrong latent.
+    # mismatched inputs but defensive checking here means a bug
+    # in the engine surfaces as a clear exception instead of a
+    # silently-wrong latent.
     if len(captures) != len(brackets):
         raise ValueError(
             f"brk_merger: captures count ({len(captures)}) does not "
@@ -145,9 +163,6 @@ def merge(captures, brackets):
     if len(captures) == 0:
         raise ValueError("brk_merger: at least one capture is required.")
 
-    # All captures must agree on shape and dtype. Mixing
-    # resolutions or pixel formats here is a programming bug,
-    # not a recoverable condition.
     ref_shape = captures[0].shape
     for i, cap in enumerate(captures):
         if cap.dtype != np.uint16:
@@ -166,107 +181,30 @@ def merge(captures, brackets):
                 f"got {cap.shape}."
             )
 
-    H, W = ref_shape[:2]
-
-    # Accumulators in float32. weight_sum tracks the total
-    # weight applied at each pixel so we can divide at the end
-    # for a proper weighted-average. value_sum accumulates
-    # weight * source_estimate per bracket. Both stay in
-    # float32 the whole way to avoid intermediate overflow on
-    # the multiply-and-add.
-    value_sum = np.zeros((H, W, 3), dtype=np.float32)
-    weight_sum = np.zeros((H, W, 3), dtype=np.float32)
-
-    # For each bracket: un-remap its capture into source space,
-    # compute per-pixel weights based on slice geometry, and
-    # add the weighted contribution to the accumulators.
-    for bracket, capture in zip(brackets, captures):
-        # ---- Un-remap the capture into source space ----
-        #
-        # The capture is uint16 because the camera produces
-        # 12-16 bits depending on sensor; treating it as a
-        # full-range capture and normalizing to [0..1] keeps
-        # the math sensor-agnostic. The engine is responsible
-        # for any sensor-saturation handling before this point.
-        #
-        # Per-pixel formula:
-        #   source_estimate_norm = slice_low_norm
-        #                        + (slice_high_norm - slice_low_norm)
-        #                          * (capture_value / 65535)
-        # i.e. the capture's 0..1 range maps linearly back
-        # across [slice_low, slice_high].
-        cap_norm = capture.astype(np.float32) / 65535.0
-        slice_width = float(bracket.slice_high_norm - bracket.slice_low_norm)
-        source_estimate = (
-            float(bracket.slice_low_norm)
-            + slice_width * cap_norm
-        )
-
-        # ---- Compute per-pixel weights ----
-        #
-        # Weight is 1.0 in the bracket's "core" region (the
-        # middle of its slice, away from any overlap with
-        # adjacent brackets). It tapers linearly to 0 across
-        # the overlap region into adjacent brackets. The exact
-        # taper shape doesn't matter much for the final
-        # quality - linear is the simplest and behaves well
-        # numerically. Tukey or raised-cosine windows would
-        # also be reasonable choices if banding turns out
-        # to be visible in practice (something to tune in a
-        # future polish pass).
-        #
-        # Per-pixel weight formula, with a few cases:
-        #   - For the peak bracket (index 0): no upper-edge
-        #     taper (the slice's top is the source's top,
-        #     nothing above it to overlap with). Only a lower-
-        #     edge taper into the next-shadow bracket.
-        #   - For the deepest bracket (index N-1): no lower-
-        #     edge taper. Only an upper-edge taper into the
-        #     next-peak bracket.
-        #   - For middle brackets: tapers on both edges.
-        #
-        # The overlap width is OVERLAP_FRACTION * slice_width,
-        # measured INSIDE the slice on each tapered side.
-        # So the slice's actual zone-of-influence extends
-        # OVERLAP_FRACTION further on each tapered side,
-        # which is where adjacent brackets cross-fade.
-        weights = _compute_weights(
-            source_estimate=source_estimate,
-            bracket=bracket,
-            is_first=(bracket is brackets[0]),
-            is_last=(bracket is brackets[-1]),
-        )
-
-        # Accumulate. The weighted source estimate is added
-        # in normalized [0..1] source space; the conversion
-        # to uint16 happens once at the end after all
-        # brackets have contributed.
-        value_sum += weights * source_estimate
-        weight_sum += weights
-
-    # ---- Final per-pixel normalization ----
+    # Accumulate in float32 for headroom. Each capture contributes
+    # its normalized [0..1] value; the running sum can exceed 1.0
+    # for pixels where multiple brackets saturate, which is fine
+    # at this point - we clip only at the final cast to uint16.
     #
-    # Divide value_sum by weight_sum to recover the weighted
-    # average. Guard against pixels where no bracket
-    # contributed (weight_sum == 0) - which shouldn't happen
-    # given our weight design (every pixel falls into at
-    # least one bracket's full-weight or tapered region),
-    # but defensive against future changes that might break
-    # that invariant.
-    #
-    # np.divide with where= leaves the output untouched
-    # (zero, from the zeros_like init) at any pixel where
-    # the divisor is zero, avoiding NaN propagation. Such
-    # pixels show as black in the output, which is the
-    # right "I don't know" signal.
-    out_norm = np.zeros_like(value_sum)
-    np.divide(value_sum, weight_sum, out=out_norm, where=(weight_sum > 0.0))
+    # We could use the more obvious idiom:
+    #   sum_norm = np.mean([c.astype(np.float32) / 65535.0 for c in
+    #                       captures], axis=0)
+    # but that materializes all N float arrays in memory at once,
+    # which on the Pi's 4GB RAM with 2028x1520x3 float32 (37MB
+    # each) is a meaningful cost for 3+ brackets. The explicit
+    # loop accumulates one bracket at a time and reuses the
+    # accumulator buffer.
+    accumulator = np.zeros(ref_shape, dtype=np.float32)
+    for cap in captures:
+        accumulator += cap.astype(np.float32) / 65535.0
+    accumulator /= float(len(captures))
 
-    # Clip-and-round to uint16. Clipping defends against
-    # extreme inputs that push the weighted average slightly
-    # above 1.0 due to float rounding (shouldn't happen with
-    # well-formed weights but isn't free of risk).
-    out_clipped = np.clip(out_norm, 0.0, 1.0)
+    # Clip-and-quantize. Even though the accumulator can never
+    # exceed 1.0 under exact arithmetic (it's a mean of values in
+    # [0, 1]), float rounding could push it slightly above; the
+    # clip guards against that. The +0.5 in the cast is round-to-
+    # nearest (numpy's default cast truncates).
+    out_clipped = np.clip(accumulator, 0.0, 1.0)
     out_uint16 = (out_clipped * 65535.0 + 0.5).astype(np.uint16)
     return out_uint16
 
