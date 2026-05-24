@@ -319,32 +319,23 @@ def _compute_weights(source_estimate, bracket, is_first, is_last):
     # and is_last removes the lower taper (core_low = low).
     
     # Core region: weight 1.0 wherever source_estimate is
-    # inside [core_low, core_high]. Both bounds are inset from
-    # the slice edges by `overlap`, leaving overlap zones at the
-    # top and bottom that get tapered weight below.
+    # inside [core_low, core_high]. Edges are inset from the
+    # slice edges by `overlap` UNLESS the bracket is on the
+    # outer edge of the source range (peak bracket on top,
+    # deepest bracket on bottom), in which case the slice
+    # edge IS the source-space edge and there's no neighbor
+    # to taper into.
     #
-    # Asymmetry between is_first and is_last (intentional):
-    #
-    #   - is_first (peak bracket): core_high = slice_high. The
-    #     top of the peak bracket's slice IS the source-space
-    #     top (1.0). Source values that saturate the peak
-    #     bracket really do mean "source value >= peak" - that's
-    #     real information, not "I don't know what's up there."
-    #     So the peak bracket keeps full weight up to its
-    #     slice_high.
-    #
-    #   - is_last (deepest bracket): core_low = slice_low + overlap.
-    #     Same as middle brackets. The deepest bracket's lower
-    #     edge is where the bracket's information ENDS - source
-    #     values below slice_low cannot be distinguished from
-    #     black by this bracket. Treating those pixels as
-    #     "source = slice_low" lifts every true-black pixel in
-    #     the merged output. By tapering the lower edge just
-    #     like a middle bracket, pixels with source_estimate at
-    #     or below slice_low get weight 0, and (via the
-    #     weight_sum=0 guard in merge()) come out as 0 in the
-    #     final image - the correct "I don't know" black.
-    core_low = low + overlap
+    # ORIGINAL STATE (intentionally unchanged after snippets
+    # 2E/2F were reverted): the deepest bracket is treated
+    # as having full information all the way to slice_low.
+    # This is known to lift true-black source pixels to
+    # roughly slice_low_norm * 65535 in the merged output.
+    # That bug is real but stable; the alternative attempts
+    # to fix it (strict > comparison in 2E, lower taper in
+    # 2F) both introduced worse problems. Leaving as-is
+    # while we build proper diagnostics.
+    core_low = low if is_last else (low + overlap)
     core_high = high if is_first else (high - overlap)
 
     # Initialize weights to zero. Below we'll set them to 1
@@ -357,21 +348,23 @@ def _compute_weights(source_estimate, bracket, is_first, is_last):
     in_core = (source_estimate >= core_low) & (source_estimate <= core_high)
     weights[in_core] = 1.0
 
-    # Lower taper: linear ramp from 0 at slice_low to 1 at
-    # core_low. Applied to every bracket regardless of is_last -
-    # the deepest bracket's lower edge is the bottom of useful
-    # information, not the bottom of source space.
-    #
-    # Math: source_estimate at slice_low gets weight 0;
-    # source_estimate at core_low gets weight 1. Linear ramp
-    # between. overlap is guaranteed > 0 (OVERLAP_FRACTION *
-    # slice_width with both factors positive), so no divide-
-    # by-zero protection is needed.
-    taper_low_start = low  # = core_low - overlap
-    in_lower_taper = (source_estimate >= taper_low_start) & (source_estimate < core_low)
-    weights[in_lower_taper] = (
-        (source_estimate[in_lower_taper] - taper_low_start) / overlap
-    )
+    # Lower taper: linear ramp from 0 at (core_low - overlap)
+    # to 1 at core_low. Only relevant when is_last is False -
+    # otherwise core_low IS low and the slice has no
+    # lower-side overlap zone.
+    if not is_last:
+        taper_low_start = core_low - overlap  # equivalently: low (the slice's actual bottom)
+        in_lower_taper = (source_estimate >= taper_low_start) & (source_estimate < core_low)
+        # Linear ramp 0..1 across the overlap. We add a
+        # tiny epsilon to the denominator only conceptually;
+        # numpy handles div-by-zero with infs, which would
+        # propagate badly. Since overlap > 0 by construction
+        # (it's OVERLAP_FRACTION * slice_width with both
+        # factors positive), no guard is actually needed
+        # here in code.
+        weights[in_lower_taper] = (
+            (source_estimate[in_lower_taper] - taper_low_start) / overlap
+        )
 
     # Upper taper: linear ramp from 1 at core_high to 0 at
     # (core_high + overlap). Only relevant when is_first is
