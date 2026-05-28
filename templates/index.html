@@ -90,10 +90,30 @@
                             Normally, this checkbox is hidden and only becomes visible when DRE
                             mode is active. 
                         -->
-                        <div class="c-box" id="dre_probe_controls" style="display: none;" 
+                        <div class="c-box dre-probe-controls" id="dre_probe_controls"
                                             title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
                             <label>DRE</label>
                             <input type="checkbox" id="probe_dre" onchange="runTask('preview')">
+                        </div>
+                        <!--
+                            BRK probe toggle. Parallel to the DRE one above.
+                            When ON (in BRK mode), Proj Probe shows ONE
+                            bracket's slice-remap on the projection monitor -
+                            the Sub (0-1.0) field picks which bracket
+                            (0.0 = peak / brightest slice, 1.0 = deepest /
+                            darkest slice). When OFF, Proj Probe shows the raw
+                            composite with no slice remap.
+
+                            Hidden unless BRK mode is active. Visibility is
+                            driven by the body.brk-mode class via the
+                            .brk-probe-controls rule in static/style.css -
+                            no inline styles, matching the .brk-constants
+                            pattern used for the sheet-header settings.
+                        -->
+                        <div class="c-box brk-probe-controls" id="brk_probe_controls"
+                                            title="BRK Mode only. When ON, Proj Probe shows one bracket's slice on the projection monitor; the Sub (0-1.0) field picks which bracket (0.0 = peak, 1.0 = deepest). When OFF, shows the raw composite.">
+                            <label>BRK</label>
+                            <input type="checkbox" id="probe_brk" onchange="runTask('preview')">
                         </div>
                     </div>
                     <div class="probe-controls spaced">

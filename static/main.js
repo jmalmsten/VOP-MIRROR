@@ -95,13 +95,17 @@ function toggleSheetVisibility() {
     // future BRK-only controls added anywhere in the DOM are
     // covered automatically - just add .brk-constants to them
     // and they're picked up for free.
+    // Body classes drive CSS-only visibility for mode-scoped controls
+    // that live in the DOM unconditionally (so collectParams() always
+    // captures their values) but should only be VISIBLE in their mode.
+    // Currently: .brk-constants and .brk-probe-controls key off
+    // body.brk-mode; .dre-probe-controls keys off body.dre-mode.
+    // See static/style.css for the matching rules.
     document.body.classList.toggle('brk-mode', currentMode === 'BRK');
+    document.body.classList.toggle('dre-mode', currentMode === 'DRE');
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
     if (dreWrap) dreWrap.style.display = (currentMode === 'DRE') ? 'block' : 'none';
-    // BRK mode wrapper. Same toggle pattern as the existing three.
-    // The inline style.display pattern is a pre-existing convention
-    // in this function; cleanup is filed for the niggles pass.
     if (brkWrap) brkWrap.style.display = (currentMode === 'BRK') ? 'block' : 'none';
 }
 

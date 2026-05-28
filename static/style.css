@@ -1518,3 +1518,37 @@ body.brk-mode .brk-sheet-settings.brk-constants {
        .brk-sheet-settings rule above for the layout details. */
     display:            flex;
 }
+
+/* ===========================================================
+   PROBE-MODE TOGGLE VISIBILITY
+   ===========================================================
+   The DRE and BRK probe toggles (in the probe-controls area)
+   live in the DOM unconditionally so their checkbox state is
+   captured by collectParams() and persisted to current_job.json
+   regardless of the active mode. They are only VISIBLE in their
+   respective modes.
+
+   Visibility is driven by body-class hooks set in
+   toggleSheetVisibility() (static/main.js):
+     - body.dre-mode reveals .dre-probe-controls
+     - body.brk-mode reveals .brk-probe-controls
+
+   This replaces the old inline style="display:none;" on
+   #dre_probe_controls (removed for the project-wide no-inline-
+   styles convention) and provides the same mechanism for the
+   new BRK probe toggle. The reveal uses display:block to match
+   the sibling probe c-boxes (Frame, Sub), which are plain block
+   elements - .c-box sets only flex:1, not a display type, so
+   block is the faithful default. ========================== */
+.dre-probe-controls,
+.brk-probe-controls {
+    display:            none;
+}
+
+body.dre-mode .dre-probe-controls {
+    display:            block;
+}
+
+body.brk-mode .brk-probe-controls {
+    display:            block;
+}
