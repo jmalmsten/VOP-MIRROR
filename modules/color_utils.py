@@ -390,6 +390,246 @@ def dng_to_uint16_rgb(buffer_file, static_dir, black_clip=0.0):
         print(f"[VOP WARNING] dng_to_uint16_rgb decode error for {buffer_file}: {e}")
         return None
 
+def write_merged_latent(merged_rgb, output_file, tiff_flag,
+                        cam_gel_rgb, mono_forced, black_clip=0.0):
+    """
+    Write a pre-decoded uint16 RGB array as a latent TIFF.
+
+    Pre-decoded-array equivalent of process_and_stack_latent_image
+    for BRK mode. The input array has already been decoded from
+    per-bracket DNGs and merged via brk_merger.merge - this function
+    picks up the post-decode pipeline from there.
+
+    Pipeline steps applied:
+      1. Pedestal subtraction (apply_pedestal).
+      2. RGB -> BGR convert for cv2.imwrite.
+      3. Optional mono-mode strip.
+      4. Camera-gel tint (cam_gel_rgb in RGB order, BGR-swapped here).
+      5. Unconditional overwrite to output_file. NO STACKING.
+
+    Hot-pixel patching is NOT applied here. It happened per-bracket
+    during cutil.dng_to_uint16_rgb. Doing it again would patch
+    already-patched defects - benign but wasteful.
+
+    Unconditional overwrite (vs SSS/MDS's additive stack) is
+    intentional for BRK. Re-running Capture on a frame in BRK mode
+    OVERWRITES the previous latent because each BRK capture is
+    already a complete N-bracket merge. Stacking would saturate
+    channels quickly. This matches BRK's "every frame is a
+    discrete, complete bracketed exposure" mental model.
+
+    Args:
+        merged_rgb  : numpy.ndarray, uint16, (H, W, 3) in RGB order.
+                      The merger's output.
+        output_file : str. Absolute path to the destination TIFF.
+        tiff_flag   : int. cv2.IMWRITE_TIFF_COMPRESSION value (8 =
+                      ADOBE_DEFLATE/ZIP, 1 = no compression).
+        cam_gel_rgb : numpy.ndarray, (3,), float in [0, 1], RGB order.
+                      Camera gel tint to apply at write time.
+        mono_forced : bool. If True, strip color before tinting.
+        black_clip  : float, default 0.0. Pedestal value for
+                      apply_pedestal.
+
+    Returns:
+        True on success, False on failure. Failure is silent
+        (logged to stderr via print) - same contract as the
+        sibling functions.
+    """
+    try:
+        img = apply_pedestal(merged_rgb, black_clip)
+
+        # 1. RGB -> BGR for OpenCV.
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        # 2. Mono mode.
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # 3. Camera gel tint. cam_gel_rgb is RGB but img is now BGR,
+        # so we reorder the multiplier vector accordingly.
+        gel_bgr = np.array(
+            [cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]],
+            dtype=np.float32
+        )
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # 4. Unconditional overwrite. See docstring for rationale.
+        cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] write_merged_latent error: {e}")
+        return False
+
+
+def merged_to_sensor_preview(merged_rgb, static_dir, cam_gel_rgb,
+                             mono_forced, black_clip=0.0,
+                             par_x=1.0, par_y=1.0,
+                             preview_unsqueeze=False):
+    """
+    Write a pre-decoded uint16 RGB array as the Cam View preview JPG.
+
+    Pre-decoded-array equivalent of generate_sensor_preview for BRK
+    mode. Same pipeline as that function from the BGR-convert step
+    onward.
+
+    Pipeline:
+      1. Pedestal subtraction.
+      2. RGB -> BGR.
+      3. Downscale to 8bpc.
+      4. Mono-mode strip (after downscale, matching sibling).
+      5. Camera-gel tint.
+      6. Optional anamorphic preview unsqueeze.
+      7. Write to static/probe_live.jpg.
+
+    Hot-pixel patching is NOT applied here (already done per-bracket).
+
+    Args:
+        merged_rgb        : numpy.ndarray, uint16, (H, W, 3) RGB.
+        static_dir        : str. Path containing probe_live.jpg.
+        cam_gel_rgb       : (3,) float [0..1] RGB. Camera gel.
+        mono_forced       : bool.
+        black_clip        : float, default 0.0.
+        par_x, par_y      : float. Anamorphic pixel-aspect-ratio
+                            components.
+        preview_unsqueeze : bool. If True and PAR != 1, apply
+                            inverse-squeeze at JPG resolution.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        img = apply_pedestal(merged_rgb, black_clip)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        # Downscale to 8-bit AFTER the high-precision math.
+        img = (img / 256.0).astype(np.uint8)
+
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        gel_bgr = np.array(
+            [cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]],
+            dtype=np.float32
+        )
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
+
+        # Anamorphic preview unsqueeze - identical to
+        # generate_sensor_preview's logic.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] BRK preview unsqueeze failed (falling back to squeezed): {e}")
+
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] merged_to_sensor_preview error: {e}")
+        return False
+
+
+def merged_to_comp_preview(merged_rgb, static_dir, cam_mag_dir, frame_num,
+                           cam_gel_rgb, mono_forced, black_clip=0.0,
+                           par_x=1.0, par_y=1.0,
+                           preview_unsqueeze=False):
+    """
+    Write a pre-decoded uint16 RGB array as the Comp View preview JPG.
+
+    Pre-decoded-array equivalent of generate_comp_preview for BRK
+    mode. Same pipeline as that function from the BGR-convert step
+    onward.
+
+    The pipeline matches generate_comp_preview: the new exposure is
+    composited additively (cv2.add at uint16) against any existing
+    latent at this frame, then downscaled to 8-bit for the JPG.
+
+    CRITICAL: the existing latent TIFF in cam_mag_dir is read but
+    NEVER written back. Comp View must be safe to spam without
+    altering the latent on disk.
+
+    Hot-pixel patching is NOT applied here (already done per-bracket).
+
+    Args:
+        merged_rgb        : numpy.ndarray, uint16, (H, W, 3) RGB.
+        static_dir        : str. Path containing probe_live.jpg.
+        cam_mag_dir       : str. Path to CamMag/ where the existing
+                            latent (if any) lives.
+        frame_num         : int. For finding the existing latent.
+        cam_gel_rgb       : (3,) float [0..1] RGB.
+        mono_forced       : bool.
+        black_clip        : float, default 0.0.
+        par_x, par_y      : float.
+        preview_unsqueeze : bool.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        img = apply_pedestal(merged_rgb, black_clip)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # Cam gel in 16-bit (matching generate_comp_preview's
+        # clip range so the additive math below sees the same
+        # 16-bit integer space).
+        gel_bgr = np.array(
+            [cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]],
+            dtype=np.float32
+        )
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # Additive composite against any existing latent. Read-only.
+        existing_latent_file = os.path.join(
+            cam_mag_dir, f"latent_{str(int(frame_num)).zfill(4)}.tif"
+        )
+        if os.path.exists(existing_latent_file):
+            existing = cv2.imread(existing_latent_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                # cv2.add saturates at 65535 (matching a real execute).
+                img = cv2.add(img, existing.astype(np.uint16))
+
+        # Downscale to 8-bit for the JPG preview.
+        img = (img / 256.0).astype(np.uint8)
+
+        # Anamorphic preview unsqueeze - identical to
+        # generate_comp_preview's logic.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] BRK comp preview unsqueeze failed (falling back to squeezed): {e}")
+
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] merged_to_comp_preview error: {e}")
+        return False
+
 def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
     if not os.path.exists(buffer_file): return False
 

@@ -1086,97 +1086,135 @@ def run_persistent_engine():
                 _finalize_capture(buf_f, frame_num, is_preview, is_comp_preview,
                                   st['cg'], black_clip)
 
-            def _finalize_brk_capture(merged_rgb, frame_num, cg_color, black_clip):
+            def _finalize_brk_capture(merged_rgb, frame_num, cg_color,
+                                      black_clip, destination='latent'):
                 """
-                BRK-specific post-merger finalizer.
+                BRK post-merger finalizer.
 
-                Parallel to _finalize_capture (which is the shared
-                post-DNG-decode path for SSS/MDS/DRE), but takes a
-                pre-decoded uint16 RGB array instead of a DNG file
-                path. The array comes from brk_merger.merge, which
-                produces a merged 16bpc reconstruction from the
-                per-bracket captures.
+                Takes the merger's pre-decoded uint16 RGB array and
+                routes it to one of three downstream destinations based
+                on the `destination` argument. Each destination has its
+                own helper in color_utils that handles the post-decode
+                pipeline (pedestal, BGR convert, mono, gel, write).
+                This function is the thin engine-side router.
 
-                Pipeline applied here:
-                  1. Pedestal subtraction (apply_pedestal).
-                  2. Convert RGB -> BGR for cv2.imwrite.
-                  3. Apply camera-gel tint (cg_color, RGB->BGR
-                     swap to match the OpenCV order).
-                  4. Stack onto any existing latent for this
-                     frame (cv2.add, same as the SSS path).
-                  5. Write as TIFF using the job's tiff_compression
-                     setting.
-
-                Hot-pixel patching is NOT applied here because it
-                was already applied per-bracket during
-                cutil.dng_to_uint16_rgb. Doing it again would
-                patch already-patched defects, which is benign
-                (the defect map is sparse) but wasteful.
+                Destinations:
+                  'latent'         : write the merged array as a
+                                     CamMag/latent_NNNN.tif TIFF.
+                                     Used by real Execute Sequence.
+                                     Unconditionally overwrites any
+                                     existing latent at this frame
+                                     (BRK does not stack like SSS/MDS).
+                  'sensor_preview' : write the merged array as
+                                     static/probe_live.jpg.
+                                     Used by BRK Cam View.
+                  'comp_preview'   : same as sensor_preview, but
+                                     additively composites against any
+                                     existing latent at this frame
+                                     before writing the JPG. The
+                                     latent on disk is NOT modified.
+                                     Used by BRK Comp View.
 
                 Args:
-                    merged_rgb : numpy.ndarray, uint16, (H, W, 3) RGB.
-                                 The merger's output.
-                    frame_num  : int. For the output filename.
-                    cg_color   : numpy.ndarray, (3,), float [0..1].
-                                 Camera gel in RGB. From
-                                 timeline.get_brk_state.
-                    black_clip : float. Job-level pedestal value.
+                    merged_rgb  : numpy.ndarray, uint16, (H, W, 3) RGB.
+                                  brk_merger.merge output.
+                    frame_num   : int. For filename construction.
+                    cg_color    : (3,) float [0..1] RGB. Camera gel
+                                  from timeline.get_brk_state.
+                    black_clip  : float. Job's pedestal value.
+                    destination : str, one of 'latent',
+                                  'sensor_preview', 'comp_preview'.
+                                  Defaults to 'latent' to match the
+                                  function's original signature.
                 """
                 try:
-                    # 1. Pedestal subtraction. Same call shape as
-                    # process_and_stack_latent_image so behavior
-                    # is consistent with SSS/MDS.
-                    img = cutil.apply_pedestal(merged_rgb, black_clip)
-
-                    # 2. RGB -> BGR for OpenCV.
-                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-                    # 3. Apply camera gel. Match
-                    # process_and_stack_latent_image's RGB->BGR
-                    # gel-component swap (cg_color is RGB-ordered
-                    # but img is now BGR).
-                    gel_bgr = np.array(
-                        [cg_color[2], cg_color[1], cg_color[0]],
-                        dtype=np.float32
-                    )
-                    img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
-
-                    # 4. Write the latent TIFF unconditionally.
-                    #
-                    # Unlike SSS/MDS (where multiple Capture clicks on
-                    # the same frame are an INTENTIONAL workflow -
-                    # additive accumulation deepens the latent, mimicking
-                    # multiple physical exposures of one film frame),
-                    # BRK already produces its final 16bpc reconstruction
-                    # via the per-frame N-bracket merge. The merged
-                    # output IS the finished frame. Stacking it onto
-                    # a previous latent would mean each re-Capture
-                    # piles N brackets' worth of intensity onto whatever
-                    # was already there, saturating channels quickly.
-                    #
-                    # Trade-off: in BRK, re-running Capture on a frame
-                    # OVERWRITES the previous latent. If you want
-                    # additive bracketing across multiple takes, run
-                    # the takes separately and accumulate in post.
-                    # That matches BRK's "every frame is a discrete,
-                    # complete bracketed exposure" mental model.
-                    tiff_flag = 8 if job_data.get('tiff_compression') == 'zip' else 1
-                    out_f = os.path.join(
-                        cam_mag_dir,
-                        f"latent_{str(frame_num).zfill(4)}.tif"
+                    # Pull job-level settings once, shared across
+                    # destinations. tiff_flag is only used by 'latent'
+                    # but reading job_data here keeps the dispatch
+                    # below clean.
+                    mono_forced = bool(job_data.get('mono_mode', False))
+                    par_x = float(job_data.get('par_x', 1.0) or 1.0)
+                    par_y = float(job_data.get('par_y', 1.0) or 1.0)
+                    preview_unsqueeze = bool(
+                        job_data.get('preview_unsqueeze', False)
                     )
 
-                    # 5. Write the TIFF.
-                    cv2.imwrite(out_f, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+                    if destination == 'latent':
+                        tiff_flag = (
+                            8 if job_data.get('tiff_compression') == 'zip'
+                            else 1
+                        )
+                        out_f = os.path.join(
+                            cam_mag_dir,
+                            f"latent_{str(frame_num).zfill(4)}.tif"
+                        )
+                        cutil.write_merged_latent(
+                            merged_rgb=merged_rgb,
+                            output_file=out_f,
+                            tiff_flag=tiff_flag,
+                            cam_gel_rgb=cg_color,
+                            mono_forced=mono_forced,
+                            black_clip=black_clip,
+                        )
+                    elif destination == 'sensor_preview':
+                        cutil.merged_to_sensor_preview(
+                            merged_rgb=merged_rgb,
+                            static_dir=static_dir,
+                            cam_gel_rgb=cg_color,
+                            mono_forced=mono_forced,
+                            black_clip=black_clip,
+                            par_x=par_x,
+                            par_y=par_y,
+                            preview_unsqueeze=preview_unsqueeze,
+                        )
+                    elif destination == 'comp_preview':
+                        cutil.merged_to_comp_preview(
+                            merged_rgb=merged_rgb,
+                            static_dir=static_dir,
+                            cam_mag_dir=cam_mag_dir,
+                            frame_num=frame_num,
+                            cam_gel_rgb=cg_color,
+                            mono_forced=mono_forced,
+                            black_clip=black_clip,
+                            par_x=par_x,
+                            par_y=par_y,
+                            preview_unsqueeze=preview_unsqueeze,
+                        )
+                    else:
+                        # Unknown destination is a programming error
+                        # (engine-internal call with a typo or bad
+                        # branch). Log it loudly and fall back to
+                        # writing the latent so we don't silently
+                        # produce no output.
+                        log_audit(
+                            f"BRK ERROR frame {frame_num}: "
+                            f"_finalize_brk_capture called with "
+                            f"unknown destination '{destination}'. "
+                            f"Falling back to 'latent'."
+                        )
+                        tiff_flag = (
+                            8 if job_data.get('tiff_compression') == 'zip'
+                            else 1
+                        )
+                        out_f = os.path.join(
+                            cam_mag_dir,
+                            f"latent_{str(frame_num).zfill(4)}.tif"
+                        )
+                        cutil.write_merged_latent(
+                            merged_rgb=merged_rgb,
+                            output_file=out_f,
+                            tiff_flag=tiff_flag,
+                            cam_gel_rgb=cg_color,
+                            mono_forced=mono_forced,
+                            black_clip=black_clip,
+                        )
 
                 except Exception as e:
                     print(f"[VOP WARNING] _finalize_brk_capture error for frame {frame_num}: {e}")
                     log_audit(
                         f"BRK ERROR frame {frame_num}: finalize failed: {e}. "
-                        f"The merged array was computed but not written. "
-                        f"Check disk space and CamMag permissions."
-                    )                     
-
+                        f"destination={destination}"
+                    )
             def execute_brk_exposure(frame_num, is_preview=False, is_comp_preview=False):
                 """
                 BRK / Bracketed-exposure path (issue: BRK mode).
