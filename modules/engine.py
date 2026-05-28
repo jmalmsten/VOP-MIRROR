@@ -1215,6 +1215,7 @@ def run_persistent_engine():
                         f"BRK ERROR frame {frame_num}: finalize failed: {e}. "
                         f"destination={destination}"
                     )
+
             def execute_brk_exposure(frame_num, is_preview=False, is_comp_preview=False):
                 """
                 BRK / Bracketed-exposure path (issue: BRK mode).
@@ -1245,27 +1246,27 @@ def run_persistent_engine():
                   7. _finalize_brk_capture writes the latent TIFF.
 
                 Preview semantics: when is_preview or is_comp_preview
-                is True, we'd ideally run the same bracket loop but
-                pipe the merged result to the preview JPG instead
-                of the CamMag. For slice 12b that's a complication
-                we don't need - the render-side dispatch (which is
-                what serves /preview) already early-returns with the
-                'no live preview' notice before reaching this
-                function. So this function is real-exposure-only.
-                The preview kwargs are kept for signature compat
-                with the dispatch site, but we log and bail if
-                either is true.
+                is True, the FULL bracket sequence still runs (BRK has
+                no cheaper preview - the only representative preview of
+                a bracketed frame is the actual N-bracket merge). The
+                difference is purely in the finalize destination:
+                  - is_comp_preview -> merged result composited against
+                    any existing latent, written to probe_live.jpg.
+                    The latent on disk is NOT modified.
+                  - is_preview (Cam View) -> merged result written
+                    straight to probe_live.jpg. No composite, no
+                    commit.
+                  - neither (real Execute) -> merged result written
+                    to CamMag/latent_NNNN.tif.
+                is_comp_preview takes precedence over is_preview when
+                both are set, matching execute_exposure's convention.
+
+                This means a BRK Cam View / Comp View is as slow as a
+                real one-frame Execute (it captures all brackets). That
+                is intentional and was a deliberate design decision:
+                the user wants to see exactly what Execute will produce,
+                and for BRK there is no faster faithful preview.
                 """
-                if is_preview or is_comp_preview:
-                    # See docstring. If we got here with a preview
-                    # flag, something dispatched wrong upstream.
-                    # Log and bail rather than do half-correct work.
-                    log_audit(
-                        f"BRK frame {frame_num}: execute_brk_exposure called with "
-                        f"preview={is_preview} comp_preview={is_comp_preview}. "
-                        f"BRK has no preview path (see render_world). Skipping."
-                    )
-                    return
 
                 # ---------- Read job config + calibration ----------
                 # bracket_count and bracket_stops live in job_data
@@ -1508,14 +1509,25 @@ def run_persistent_engine():
                     f"dtype={merged.dtype}, min={merged.min()}, max={merged.max()}."
                 )
 
-                # ---------- Finalize: gel tint, latent write ----------
-                # _finalize_brk_capture is the BRK-specific
-                # post-merger pipeline (snippet 5). Bypasses
-                # process_and_stack_latent_image because that
-                # function expects a DNG-on-disk input; our merged
-                # array is already in memory.
+                # ---------- Finalize: route by destination ----------
+                # _finalize_brk_capture dispatches to one of three
+                # color_utils helpers based on the destination arg.
+                # We pick the destination from the preview flags:
+                #   is_comp_preview -> 'comp_preview' (composite + JPG)
+                #   is_preview      -> 'sensor_preview' (JPG only)
+                #   neither         -> 'latent' (CamMag TIFF write)
+                # is_comp_preview takes precedence when both are set,
+                # matching execute_exposure's flag-precedence rule.
+                if is_comp_preview:
+                    brk_destination = 'comp_preview'
+                elif is_preview:
+                    brk_destination = 'sensor_preview'
+                else:
+                    brk_destination = 'latent'
+
                 _finalize_brk_capture(
-                    merged, frame_num, cg_color, black_clip
+                    merged, frame_num, cg_color, black_clip,
+                    destination=brk_destination
                 )
 
                 # ---------- Cleanup ----------
