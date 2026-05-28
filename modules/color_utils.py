@@ -405,18 +405,32 @@ def write_merged_latent(merged_rgb, output_file, tiff_flag,
       2. RGB -> BGR convert for cv2.imwrite.
       3. Optional mono-mode strip.
       4. Camera-gel tint (cam_gel_rgb in RGB order, BGR-swapped here).
-      5. Unconditional overwrite to output_file. NO STACKING.
+      5. Additive stack onto any existing latent at output_file
+         (cv2.add, saturating at 65535), then write.
 
     Hot-pixel patching is NOT applied here. It happened per-bracket
     during cutil.dng_to_uint16_rgb. Doing it again would patch
     already-patched defects - benign but wasteful.
 
-    Unconditional overwrite (vs SSS/MDS's additive stack) is
-    intentional for BRK. Re-running Capture on a frame in BRK mode
-    OVERWRITES the previous latent because each BRK capture is
-    already a complete N-bracket merge. Stacking would saturate
-    channels quickly. This matches BRK's "every frame is a
-    discrete, complete bracketed exposure" mental model.
+    Additive stacking (same as process_and_stack_latent_image for
+    SSS/MDS) is intentional. It enables the full LIME workflow in
+    BRK mode: re-exposing a frame accumulates light, which is what
+    makes split-screen composites, holdout mattes, dodge/burn, and
+    layering BRK passes with SSS/MDS passes possible. Each Execute
+    adds to what is already in CamMag; Nuke CamMag for a fresh
+    start. The N-bracket merge that produced merged_rgb is the
+    WITHIN-frame combination (one complete exposure); the additive
+    stack here is the ACROSS-exposure accumulation (multiple passes
+    building a composite). They are different operations - the
+    merger handling the former does not mean the latter should be
+    disabled.
+
+    Note on the merger's averaging vs. this additive stack: because
+    the BRK merger averages its brackets (rather than summing), a
+    single BRK pass produces a relatively conservative exposure.
+    Stacking multiple passes is therefore well-behaved - it takes
+    several passes to approach saturation, giving fine control for
+    dodge/burn and composite work.
 
     Args:
         merged_rgb  : numpy.ndarray, uint16, (H, W, 3) in RGB order.
@@ -454,7 +468,18 @@ def write_merged_latent(merged_rgb, output_file, tiff_flag,
         )
         img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
 
-        # 4. Unconditional overwrite. See docstring for rationale.
+        # 4. Additive stack onto any existing latent, then write.
+        # cv2.add saturates at the dtype max (65535 for uint16)
+        # rather than wrapping - the correct behavior for light
+        # accumulation. Identical to process_and_stack_latent_image's
+        # stacking step, so BRK latents accumulate the same way
+        # SSS/MDS latents do. This is what enables multi-pass LIME
+        # compositing in BRK mode.
+        if os.path.exists(output_file):
+            existing = cv2.imread(output_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                img = cv2.add(img, existing.astype(np.uint16))
+
         cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
         return True
     except Exception as e:
