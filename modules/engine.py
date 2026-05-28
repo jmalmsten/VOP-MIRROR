@@ -1426,44 +1426,17 @@ def run_persistent_engine():
                 )
 
                 # ---------- Cleanup ----------
-                # DIAGNOSTIC MODE: per-bracket DNG preservation
-                #
-                # Normally we remove per-bracket DNGs and their JPG
-                # siblings here. Each capture leaves both files; the
-                # JPG is a libcamera-side preview that we don't use.
-                #
-                # During merger diagnosis (the period when we're
-                # building a harness to test the merger against
-                # real captures), we keep the DNGs around so the
-                # harness has a stable, reproducible input set.
-                # Each BRK Execute Sequence run overwrites the
-                # previous /tmp/vop_brk_buf_<frame>_b<n>.dng files
-                # in place, so there's only ever one set in /tmp
-                # at a time - no disk fill risk.
-                #
-                # REMOVE THIS DIAGNOSTIC BLOCK AND RESTORE THE
-                # NORMAL CLEANUP WHEN MERGER DIAGNOSIS IS DONE.
-                # Look for "DIAGNOSTIC MODE" in this file to find
-                # everything that needs reverting.
-                preserved = []
+                # Remove per-bracket DNGs and their JPG siblings.
+                # Each capture leaves both files; the JPG is a
+                # libcamera-side preview that we don't use. Both are
+                # transient - the merged latent (or preview JPG) is
+                # the only output we keep.
                 for buf in captured_files:
                     if os.path.exists(buf):
-                        preserved.append(buf)
+                        os.remove(buf)
                     jpg = buf.replace('.dng', '.jpg')
-                    # Still remove the libcamera-side JPG - it's
-                    # not useful for diagnosis and it's a few MB
-                    # each. We only need the DNGs.
                     if os.path.exists(jpg):
                         os.remove(jpg)
-
-                if preserved:
-                    log_audit(
-                        f"BRK DIAGNOSTIC: preserved {len(preserved)} "
-                        f"per-bracket DNGs at "
-                        f"/tmp/vop_brk_buf_{frame_num}_b*.dng "
-                        f"(this is a temporary diagnostic mode - "
-                        f"see comment in execute_brk_exposure)"
-                    )
 
             # ---------------------------------------------------------
             # TASK ROUTING & EXECUTION
