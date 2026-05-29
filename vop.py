@@ -827,7 +827,7 @@ def execute_seq():
 def measure_white_balance():
     # Calibration page: "Auto White Balance".
     #
-    # Fire-and-forget, exactly like ACB. The engine runs at the full
+    # Fire-and-forget, exactly like ACB. The engine runs the full
     # exposure-search -> WB loop -> confirm sequence in one task
     # (unlike ACB+black which split because they're independently
     # useful; WB search/solve/confirm is one logical operation).

@@ -2114,11 +2114,11 @@ def run_persistent_engine():
                     # Calibration page: "Auto White Balance".
                     # 
                     # Semi-auto WB gain finder, CLOSED LOOP on --awbgains.
-                    # For DNGs, libraw's default WB come from the
+                    # For DNGs, libraw's default WB comes from the
                     # AsShotNeutral that rpicam writes from --awbgains, so
                     # driving the camera gains directly changes the decoded
                     # TIFF. Verified on real captures: unity gain floors red
-                    # to black; 3.3/1.42 lands the grey ramp neutrall.
+                    # to black; 3.3/1.42 lands the grey ramp neutral.
                     # 
                     # "Semi": runs once here, stores awb_r/awb_b, jobs reuse
                     # them every frame -> WB can't drift mid-render.
@@ -2135,7 +2135,7 @@ def run_persistent_engine():
                     #   awb_b_new = awb_b_cur * (G / B)
                     # Linear, so this converges in 1-2 iterations.
 
-                    grey_level          = float(job_data.get('grey_level'0.5))
+                    grey_level          = float(job_data.get('grey_level', 0.5))
                     initial_exposure    = float(job_data.get('initial_exposure_s', 1.0))
                     # Safe per-channel-max window for the grey capture: above
                     # the noise floor, clear of clipping.
@@ -2174,18 +2174,18 @@ def run_persistent_engine():
                         f"tol={tol*100:.1f}% max_wb_iter={max_wb_iter}"
                     )
 
-                    # One grey captureat the CURRENT gains. note awb_r/awb_b
+                    # One grey capture at the CURRENT gains. note awb_r/awb_b
                     # are read from the enclosing scope each call, so as the
                     # loop updates them, captures track. Returns the dict form
                     # for per-channel values. Write probe_live.jpg too.
                     def _measure_grey(exp_s):
                         ctx.screen.use()
-                        ctx.clear(grey_level, grey_levl, grey_level, 1.0)
+                        ctx.clear(grey_level, grey_level, grey_level, 1.0)
                         pygame.display.flip()
                         total_ms= exp_s * 1000.0
                         buf_f = "/tmp/vop_wb_buf.dng"
                         cam_proc = hw.trigger_capture(
-                            buf_f, total_ms, gain, awbr, awb_b, cam_res,
+                            buf_f, total_ms, gain, awb_r, awb_b, cam_res,
                         )
                         hw.wait_for_sensor_prime()
                         time.sleep(total_ms / 1000.0)
@@ -2227,7 +2227,7 @@ def run_persistent_engine():
                     # --- PHASE 2: WB closed loop at the converged exposure. ---
                     eps = 1e-6
                     wb_converged = False
-                    for it in range(1, max_wb_iter +):
+                    for it in range(1, max_wb_iter +1):
                         m = _measure_grey(current_exposure)
                         r, g, b = m['channel_maxes']
 
@@ -2247,11 +2247,12 @@ def run_persistent_engine():
                             continue
 
                         res_r = abs(r - g) / max(g, eps)
-                        res_b = abs(r - b) / max(g, eps)
+                        res_b = abs(b - g) / max(g, eps)
                         log_audit(f"AWB | WB {it}/{max_wb_iter} | "
-                                  f"awb=(R={res_r*100:+.2f}% B={res_b*100:+.2f}%")
+                                  f"awb=(R={awb_r:.3f},B={awb_b:.3f}) | "
+                                  f"residual R={res_r*100:+.2f}% B={res_b*100:+.2f}%")
                         if res_r <= tol and res_b <= tol:
-                            wb_converged = Trueee
+                            wb_converged = True
                             break
                         
                         # Green-referenced correction. Clamp the per-step
@@ -2259,7 +2260,7 @@ def run_persistent_engine():
                         fr = min(max(g / max(r, eps), 0.5), 2.0)
                         fb = min(max(g / max(b, eps), 0.5), 2.0)
                         awb_r = min(max(awb_r * fr, 0.25), 16.0)
-                        awb_b = min(max(awb_b * fr, 0.25), 16.0)
+                        awb_b = min(max(awb_b * fb, 0.25), 16.0)
 
                     # --- Phase 3: confirm. Capture grey at the FINAL gains and
                     # report how neutral it actually came out. This is the real
@@ -2270,10 +2271,10 @@ def run_persistent_engine():
                     mc = _measure_grey(current_exposure)
                     rc, gc, bc = mc['channel_maxes']
                     res_r = abs(rc - gc) / max(gc, eps)
-                    res_b = abs(rc - gc) / max(gc, eps)
+                    res_b = abs(bc - gc) / max(gc, eps)
                     passed = (res_r <= tol) and (res_b <= tol)
                     log_audit(f"AWB | CONFIRM | awb=(R={awb_r:.3f},B={awb_b:.3f}) "
-                              f"residual R={res_r*100:+.2f}% B={res_b*100:+.2f} "
+                              f"residual R={res_r*100:+.2f}% B={res_b*100:+.2f}% "
                               f"-> {'PASS' if passed else 'FAIL'}")
                     
                     # Persist as awb_r/awb_b - the same keys jobs already use

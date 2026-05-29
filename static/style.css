@@ -415,7 +415,7 @@ body {
    green/red language as the single-measurement readout buckets.
 */
 .cal-wb-readout-pass {
-    color: var(--ok-color, #4caf4c);
+    color: var(--ok-color, #4caf50);
 }
 .cal-wb-readout-fail {
     color: var(--danger-color, #e53935);

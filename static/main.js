@@ -1312,7 +1312,7 @@ const calibration = {
 
         // Auto White Balance button. Same addEventListener pattern as the
         // others so the HTML stays JS-free.
-        const wbBtn = document.gettElementById('cal_wb_btn')
+        const wbBtn = document.getElementById('cal_wb_btn')
         if (wbBtn) wbBtn.addEventListener('click', () => this.runWhiteBalance());
 
         // Initial population of the Current Calibration readout panel.
@@ -1418,7 +1418,7 @@ const calibration = {
         // current Main-page awb_r/awb_b are the loop's STARTING gains - leave
         // them near your working values (e.g. 3.3/1.4) so it refines rather
         // than climbing red out of the floor from scratch.
-        const grey      = parseFloat(document.getElementById('cal_wb_grey').Value);
+        const grey      = parseFloat(document.getElementById('cal_wb_grey').value);
         const initial   = parseFloat(document.getElementById('cal_wb_initial').value);
         const elow      = parseFloat(document.getElementById('cal_wb_expo_low').value);
         const ehigh     = parseFloat(document.getElementById('cal_wb_expo_high').value);

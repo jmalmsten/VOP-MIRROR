@@ -154,7 +154,7 @@ No JS event handlers here - those are wired up by slice 7 in main.js.
     </div>
 
     <!-- Auto White Balance section.
-         Semi-auto: derives cameraWB gains (awb_r / awb_b) once from a
+         Semi-auto: derives camera WB gains (awb_r / awb_b) once from a
          neutral grey field via a closed loop on --awbgains, then jobs
          reuse them so WB never drifts between frames. Captures bypass the 
          timeline (ctx.clear), so no PG/CG is applied during measurement.
@@ -163,43 +163,43 @@ No JS event handlers here - those are wired up by slice 7 in main.js.
         <div class="group-title">Auto White Balance</div>
 
         <div class="cal-status-row">
-            <span span="cal-status-label">Status:</span>
+            <span class="cal-status-label">Status:</span>
             <span id="cal_wb_status_text" class="cal-status-text">Ready</span>
         </div>
 
         <!-- Search parameters. Grey level + the safe mid-tone window the
-             exposure aims the brightness channel into
+             exposure aims the brightest channel into
         -->
-        <dif class="constants-zone cal-wb-params">
+        <div class="constants-zone cal-wb-params">
             <div class="const-group">
                 <label>Grey Level</label>
                 <input type="number" id="cal_wb_grey" step="0.01" min="0" max="1" value="0.5"
-                       title="Framebuffer grey shown during WB meadurement. 0.5 is a safe midtone. Neutrality matters, not the exact level.">
+                       title="Framebuffer grey shown during WB measurement. 0.5 is a safe mid-tone. Neutrality matters, not the exact level.">
             </div>
             <div class="const-group">
                 <label>Initial Exposure (s)</label>
-                <input type="number" id="cal-wb_initial" step="0.001" value="1.0"
+                <input type="number" id="cal_wb_initial" step="0.001" value="1.0"
                        title="Starting exposure for the WB exposure search.">
             </div>
             <div class="const-group">
                 <label>Expo Target Low</label>
                 <input type="number" id="cal_wb_expo_low" step="0.01" value="0.45"
-                       title="Lower bound for the brightness channel. Keeps the grey above the noise floor.">
+                       title="Lower bound for the brightest channel. Keeps the grey above the noise floor.">
             </div>
             <div class="const-group">
                 <label>Expo Target High</label>
                 <input type="number" id="cal_wb_expo_high" step="0.01" value="0.70"
                        title="Upper bound for the brightest channel. keeps every channel clear of clipping.">
             </div>
-        </dif>
+        </div>
 
-        <div class=""input-row spaced cal-wb-trigger-row">
+        <div class="input-row spaced cal-wb-trigger-row">
             <button type="button" class="action-btn" id="cal_wb_btn"
                     title="Find camera WB gains from a neutral grey, then confirm Persists awb_r / awb_b and writes them to the main page.">AUTO WHITE BALANCE</button>
         </div>
 
         <!-- Result readout. These are the camera gains the loop converged on,
-             plus the confirmed residual (the accountant's trugh check).
+             plus the confirmed residual (the accountant's truth check).
         -->
         <div class="cal-readout-grid">
             <div class="cal-readout-label">awb_r:</div>
