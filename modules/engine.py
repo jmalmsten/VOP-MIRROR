@@ -2145,7 +2145,7 @@ def run_persistent_engine():
                     # WB convergence: stop when both channels are within tol
                     # of green, 0.01 = 1% ("accountant's truth").
                     tol                 = float(job_data.get('wb_tolerance', 0.01))
-                    max_wb_iter         = int(job_data.get('max_wb_iterations', 4))
+                    max_wb_iter         = int(job_data.get('max_wb_iterations', 6))
                     # A channel reading below this (normalized) is floored /
                     # noise-dominated: its G/ratio is meaningless. We bootstrap
                     # its gain up instead of dividing by ~zero.
@@ -2255,10 +2255,34 @@ def run_persistent_engine():
                             wb_converged = True
                             break
                         
-                        # Green-referenced correction. Clamp the per-step
-                        # factor so one noisy read can't fling the gain wild
-                        fr = min(max(g / max(r, eps), 0.5), 2.0)
-                        fb = min(max(g / max(b, eps), 0.5), 2.0)
+                        # DAMPED green-referenced correction.
+                        #
+                        # WHY: the decoded channel ratios respond to an awbgain
+                        # change with a LOOP GAIN of ~2.5 - a 10% change in
+                        # awb_r moves the measured R/G by ~30% - because
+                        # rawpy.postprocess runs the camera colour matrix, so
+                        # green is NOT a fixed reference and the ratio over-
+                        # shoots. An undamped step (the old code) therefore
+                        # oscillates and runs away to magenta. We under-relax
+                        # by raising the ratio to a power < 1: with damping ~0.4
+                        # the effective loop gain is ~1 (near-Newton), so it
+                        # settles in 1-2 iterations.
+                        #
+                        # Tuning: if you still see the residual bounce/grow,
+                        # LOWER wb_damping (e.g. 0.3 -> smaller, safer steps).
+                        # If it converges but too slowly, raise it toward 0.5.
+                        damping = float(job_data.get('wb_damping', 0.4))
+                        fr = (g / max(r, eps)) ** damping
+                        fb = (g / max(b, eps)) ** damping
+
+                        # Tighter per-step clamp than the old [0.5, 2.0]. With
+                        # damping the steps are small near convergence, so this
+                        # is only a guard against one wild measurement. The old
+                        # wide clamp let the oscillation build amplitude (you
+                        # can see it hit exactly 0.5 in run 2); keep it near 1.
+                        fr = min(max(fr, 0.7), 1.4)
+                        fb = min(max(fb, 0.7), 1.4)
+
                         awb_r = min(max(awb_r * fr, 0.25), 16.0)
                         awb_b = min(max(awb_b * fb, 0.25), 16.0)
 
