@@ -2178,7 +2178,25 @@ def run_persistent_engine():
                     # are read from the enclosing scope each call, so as the
                     # loop updates them, captures track. Returns the dict form
                     # for per-channel values. Write probe_live.jpg too.
-                    def _measure_grey(exp_s):
+                    def _measure_grey_avg(exp_s, n):
+                        # Average N captures of the SAME grey to pull the
+                        # per-frame measurement noise down. Noise falls ~as
+                        # 1/sqrt(N), so 4 frames roughly halves it. We only
+                        # need this for the verdict: at convergence the true
+                        # WB error (~0.3-0.5%) is smaller than single-frame
+                        # noise (~0.65%), so a one-shot CONFIRM is a coin
+                        # flip against a 1% tolerance. Averaging makes PASS
+                        # mean "actually balanced" instead of "lucky frame".
+                        rs = gs = bs = 0.0
+                        pcm = 0.0
+                        n = max(1, n)
+                        for _ in range(n):
+                            m = _measure_grey(exp_s)
+                            r, g, b = m['channel_maxes']
+                            rs += r; gs += g; bs += b
+                            pcm = max(pcm, m['per_channel_max'])
+                        return {'channel_maxes': (rs / n, gs / n, bs / n),
+                                'per_channel_max': pcm}
                         ctx.screen.use()
                         ctx.clear(grey_level, grey_level, grey_level, 1.0)
                         pygame.display.flip()
@@ -2292,7 +2310,11 @@ def run_persistent_engine():
                     # camera genuinely produces at the gains we're about to 
                     # store. (no digital multiply needed - the gains are baked
                     # into this capture via --awbgains.) ---
-                    mc = _measure_grey(current_exposure)
+                    # Averaged confirm: the verdict is the one place precision
+                    # matters more than speed. Frames count from wb_confirm_avg
+                    # (default 4); set to 1 to restore single-frame behaviour.
+                    wb_confirm_avg = int(job_data.get('wb_confirm_avg', 4))
+                    mc = _measure_grey_avg(current_exposure, wb_confirm_avg)
                     rc, gc, bc = mc['channel_maxes']
                     res_r = abs(rc - gc) / max(gc, eps)
                     res_b = abs(bc - gc) / max(gc, eps)
