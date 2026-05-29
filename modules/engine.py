@@ -2174,33 +2174,16 @@ def run_persistent_engine():
                         f"tol={tol*100:.1f}% max_wb_iter={max_wb_iter}"
                     )
 
-                    # One grey capture at the CURRENT gains. note awb_r/awb_b
+                    # SINGLE-CAPTURE PRIMITIVE.
+                    # One grey capture at the CURRENT gains. Note awb_r/awb_b
                     # are read from the enclosing scope each call, so as the
                     # loop updates them, captures track. Returns the dict form
-                    # for per-channel values. Write probe_live.jpg too.
-                    def _measure_grey_avg(exp_s, n):
-                        # Average N captures of the SAME grey to pull the
-                        # per-frame measurement noise down. Noise falls ~as
-                        # 1/sqrt(N), so 4 frames roughly halves it. We only
-                        # need this for the verdict: at convergence the true
-                        # WB error (~0.3-0.5%) is smaller than single-frame
-                        # noise (~0.65%), so a one-shot CONFIRM is a coin
-                        # flip against a 1% tolerance. Averaging makes PASS
-                        # mean "actually balanced" instead of "lucky frame".
-                        rs = gs = bs = 0.0
-                        pcm = 0.0
-                        n = max(1, n)
-                        for _ in range(n):
-                            m = _measure_grey(exp_s)
-                            r, g, b = m['channel_maxes']
-                            rs += r; gs += g; bs += b
-                            pcm = max(pcm, m['per_channel_max'])
-                        return {'channel_maxes': (rs / n, gs / n, bs / n),
-                                'per_channel_max': pcm}
+                    # for per-channel values. Writes probe_live.jpg too.
+                    def _measure_grey(exp_s):
                         ctx.screen.use()
                         ctx.clear(grey_level, grey_level, grey_level, 1.0)
                         pygame.display.flip()
-                        total_ms= exp_s * 1000.0
+                        total_ms = exp_s * 1000.0
                         buf_f = "/tmp/vop_wb_buf.dng"
                         cam_proc = hw.trigger_capture(
                             buf_f, total_ms, gain, awb_r, awb_b, cam_res,
@@ -2211,6 +2194,29 @@ def run_persistent_engine():
                         return cutil.measure_centre_brightness(
                             buf_f, static_dir, return_dict=True
                         )
+
+                    # AVERAGING WRAPPER.
+                    # Average N captures of the SAME grey to pull the per-frame
+                    # measurement noise down. Noise falls ~as 1/sqrt(N), so 4
+                    # frames roughly halves it. We only need this for the
+                    # verdict: at convergence the true WB error (~0.3-0.5%) is
+                    # smaller than single-frame noise (~0.65%), so a one-shot
+                    # CONFIRM is a coin flip against a 1% tolerance. Averaging
+                    # makes PASS mean "actually balanced" instead of "lucky
+                    # frame". Calls the primitive above N times and means the
+                    # per-channel values; per_channel_max is kept as the worst
+                    # (max) seen, since that's a clipping guard not an average.
+                    def _measure_grey_avg(exp_s, n):
+                        rs = gs = bs = 0.0
+                        pcm = 0.0
+                        n = max(1, n)
+                        for _ in range(n):
+                            m = _measure_grey(exp_s)
+                            r, g, b = m['channel_maxes']
+                            rs += r; gs += g; bs += b
+                            pcm = max(pcm, m['per_channel_max'])
+                        return {'channel_maxes': (rs / n, gs / n, bs / n),
+                                'per_channel_max': pcm}
                     
                     # --- PHASE 1: exposure search (ACB-shaped bisection. run
                     # at the starting gains so all channels have signal).---
@@ -2225,7 +2231,7 @@ def run_persistent_engine():
                         r, g, b = m['channel_maxes']
                         log_audit(f"AWB | Expo {it}/{max_expo_iter} | "
                                   f"exp={current_exposure:.4f}s pcm={pcm:.4f} "
-                                  f"(R={r:.3f},G={g:.3f},B={b:.3f}")
+                                  f"(R={r:.3f},G={g:.3f},B={b:.3f})")
                         if pcm < expo_low:
                             low_bound = current_exposure
                             current_exposure = (current_exposure * 2.0
