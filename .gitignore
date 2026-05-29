@@ -17,6 +17,7 @@ vop_focus_tests/
 current_job.json
 ffmpeg_metadata.txt
 static/noise_data.json
+static/calibration.json
 
 # --- Python Junk ---
 __pycache__/
@@ -33,6 +34,7 @@ __pycache__/
 # Ignore local VSCodium settings
 .vscode/
 VOP.code-workspace
+CaliTools/alignment.log
 
 # Ignore the dump.txt's
 vop_dump*.txt

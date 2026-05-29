@@ -319,6 +319,342 @@ def generate_comp_preview(buffer_file, static_dir, cam_mag_dir, frame_num,
 
     return True
 
+def dng_to_uint16_rgb(buffer_file, static_dir, black_clip=0.0):
+    """
+    Decode a camera DNG to a 16-bit linear RGB numpy array,
+    with hot-pixel patching and noise pedestal subtraction
+    applied. NO color gel, NO TIFF write, NO disk side
+    effects beyond reading buffer_file.
+
+    Args:
+        buffer_file : str. Path to a camera DNG file on disk
+                      (typically /tmp/vop_buf_*.dng or a
+                      BRK-specific per-bracket variant).
+        static_dir  : str. Path to the runtime static dir;
+                      passed through to apply_hot_pixel_patch
+                      which reads the defect map from there.
+        black_clip  : float, default 0.0. The pedestal value
+                      to subtract; defaults to 0.0 (no
+                      subtraction) for callers that want the
+                      raw decode without the SSS/MDS path's
+                      pedestal handling.
+
+    Returns:
+        numpy.ndarray, dtype=uint16, shape=(H, W, 3). In RGB
+        channel order (NOT BGR - matches what the camera
+        produces directly out of rawpy.postprocess, and what
+        brk_merger.merge() expects as input). The caller is
+        responsible for any further processing (gel tint,
+        BGR conversion for cv2.imwrite, etc.).
+
+        Returns None if buffer_file does not exist or rawpy
+        fails to decode it. Callers should check for None.
+
+    This is the DNG-decode-and-clean prefix of the SSS/MDS
+    pipeline that process_and_stack_latent_image runs.
+    Factoring it out lets the BRK execute path get N decoded
+    arrays for merging without writing N intermediate
+    latent TIFFs to disk.
+    """
+    if not os.path.exists(buffer_file):
+        return None
+
+    try:
+        # Identical postprocess parameters to process_and_stack_latent_image:
+        # gamma=(1,1)        - strictly linear, no display gamma applied
+        # no_auto_bright     - no automatic exposure compensation
+        # output_bps=16      - full 16-bit precision
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True, output_bps=16)
+
+        # Hot pixel patching (uses defect map from static_dir).
+        # Identical to process_and_stack_latent_image's call.
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+
+        # Pedestal subtraction. For BRK, black_clip is usually
+        # left at 0.0 because the merger's per-bracket weighting
+        # handles noise-floor masking implicitly - the deepest
+        # bracket's slice cut-off acts as the floor. But the
+        # parameter is exposed so callers that DO want pedestal
+        # subtraction (e.g. an SSS-style consumer that happens
+        # to want a decoded array) can opt in.
+        rgb = apply_pedestal(rgb, black_clip)
+
+        return rgb
+
+    except Exception as e:
+        # Return None on failure rather than raising. Mirrors
+        # process_and_stack_latent_image's silent-failure
+        # contract; the engine logs the failure via its own
+        # audit channel when None comes back.
+        print(f"[VOP WARNING] dng_to_uint16_rgb decode error for {buffer_file}: {e}")
+        return None
+
+def write_merged_latent(merged_rgb, output_file, tiff_flag,
+                        cam_gel_rgb, mono_forced, black_clip=0.0):
+    """
+    Write a pre-decoded uint16 RGB array as a latent TIFF.
+
+    Pre-decoded-array equivalent of process_and_stack_latent_image
+    for BRK mode. The input array has already been decoded from
+    per-bracket DNGs and merged via brk_merger.merge - this function
+    picks up the post-decode pipeline from there.
+
+    Pipeline steps applied:
+      1. Pedestal subtraction (apply_pedestal).
+      2. RGB -> BGR convert for cv2.imwrite.
+      3. Optional mono-mode strip.
+      4. Camera-gel tint (cam_gel_rgb in RGB order, BGR-swapped here).
+      5. Additive stack onto any existing latent at output_file
+         (cv2.add, saturating at 65535), then write.
+
+    Hot-pixel patching is NOT applied here. It happened per-bracket
+    during cutil.dng_to_uint16_rgb. Doing it again would patch
+    already-patched defects - benign but wasteful.
+
+    Additive stacking (same as process_and_stack_latent_image for
+    SSS/MDS) is intentional. It enables the full LIME workflow in
+    BRK mode: re-exposing a frame accumulates light, which is what
+    makes split-screen composites, holdout mattes, dodge/burn, and
+    layering BRK passes with SSS/MDS passes possible. Each Execute
+    adds to what is already in CamMag; Nuke CamMag for a fresh
+    start. The N-bracket merge that produced merged_rgb is the
+    WITHIN-frame combination (one complete exposure); the additive
+    stack here is the ACROSS-exposure accumulation (multiple passes
+    building a composite). They are different operations - the
+    merger handling the former does not mean the latter should be
+    disabled.
+
+    Note on the merger's averaging vs. this additive stack: because
+    the BRK merger averages its brackets (rather than summing), a
+    single BRK pass produces a relatively conservative exposure.
+    Stacking multiple passes is therefore well-behaved - it takes
+    several passes to approach saturation, giving fine control for
+    dodge/burn and composite work.
+
+    Args:
+        merged_rgb  : numpy.ndarray, uint16, (H, W, 3) in RGB order.
+                      The merger's output.
+        output_file : str. Absolute path to the destination TIFF.
+        tiff_flag   : int. cv2.IMWRITE_TIFF_COMPRESSION value (8 =
+                      ADOBE_DEFLATE/ZIP, 1 = no compression).
+        cam_gel_rgb : numpy.ndarray, (3,), float in [0, 1], RGB order.
+                      Camera gel tint to apply at write time.
+        mono_forced : bool. If True, strip color before tinting.
+        black_clip  : float, default 0.0. Pedestal value for
+                      apply_pedestal.
+
+    Returns:
+        True on success, False on failure. Failure is silent
+        (logged to stderr via print) - same contract as the
+        sibling functions.
+    """
+    try:
+        img = apply_pedestal(merged_rgb, black_clip)
+
+        # 1. RGB -> BGR for OpenCV.
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        # 2. Mono mode.
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # 3. Camera gel tint. cam_gel_rgb is RGB but img is now BGR,
+        # so we reorder the multiplier vector accordingly.
+        gel_bgr = np.array(
+            [cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]],
+            dtype=np.float32
+        )
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # 4. Additive stack onto any existing latent, then write.
+        # cv2.add saturates at the dtype max (65535 for uint16)
+        # rather than wrapping - the correct behavior for light
+        # accumulation. Identical to process_and_stack_latent_image's
+        # stacking step, so BRK latents accumulate the same way
+        # SSS/MDS latents do. This is what enables multi-pass LIME
+        # compositing in BRK mode.
+        if os.path.exists(output_file):
+            existing = cv2.imread(output_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                img = cv2.add(img, existing.astype(np.uint16))
+
+        cv2.imwrite(output_file, img, [cv2.IMWRITE_TIFF_COMPRESSION, tiff_flag])
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] write_merged_latent error: {e}")
+        return False
+
+
+def merged_to_sensor_preview(merged_rgb, static_dir, cam_gel_rgb,
+                             mono_forced, black_clip=0.0,
+                             par_x=1.0, par_y=1.0,
+                             preview_unsqueeze=False):
+    """
+    Write a pre-decoded uint16 RGB array as the Cam View preview JPG.
+
+    Pre-decoded-array equivalent of generate_sensor_preview for BRK
+    mode. Same pipeline as that function from the BGR-convert step
+    onward.
+
+    Pipeline:
+      1. Pedestal subtraction.
+      2. RGB -> BGR.
+      3. Downscale to 8bpc.
+      4. Mono-mode strip (after downscale, matching sibling).
+      5. Camera-gel tint.
+      6. Optional anamorphic preview unsqueeze.
+      7. Write to static/probe_live.jpg.
+
+    Hot-pixel patching is NOT applied here (already done per-bracket).
+
+    Args:
+        merged_rgb        : numpy.ndarray, uint16, (H, W, 3) RGB.
+        static_dir        : str. Path containing probe_live.jpg.
+        cam_gel_rgb       : (3,) float [0..1] RGB. Camera gel.
+        mono_forced       : bool.
+        black_clip        : float, default 0.0.
+        par_x, par_y      : float. Anamorphic pixel-aspect-ratio
+                            components.
+        preview_unsqueeze : bool. If True and PAR != 1, apply
+                            inverse-squeeze at JPG resolution.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        img = apply_pedestal(merged_rgb, black_clip)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        # Downscale to 8-bit AFTER the high-precision math.
+        img = (img / 256.0).astype(np.uint8)
+
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        gel_bgr = np.array(
+            [cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]],
+            dtype=np.float32
+        )
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 255).astype(np.uint8)
+
+        # Anamorphic preview unsqueeze - identical to
+        # generate_sensor_preview's logic.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] BRK preview unsqueeze failed (falling back to squeezed): {e}")
+
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] merged_to_sensor_preview error: {e}")
+        return False
+
+
+def merged_to_comp_preview(merged_rgb, static_dir, cam_mag_dir, frame_num,
+                           cam_gel_rgb, mono_forced, black_clip=0.0,
+                           par_x=1.0, par_y=1.0,
+                           preview_unsqueeze=False):
+    """
+    Write a pre-decoded uint16 RGB array as the Comp View preview JPG.
+
+    Pre-decoded-array equivalent of generate_comp_preview for BRK
+    mode. Same pipeline as that function from the BGR-convert step
+    onward.
+
+    The pipeline matches generate_comp_preview: the new exposure is
+    composited additively (cv2.add at uint16) against any existing
+    latent at this frame, then downscaled to 8-bit for the JPG.
+
+    CRITICAL: the existing latent TIFF in cam_mag_dir is read but
+    NEVER written back. Comp View must be safe to spam without
+    altering the latent on disk.
+
+    Hot-pixel patching is NOT applied here (already done per-bracket).
+
+    Args:
+        merged_rgb        : numpy.ndarray, uint16, (H, W, 3) RGB.
+        static_dir        : str. Path containing probe_live.jpg.
+        cam_mag_dir       : str. Path to CamMag/ where the existing
+                            latent (if any) lives.
+        frame_num         : int. For finding the existing latent.
+        cam_gel_rgb       : (3,) float [0..1] RGB.
+        mono_forced       : bool.
+        black_clip        : float, default 0.0.
+        par_x, par_y      : float.
+        preview_unsqueeze : bool.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        img = apply_pedestal(merged_rgb, black_clip)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        if mono_forced:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # Cam gel in 16-bit (matching generate_comp_preview's
+        # clip range so the additive math below sees the same
+        # 16-bit integer space).
+        gel_bgr = np.array(
+            [cam_gel_rgb[2], cam_gel_rgb[1], cam_gel_rgb[0]],
+            dtype=np.float32
+        )
+        img = (img.astype(np.float32) * gel_bgr).clip(0, 65535).astype(np.uint16)
+
+        # Additive composite against any existing latent. Read-only.
+        existing_latent_file = os.path.join(
+            cam_mag_dir, f"latent_{str(int(frame_num)).zfill(4)}.tif"
+        )
+        if os.path.exists(existing_latent_file):
+            existing = cv2.imread(existing_latent_file, cv2.IMREAD_UNCHANGED)
+            if existing is not None:
+                # cv2.add saturates at 65535 (matching a real execute).
+                img = cv2.add(img, existing.astype(np.uint16))
+
+        # Downscale to 8-bit for the JPG preview.
+        img = (img / 256.0).astype(np.uint8)
+
+        # Anamorphic preview unsqueeze - identical to
+        # generate_comp_preview's logic.
+        if preview_unsqueeze:
+            try:
+                px = float(par_x) if float(par_x) > 0 else 1.0
+                py = float(par_y) if float(par_y) > 0 else 1.0
+                par = px / py
+                if abs(par - 1.0) > 1e-6:
+                    h, w = img.shape[:2]
+                    if par > 1.0:
+                        new_w = int(round(w * par))
+                        img = cv2.resize(img, (new_w, h), interpolation=cv2.INTER_CUBIC)
+                    else:
+                        new_h = int(round(h / par))
+                        img = cv2.resize(img, (w, new_h), interpolation=cv2.INTER_CUBIC)
+            except Exception as e:
+                print(f"[VOP WARNING] BRK comp preview unsqueeze failed (falling back to squeezed): {e}")
+
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img)
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] merged_to_comp_preview error: {e}")
+        return False
+
 def process_and_stack_latent_image(buffer_file, static_dir, output_file, tiff_flag, cam_gel_rgb, mono_forced, black_clip=0.0):
     if not os.path.exists(buffer_file): return False
 
@@ -433,6 +769,179 @@ def measure_noise_floor(buffer_file, static_dir):
         dummy = buffer_file.replace(".dng", ".jpg")
         if os.path.exists(dummy): os.remove(dummy)
 
+def measure_centre_brightness(buffer_file, static_dir, patch_fraction=0.05,
+                              return_dict=False):
+    """
+    Centre-weighted brightness measurement for calibration routines.
+
+    Reads the DNG captured by the camera, demosaics it via rawpy, takes
+    a small square region at the geometric centre of the frame, and
+    computes brightness metrics on it. Also writes a JPG preview of
+    the full capture (with a green rectangle showing the measurement
+    region) to probe_live.jpg so the Calibration page can display what
+    was actually measured.
+
+    Args:
+        buffer_file    : str. Path to the DNG file just written by
+                         hw.trigger_capture(). Same convention as
+                         measure_noise_floor.
+        static_dir     : str. Path to the static/ directory. Used for
+                         the probe_live.jpg write and (via
+                         apply_hot_pixel_patch) the hot pixel JSON
+                         path.
+        patch_fraction : float in (0, 1]. Side length of the centre
+                         square as a fraction of the smaller image
+                         dimension. Default 0.05 = a 5%-side square,
+                         which is small enough to avoid corner
+                         vignetting and large enough to average out
+                         per-pixel noise.
+        return_dict    : bool. When False (default), returns the mean
+                         brightness as a float. When True, returns a
+                         dict with mean, per_channel_max, and
+                         channel_maxes - the per-channel info ACB
+                         needs to detect single-channel saturation.
+
+                         The dict form is opt-in rather than the
+                         default because most callers (the manual
+                         "Single Measurement" button, a future
+                         exposure-preview helper, anything else that
+                         just wants "how bright was this?") only need
+                         the scalar. ACB is the unusual caller that
+                         needs to reason about channels separately.
+
+    Returns:
+        If return_dict is False:
+            float in [0.0, 1.0] - the mean brightness across R, G, B.
+        If return_dict is True:
+            dict with keys:
+                'mean'             : float, mean across R, G, B in [0,1]
+                'per_channel_max'  : float, max(R_max, G_max, B_max) in
+                                     [0,1]. THIS is the metric ACB
+                                     should chase - it goes to 1.0 the
+                                     moment any single channel clips.
+                'channel_maxes'    : tuple of (r_max, g_max, b_max),
+                                     each in [0,1]. Diagnostic; ACB
+                                     logs these so the user can see
+                                     which channel hit the ceiling
+                                     first (= WB diagnosis hint).
+
+    Notes for future-me:
+        Earlier versions of this function used cv2.imread on the DNG,
+        which returns raw Bayer pattern data (not demosaiced RGB).
+        That caused readings to come back at roughly 1/4 of the actual
+        sensor response because three out of every four positions in
+        each "channel" are zeros from the other Bayer colours. The
+        correct path - matching measure_noise_floor - is rawpy with
+        gamma=(1,1), no_auto_bright=True, output_bps=16, which gives
+        properly demosaiced linear 16-bit RGB.
+    """
+    # Defensive fallback values. We construct them once here so that
+    # any of the early-return paths below can hand back consistent
+    # shapes. Sentinel value is 1.0 ("near saturation, back off")
+    # because that's the safer direction for ACB to misread - a false
+    # "low" reading would push the convergence loop toward even longer
+    # exposures and waste time chasing a doomed capture.
+    fallback_scalar = 1.0
+    fallback_dict = {
+        'mean': 1.0,
+        'per_channel_max': 1.0,
+        'channel_maxes': (1.0, 1.0, 1.0),
+    }
+
+    if not os.path.exists(buffer_file):
+        return fallback_dict if return_dict else fallback_scalar
+
+    try:
+        # Strictly linear 16-bit extraction. Identical posture to
+        # measure_noise_floor: gamma=(1,1) means no tonemap,
+        # no_auto_bright disables rawpy's automatic exposure
+        # correction (we want raw measurements, not "what looks
+        # nice"), output_bps=16 preserves full sensor precision.
+        with rawpy.imread(buffer_file) as raw:
+            rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True,
+                                  output_bps=16)
+
+        # Patch hot pixels before measurement so a single stuck pixel
+        # in the metering region doesn't drag any metric upward and
+        # confuse ACB's "are we near saturation?" decision.
+        rgb = apply_hot_pixel_patch(rgb, static_dir)
+
+        # rawpy returns shape (H, W, 3) in RGB order. The centre
+        # patch is sized as a fraction of min(H, W) so it stays
+        # square on any aspect ratio.
+        h, w = rgb.shape[:2]
+        side = int(min(h, w) * patch_fraction)
+        side = max(1, side)
+        cy, cx = h // 2, w // 2
+        half = side // 2
+
+        patch = rgb[cy - half : cy + half, cx - half : cx + half]
+
+        # Mean across all pixels and all channels - the "typical
+        # brightness" metric for the manual readout.
+        mean_brightness = float(patch.mean()) / 65535.0
+
+        # 99th percentile per channel rather than raw max.
+        #
+        # Raw .max() is one hot pixel away from being wrong: a single
+        # sensor pixel stuck at 65535 inside the metering patch makes
+        # every measurement return per_channel_max=1.0 regardless of
+        # actual screen brightness. ACB can't converge against a
+        # constant signal - it bisects forever and the algorithm has
+        # no way to recover.
+        #
+        # 99th percentile rejects the top 1% of pixels per channel,
+        # which is roughly 56 pixels on a 75x75 patch (the size we
+        # get from patch_fraction=0.05 on a 2028x1520 capture). That
+        # is more than enough to mask out unmapped hot pixels while
+        # still firing immediately when real clipping happens, since
+        # real clipping affects thousands of pixels at once - the
+        # 99th percentile saturates almost as fast as the absolute
+        # max when the screen genuinely whites out.
+        #
+        # Compare measure_noise_floor which uses 99.9th percentile
+        # for similar reasons; ACB uses the slightly tighter 99th
+        # because the noise crusher wants to be conservative about
+        # what counts as "noise" (more outliers ignored = lower
+        # crush level = more cleanup) while ACB wants to be liberal
+        # about what counts as "clipping" (fewer outliers ignored =
+        # detect real saturation sooner).
+        r_max = float(np.percentile(patch[:, :, 0], 99)) / 65535.0
+        g_max = float(np.percentile(patch[:, :, 1], 99)) / 65535.0
+        b_max = float(np.percentile(patch[:, :, 2], 99)) / 65535.0
+        per_channel_max = max(r_max, g_max, b_max)
+
+        # --- PREVIEW GENERATION ---
+        # Convert to 8-bit BGR for the JPG write. Same shape /
+        # bit-depth conversion measure_noise_floor uses.
+        img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        img_8bit = (img_bgr / 256.0).astype(np.uint8)
+
+        # Burn a bright green rectangle around the measured region.
+        # This matches the noise-crusher preview style and gives the
+        # user visual confirmation of where the measurement happened.
+        cv2.rectangle(img_8bit, (cx - half, cy - half),
+                      (cx + half, cy + half), (0, 255, 0), 2)
+        cv2.imwrite(os.path.join(static_dir, "probe_live.jpg"), img_8bit)
+
+        if return_dict:
+            return {
+                'mean': mean_brightness,
+                'per_channel_max': per_channel_max,
+                'channel_maxes': (r_max, g_max, b_max),
+            }
+        return mean_brightness
+
+    except Exception as e:
+        print(f"[VOP WARNING] Peak Measurement Error: {e}")
+        return fallback_dict if return_dict else fallback_scalar
+    finally:
+        # Cleanup, same as measure_noise_floor.
+        if os.path.exists(buffer_file):
+            os.remove(buffer_file)
+        dummy = buffer_file.replace(".dng", ".jpg")
+        if os.path.exists(dummy):
+            os.remove(dummy)
 def apply_hot_pixel_patch(img_16bit, static_dir):
     """
     Reads the hot pixel map and replaces defective pixels with the median of their neighbors.

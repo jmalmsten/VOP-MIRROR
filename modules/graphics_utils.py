@@ -50,25 +50,69 @@ def init_render_pipeline():
     }
     """
     
+    # FRAGMENT SHADER
+    #
+    # Samples the bound texture, optionally applies a source-slice
+    # remap (BRK mode), optionally converts to grayscale, and
+    # multiplies by the per-frame filter color (PG*CG combined gel).
+    #
+    # The slice remap is bracketed-mode specific. When slice_active
+    # is true, the sampled texture color (assumed to represent a
+    # normalized 16bpc source value in [0..1]) is linearly mapped
+    # so that source value slice_low maps to screen 0.0 and
+    # source value slice_high maps to screen 1.0. Values outside
+    # [slice_low, slice_high] clip. This is what lets BRK use the
+    # 8-bit projection panel to show a fine slice of the 16bpc
+    # source range without losing precision to the panel's
+    # quantization.
+    #
+    # When slice_active is false (default), the remap is bypassed
+    # and tex_col passes through untouched. All non-BRK modes
+    # (SSS, MDS, DRE) rely on this default - they never set
+    # slice_active, so they get exactly the same fragment output
+    # they did before this uniform existed.
     frag = """
     #version 300 es
     precision mediump float;
     uniform sampler2D TexUnit;
     uniform vec3 filter_color;
-    uniform bool mono_mode; // <-- Added the uniform receiver
-    
+    uniform bool mono_mode;
+
+    // BRK source-slice remap uniforms.
+    // slice_active=false (default) bypasses the remap entirely,
+    // making the shader behave identically to the pre-BRK build.
+    // When true, slice_low / slice_high define the source range
+    // that gets stretched to fill screen [0..1].
+    uniform bool slice_active;
+    uniform float slice_low;
+    uniform float slice_high;
+
     in vec2 v_tex;
     out vec4 f_color;
-    
+
     void main() {
         vec4 tex_col = texture(TexUnit, v_tex);
-        
-        // <-- Convert to grayscale if the toggle is active
+
+        // BRK SOURCE-SLICE REMAP
+        // Active only when slice_active is set by the engine
+        // (BRK execute path); off in all other modes.
+        // Implemented per-channel because BRK source is RGB and
+        // each channel undergoes the same remap independently.
+        // The clamp at the end ensures pixels outside the slice
+        // clip cleanly to 0 or 1 rather than producing negatives
+        // or values >1 that would interact weirdly with the
+        // filter multiply below.
+        if (slice_active) {
+            float slice_width = slice_high - slice_low;
+            tex_col.rgb = clamp((tex_col.rgb - slice_low) / slice_width, 0.0, 1.0);
+        }
+
+        // MONOCHROME PATH (unchanged from before)
         if (mono_mode) {
             float gray = dot(tex_col.rgb, vec3(0.299, 0.587, 0.114));
             tex_col.rgb = vec3(gray);
         }
-        
+
         f_color = tex_col * vec4(filter_color, 1.0);
     }
     """
@@ -79,6 +123,24 @@ def init_render_pipeline():
     # Initialize the mono uniform to a safe default
     if 'mono_mode' in prog:
         prog['mono_mode'].value = False
+        
+    # BRK slice-remap uniforms: initialize to passthrough defaults
+    # so that any code path that doesn't explicitly set them
+    # behaves identically to the pre-BRK shader. The engine's
+    # BRK execute path will override these per-bracket. The
+    # 'in prog' guards protect against drivers that strip
+    # unused uniforms during shader compilation (unlikely with
+    # an `if (slice_active)` branch keeping them referenced,
+    # but defensive). If a uniform is missing, the default-
+    # behavior path (slice_active=false) still holds because
+    # missing uniforms in GLSL default to 0/false, which is
+    # exactly our passthrough configuration.
+    if 'slice_active' in prog:
+        prog['slice_active'].value = False
+    if 'slice_low' in prog:
+        prog['slice_low'].value = 0.0
+    if 'slice_high' in prog:
+        prog['slice_high'].value = 1.0
 
     verts = np.array([
         -1.0,  1.0, 0.0, 1.0,
@@ -158,11 +220,22 @@ class TextureManager:
         playhead position.
         
         layer: one of 'pm', 'bp1', 'bp2'. Anything else falls back to PM for 
-               safety, so a typo in a caller can't crash the engine.
+            safety, so a typo in a caller can't crash the engine.
         
         If the layer has no frames on disk, returns the white pass-through 
         texture with a default 16:9 aspect ratio - the engine's render path
         special-cases white_tex to skip the geometry transform entirely.
+        
+        Bit-depth handling (phase 2 of issue #169):
+            OpenCV preserves the source dtype when reading 16-bit TIFFs, so 
+            cv2.imread returns either uint8 or uint16 arrays depending on 
+            the file. We detect this and upload accordingly:
+            - uint8  -> 3 bytes/pixel,  moderngl default 'f1' dtype 
+                        (preserves existing SSS/MDS behavior exactly).
+            - uint16 -> 6 bytes/pixel,  moderngl 'f2' half-float dtype.
+                        The shader still samples in normalized [0.0, 1.0] 
+                        so no shader change is needed; the GPU does the 
+                        uint16 -> half-float conversion at upload time.
         """
         files = self.layer_files.get(layer, self.layer_files.get('pm', []))
 
@@ -179,37 +252,92 @@ class TextureManager:
         
         if f_path in self.cache: 
             return self.cache[f_path]
-        if f_path in self.cache: 
-            return self.cache[f_path]
-        # The default cv2.imread automatically strips the alpha channel 
-        # during the read process, turning transparent pixels into pure 
-        # white (255, 255, 255). Adding cv2.IMREAD_UNCHANGED forces OpenCV 
-        # to pull the raw 4-channel (BGRA) data into memory if it is a PNG.
+        
+        # cv2.IMREAD_UNCHANGED preserves both the alpha channel (for PNGs) 
+        # AND the source bit depth (8 vs 16). Without this flag, OpenCV 
+        # would auto-strip alpha AND silently downcast 16-bit TIFFs to 
+        # uint8 - which is exactly the 8bpc ceiling phase 2 is removing.
         img = cv2.imread(f_path, cv2.IMREAD_UNCHANGED)
-        img = cv2.imread(f_path, cv2.IMREAD_UNCHANGED)  
         if img is None: 
             return self.white_tex, 1.777
 
-        # Multiply alpha into RGB to force transparent pixels to black (0,0,0)
-        if len(img.shape) == 3 and img.shape[2] == 4: # Checks if a 4th channel actually exists (so JPEGs don't crash).
-            alpha_mask = img[:, :, 3] / 255.0 # Normalizes the 0-255 alpha values into a 0.0 to 1.0 multiplier.
-            # Multiplies the Blue, Green, and Red channels by that mask. If a pixel is fully transparent (alpha 0.0), its RGB values become 0 (Black).
-            img[:, :, :3] = (img[:, :, :3] * alpha_mask[:, :, np.newaxis]).astype(np.uint8)
-            # Slice off the 4th channel to return strictly BGR for the pipeline
-            img = img[:, :, :3] # permanently deletes the alpha channel from the array so your OpenGL texture logic (self.ctx.texture) remains strictly 3-channel RGB, maintaining physical optical printer constraints.
+        # ----- Alpha premultiply (dtype-aware) ----------------------------
+        # The original code assumed uint8 throughout. For 16-bit sources we 
+        # need the same logic but with the alpha normalization scaled to the 
+        # dtype's max value (255 for uint8, 65535 for uint16). dtype is 
+        # preserved across the multiplication via .astype() at the end.
+        if len(img.shape) == 3 and img.shape[2] == 4:
+            # Source max value for normalization. For uint8 = 255, uint16 = 65535.
+            # np.iinfo gives us the right constant for whichever dtype OpenCV 
+            # handed us, with no risk of getting it wrong by hardcoding.
+            src_max = float(np.iinfo(img.dtype).max)
+            alpha_mask = img[:, :, 3] / src_max  # 0.0..1.0 multiplier
+            # Apply premultiply, then cast back to the original dtype so the 
+            # rest of the pipeline (and the texture upload below) sees the 
+            # same uint8 or uint16 array it expected.
+            img[:, :, :3] = (img[:, :, :3] * alpha_mask[:, :, np.newaxis]).astype(img.dtype)
+            img = img[:, :, :3]  # strip alpha; engine pipeline is strictly 3-channel
 
         h, w = img.shape[:2]
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        # CRITICAL FIX: Flip image vertically to align OpenCV (0,0 top-left) 
-        # with OpenGL (0,0 bottom-left) texture coordinates
+        # Flip vertically: OpenCV is (0,0)=top-left, OpenGL is (0,0)=bottom-left.
         img = cv2.flip(img, 0)
         
-        tex = self.ctx.texture((w, h), 3, img.tobytes())
+        # ----- Texture upload (dtype-aware) -------------------------------
+        # moderngl's dtype param controls the GPU-side storage format:
+        #   'f1' = 8-bit per channel  (default - 1 byte, integer-normalized)
+        #   'f2' = 16-bit half-float per channel (2 bytes)
+        # The shader samples textures as normalized floats in [0.0, 1.0] in 
+        # both cases, so no shader change is needed - only the precision of 
+        # what gets sampled changes.
+        if img.dtype == np.uint16:
+            # IMPORTANT: uint16 and float16 are both 2 bytes per channel but 
+            # have COMPLETELY different bit layouts. A uint16 value of 65535 
+            # would, if reinterpreted as a float16, be +Inf - not 1.0. So we 
+            # cannot just hand the uint16 buffer to moderngl with dtype='f2' 
+            # and hope for the best (an earlier phase-2 implementation did 
+            # exactly this and produced garbage on real 16-bit gradient 
+            # sources - looked plausible on solid colors but wrong on ramps).
+            # 
+            # The fix: convert uint16 [0..65535] to actual half-float [0..1] 
+            # in numpy, where we can see the math. We go via float32 as an 
+            # intermediate because:
+            #   1. Dividing uint16 by 65535.0 needs a float wide enough to 
+            #      hold both operands without overflow. float32 has plenty 
+            #      of headroom; float16 would overflow on the divisor.
+            #   2. Doing the divide in float32 means the values we cast to 
+            #      float16 are already in [0,1] - well within float16's 
+            #      representable range, so the final cast is precision-loss 
+            #      only (no overflow, no inf).
+            # 
+            # The cost is one full-image float32 buffer per cache-miss load. 
+            # At 1080p this is 1920*1080*3*4 = ~24MB transient - cheap 
+            # relative to the disk read we just did.
+            img_norm = img.astype(np.float32) / 65535.0  # uint16 -> float32 [0,1]
+            img_f16  = img_norm.astype(np.float16)        # float32 -> float16, same range
+            tex = self.ctx.texture((w, h), 3, img_f16.tobytes(), dtype='f2')
+        else:
+            # 8-bit RGB upload. Matches the pre-phase-2 behavior exactly so 
+            # SSS / MDS jobs with 8-bit sources continue producing 
+            # bit-identical output.
+            tex = self.ctx.texture((w, h), 3, img.tobytes())
+        
         self.cache[f_path] = (tex, w/h)
         return tex, w/h
 
     def release(self):
+        """
+        Free all GPU textures owned by this manager. Called by 
+        run_persistent_engine at end-of-task to release VRAM before 
+        the next job's texture manager is created.
+        
+        Was buried inside load() due to a phase-2 indentation slip - 
+        meaning every job from phase 2 through phase 3 was crashing 
+        in cleanup with 'TextureManager has no attribute release', 
+        but the crash happened AFTER the exposure produced output so 
+        it appeared to work. Fixed here as part of phase 3 follow-up.
+        """
         for t, a in self.cache.values(): 
             t.release()
         self.white_tex.release()

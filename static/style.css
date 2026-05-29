@@ -173,6 +173,232 @@ body {
     border-bottom:      1px solid var(--border-color); 
 }
 
+/* ===========================================================
+ * Page navigation (Calibration page introduction)
+ *
+ * Two buttons in the vop-header switch between Main and
+ * Calibration pages. The buttons toggle .page-active between
+ * the two top-level page divs (#page_main and #page_calibration).
+ * Pages without .page-active are hidden via display: none.
+ *
+ * Future pages (Config, Help, etc.) follow the same pattern:
+ * add a button, a top-level div with .page-section, and a
+ * showPage() case.
+ * =========================================================== */
+
+.page-nav {
+    display: flex;
+    gap: 0.5em;
+}
+
+.page-nav-btn {
+    /* Default appearance: dim, indicating "not active". */
+    background: #2a2a2a;
+    color: #888;
+    border: 1px solid #444;
+    padding: 0.4em 1em;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.95em;
+}
+
+.page-nav-btn:hover {
+    color: #ccc;
+    border-color: #666;
+}
+
+.page-nav-btn.active {
+    /* Active page's button stands out so the user always knows
+     * which page they're on. */
+    background: #1a4a1a;
+    color: #cfc;
+    border-color: #4a8a4a;
+}
+
+/* Page section default: hidden. Only the one with .page-active
+ * is shown. */
+.page-section {
+    display: none;
+}
+
+/* When a page section is active, it becomes a grid container with
+ * the same column layout .container used to provide directly. This
+ * is necessary because the Main page's children (.preview-area,
+ * .controls-area, .sheets-area) declare grid-column and grid-row
+ * positions that only resolve correctly when their direct parent
+ * is a grid. Before page-navigation, those children were direct
+ * children of .container; now they're nested one level deeper
+ * inside #page_main, so #page_main must carry the grid contract.
+ *
+ * Using the same grid-template-columns as .container (1fr 420px)
+ * means the layout inside the active page is byte-identical to
+ * pre-page-nav behaviour. */
+.page-section.page-active {
+    /* Span both columns of the outer .container grid, same as
+     * .vop-header does at the top of the container. Without this,
+     * the page wrapper auto-places into a single column and any
+     * sibling element (notably the cheat-sheet) drops into the
+     * adjacent column instead of onto a new row below. */
+    grid-column: 1 / -1;
+
+    /* Inside, this page wrapper is itself a grid that recreates
+     * the column layout .container was providing directly before
+     * page-nav. .preview-area / .controls-area / .sheets-area
+     * declare grid-column and grid-row, so their direct parent
+     * has to be a grid with the matching template. */
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 20px;
+}
+
+
+/* ===========================================================
+ * Calibration page styling 
+ *
+ * The Calibration page reuses .group-box, .const-group,
+ * .input-row, .c-box, .action-btn, .mini-btn, and .section-divider
+ * from the Main page's existing styling so it visually belongs
+ * to the same family. The .cal-* classes below cover the
+ * page-specific layout and the new colour-coded brightness
+ * readout.
+ *
+ * The colour-coded readout uses .ok / .warn / .danger / .info
+ * modifier classes that slice 7's JS sets dynamically based on
+ * measured brightness. The colours match the meaning we agreed
+ * during planning: green = sensible high but not clipped,
+ * yellow = one or more channels are clipping, red = full clip,
+ * blue = should probably be higher.
+ * =========================================================== */
+
+/* Position the preview area on the Calibration page in the left
+ * column. Same column as Main's preview, same visual treatment. */
+.cal-preview-area {
+    grid-column:        1;
+    justify-self:       center;
+    align-self:         start;
+}
+
+/* Right-column control stack. Sits in column 2 of the page grid,
+ * the same column Main uses for its controls. */
+.cal-controls-area {
+    grid-column:        2;
+}
+
+/* Status row inside the Peak White group box.
+ * "Status: Ready" / "Status: Measuring" indicator. */
+.cal-status-row {
+    display:            flex;
+    align-items:        center;
+    gap:                8px;
+    font-size:          0.85em;
+}
+
+.cal-status-label {
+    color:              var(--text-secondary);
+    text-transform:     uppercase;
+    font-size:          0.7em;
+    font-weight:        bold;
+}
+
+.cal-status-text {
+    color:              var(--color-accent);
+    font-family:        monospace;
+    font-weight:        bold;
+}
+
+/* Measurement-result readout. Used for the Single Measurement
+ * numeric output. Slice 7's JS sets one of the modifier classes
+ * (.ok / .warn / .danger / .info) to colour-code the value. */
+.cal-readout {
+    font-family:        monospace;
+    font-weight:        bold;
+    color:              var(--color-accent);
+    margin-left:        8px;
+    min-width:          80px;
+    display:            inline-block;
+    font-size:          0.9em;
+}
+
+.cal-readout.ok {
+    /* Green: brightness in the comfortable "near-target" range,
+     * no channel clipping. */
+    color:              #6c6;
+}
+
+.cal-readout.warn {
+    /* Yellow: at least one channel clipping but mean is still
+     * reasonable. The "you got close" colour. */
+    color:              #fc4;
+}
+
+.cal-readout.danger {
+    /* Red: full clip - both mean and per-channel max at 1.0.
+     * The exposure is way too long. */
+    color:              #f55;
+}
+
+.cal-readout.info {
+    /* Blue: brightness well below target. The "exposure should
+     * probably be higher" colour. */
+    color:              #4af;
+}
+
+/* ACB parameter grid - 2 columns, 2 rows of the four small fields.
+ * Reuses .constants-zone visual styling. */
+.cal-acb-params {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+/* ACB button + black-level checkbox layout.
+ * The button stretches to take most of the row, checkbox sits to
+ * the right and shrinks to content. */
+.cal-acb-trigger-row {
+    align-items:        center;
+}
+
+.cal-acb-trigger-row .action-btn {
+    flex:               1;
+}
+
+.cal-black-checkbox {
+    display:            flex;
+    align-items:        center;
+    gap:                6px;
+    font-size:          0.8em;
+    color:              var(--text-secondary);
+    white-space:        nowrap;
+    cursor:             pointer;
+}
+
+.cal-black-checkbox input {
+    /* Native size for the checkbox - .const-group's 100%-width
+     * default would balloon it. */
+    width:              auto;
+    margin:             0;
+}
+
+/* Current calibration state readout grid. Two columns: label / value.
+ * Each row of the grid is one calibration value with its label. */
+.cal-readout-grid {
+    display:                grid;
+    grid-template-columns:  auto 1fr;
+    gap:                    6px 12px;
+    font-size:              0.85em;
+}
+
+.cal-readout-label {
+    color:              var(--text-secondary);
+    text-transform:     uppercase;
+    font-size:          0.7em;
+    font-weight:        bold;
+    align-self:         center;
+}
+
+.cal-readout-value {
+    font-family:        monospace;
+    color:              var(--color-accent);
+    font-weight:        bold;
+}
 
 
 /* ###################### HEADER AND STATUS ############################ */
@@ -395,7 +621,6 @@ body {
     justify-content:    center;
     overflow:           hidden;
     grid-column:        1;
-    grid-row:           3;
     justify-self:       center;
     align-self:         start;
 }
@@ -783,12 +1008,10 @@ body {
 
 .controls-area {
     grid-column:        2;
-    grid-row:           3 / span 2;
 }
 
 .sheets-area {
     grid-column:        1;
-    grid-row:           4;
     align-self:         start;
     
     /* Allow the sheet to extend rightward beyond the controls grid column
@@ -986,6 +1209,106 @@ body {
     display:            none;
 }
 
+/* --- BRK Sheet grid template ---
+ * Bracketed exposures mode. Structurally similar to SSS in column
+ * count but lacks SSS's smear-specific fields and DRE's INT/EXP/STEPS.
+ *
+ * Column groups (CSS variables) follow the same scheme as SSS/MDS so
+ * the eye-toggle (.layer-disabled-*) and video-presence (.has-*-video)
+ * classes hide columns identically when their corresponding layer is
+ * disabled or still-image-only.
+ *
+ * Spatial columns (POS/ROT) use larger fixed widths than SSS because
+ * BRK's spatial values are text inputs ("x,y,z") not numeric fields,
+ * and need more room to display comfortably.
+ */
+.brk-sheet {
+    --col-pm-jk:    ;
+    --col-bp1-jk:   ;
+    --col-bp2-jk:   ;
+    --col-pm-sp:    105px 105px;
+    --col-bp1-sp:   105px 105px;
+    --col-bp2-sp:   105px 105px;
+}
+
+.brk-sheet.has-pm-video:not(.layer-disabled-pm)   { --col-pm-jk:  45px 40px 40px; }
+.brk-sheet.has-bp1-video:not(.layer-disabled-bp1) { --col-bp1-jk: 45px 40px 40px; }
+.brk-sheet.has-bp2-video:not(.layer-disabled-bp2) { --col-bp2-jk: 45px 40px 40px; }
+
+.brk-sheet.layer-disabled-pm  { --col-pm-sp:  ; }
+.brk-sheet.layer-disabled-bp1 { --col-bp1-sp: ; }
+.brk-sheet.layer-disabled-bp2 { --col-bp2-sp: ; }
+
+.brk-header, .brk-keyframe-row {
+    display:                    grid;
+    grid-template-columns:      25px 50px
+                                var(--col-pm-jk) var(--col-bp1-jk) var(--col-bp2-jk)
+                                var(--col-pm-sp) var(--col-bp1-sp) var(--col-bp2-sp)
+                                35px 35px 30px;
+    /*                          #    FR
+                                PM-JK  BP1-JK BP2-JK
+                                PM-SP  BP1-SP BP2-SP
+                                PG    CG    [×] */
+    gap:                        5px;
+    align-items:                center;
+    margin-bottom:              5px;
+}
+
+/* Cell visibility for BRK mirrors the SSS/MDS rules. JK cells hide
+   when the layer lacks video OR when the layer is eye-disabled.
+   Spatial cells hide only on eye-disable. */
+.brk-sheet:not(.has-pm-video) .pm-jk-cell,
+.brk-sheet.layer-disabled-pm  .pm-jk-cell {
+    display:            none;
+}
+.brk-sheet:not(.has-bp1-video) .bp1-jk-cell,
+.brk-sheet.layer-disabled-bp1  .bp1-jk-cell {
+    display:            none;
+}
+.brk-sheet:not(.has-bp2-video) .bp2-jk-cell,
+.brk-sheet.layer-disabled-bp2  .bp2-jk-cell {
+    display:            none;
+}
+.brk-sheet.layer-disabled-pm  .pm-spatial-cell { display: none; }
+.brk-sheet.layer-disabled-bp1 .bp1-spatial-cell { display: none; }
+.brk-sheet.layer-disabled-bp2 .bp2-spatial-cell { display: none; }
+
+/* Add-row button. Reuses the existing .add-row layout and gives BRK
+ * its own visual accent so users can tell at a glance which mode's
+ * sheet they're looking at. The accent color choice matches BRK's
+ * "frame-locked, bracketed" character - same green as DRE because
+ * they're both frame-locked modes, but with a slightly different
+ * brightness so the two are distinguishable. */
+.brk-add-row {
+    margin-top:         10px;
+}
+
+.brk-add-btn {
+    background:         var(--tag-master-bg);
+    color:              var(--color-success);
+    border:             1px solid var(--color-success);
+    cursor:             pointer;
+    padding:            6px 12px;
+    font-family:        inherit;
+    font-size:          0.85em;
+}
+
+/* --- DRE Sheet grid template ---
+ * Issue #169: Dynamic Range Extender mode.
+ * DRE sheets are deliberately simpler than SSS/MDS - no JK printer 
+ * columns, no spatial transforms, no eye-toggle visibility hooks. 
+ * Just identity, frame number, interpolation mode, exposure, DRE 
+ * step count, the two gels, and the delete button.
+ */
+.dre-header, .dre-keyframe-row {
+    display:                    grid;
+    grid-template-columns:      30px 60px 50px 60px 60px 60px 60px 40px;
+    /*                          #    FR   INT  EXP  STEPS PG   CG  [×]   */
+    gap:                        5px;
+    align-items:                center;
+    margin-bottom:              5px;
+}
+
 /* --- JK input styling ---
    Tight integer inputs - shorter than the position/rotation fields. The
    .bp1-input / .bp2-input classes on BP variants already apply their 
@@ -1107,4 +1430,125 @@ hr.section-divider {
     display:            flex;
     justify-content:    flex-end;
     gap:                10px;
+}
+
+/* ===========================================================
+   BRK MODE: per-job constants in the sheet header
+   ===========================================================
+   Container for bracket_count + bracket_stops, sitting between
+   the "Exposure Sheet" title (left) and Smear Mode selector
+   (right) inside .sheet-header. Hidden by default via the
+   .brk-constants class it also carries; revealed when body
+   has .brk-mode. ============================================ */
+
+.brk-sheet-settings {
+    /* Display value here is the visible-state default. The
+       .brk-constants rule above sets display:none until the
+       body.brk-mode selector overrides it back. The cascade
+       order is: .brk-constants (none) -> body.brk-mode
+       .brk-constants (revert), and the revert here picks up
+       this flex layout. */
+    display:            flex;
+    align-items:        center;
+    gap:                15px;
+}
+
+.brk-setting {
+    /* Each setting is a vertical stack: small accent label on
+       top, input below. Mirrors the visual rhythm of
+       .mode-control but consumes less horizontal space because
+       we have two of them side by side. */
+    display:            flex;
+    flex-direction:     column;
+    align-items:        flex-start;
+    gap:                3px;
+}
+
+.brk-setting label {
+    /* Same label styling as .mode-control label so the three
+       header children (title, BRK settings, mode control)
+       read as a unified row. */
+    color:              var(--color-accent);
+    font-size:          0.7em;
+    font-weight:        bold;
+    text-transform:     uppercase;
+}
+
+.brk-setting select,
+.brk-setting input {
+    /* Slightly tighter input styling than .mode-control select
+       (which is a single dominant control); the BRK settings
+       are supporting controls so they get a less attention-
+       grabbing treatment. */
+    background:         var(--bg-input);
+    border:             1px solid var(--border-color);
+    color:              var(--text-primary);
+    padding:            3px 8px;
+    border-radius:      var(--radius-small);
+    font-size:          0.85em;
+}
+
+.brk-setting input[type="number"] {
+    /* Number input gets a tighter width since values are
+       short (0.25 - 4.0). Without this, browsers default to
+       a wide field that misaligns visually with the select. */
+    width:              60px;
+}
+
+/* ===========================================================
+   BRK CONSTANTS VISIBILITY
+   ===========================================================
+   Elements tagged .brk-constants are mode-scoped: they exist
+   in the DOM unconditionally (so their values are gathered
+   by collectParams() and persisted to current_job.json
+   regardless of active mode), but they're only VISIBLE when
+   smear_mode is BRK.
+
+   The visibility hook is body.brk-mode, set/cleared by
+   toggleSheetVisibility() in main.js. Driving visibility from
+   a body class rather than per-element JS lets multiple
+   .brk-constants elements share one toggle. =============== */
+.brk-constants {
+    display:            none;
+}
+
+body.brk-mode .brk-sheet-settings.brk-constants {
+    /* The sheet-header settings panel uses flex to lay out
+       its two child controls side by side. See the
+       .brk-sheet-settings rule above for the layout details. */
+    display:            flex;
+}
+
+/* ===========================================================
+   PROBE-MODE TOGGLE VISIBILITY
+   ===========================================================
+   The DRE and BRK probe toggles (in the probe-controls area)
+   live in the DOM unconditionally so their checkbox state is
+   captured by collectParams() and persisted to current_job.json
+   regardless of the active mode. They are only VISIBLE in their
+   respective modes.
+
+   Visibility is driven by body-class hooks set in
+   toggleSheetVisibility() (static/main.js):
+     - body.dre-mode reveals .dre-probe-controls
+     - body.brk-mode reveals .brk-probe-controls
+
+   This replaces the old inline style="display:none;" on
+   #dre_probe_controls (removed for the project-wide no-inline-
+   styles convention) and provides the same mechanism for the
+   new BRK probe toggle. The reveal uses display:block to match
+   the sibling probe c-boxes (Frame, Sub), which are plain block
+   elements - .c-box sets only flex:1, not a display type, so
+   block is the faithful default. ========================== */
+.dre-probe-controls,
+.brk-probe-controls {
+    display:            none;
+}
+
+body.dre-mode .dre-probe-controls {
+    display:            block;
+}
+
+body.brk-mode .brk-probe-controls {
+    display:            block;
 }

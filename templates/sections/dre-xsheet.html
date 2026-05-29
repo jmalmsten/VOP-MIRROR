@@ -1,0 +1,38 @@
+<!--
+    DRE Exposure Sheet (Dynamic Range Extender mode)
+    
+    Issue #169, phase 3: minimal schema. DRE keyframes encode tonal 
+    behavior over time, not spatial behavior. Per-keyframe fields:
+        FR        - frame number (timeline position)
+        INT       - interpolation mode (linear / ease / hold etc, 
+                    matches SSS dropdown behavior)
+        EXP       - exposure window in seconds. The DRE sequencer 
+                    will divide this evenly among its steps.
+        DRE STEPS - number of sub-exposures in the temporal luminance 
+                    sequence. More steps = finer effective bit depth 
+                    at the cost of slower steps. The engine warns 
+                    and clamps if (EXP * 1000) / steps falls below 
+                    the panel's refresh interval (~16.7ms at 60Hz).
+        PG / CG   - projector and camera gel colors. Interpolate as 
+                    RGB between keyframes the same way SSS gels do.
+    
+    What is intentionally absent: position, rotation, scale, smear 
+    start/stop, JK printer columns. The frame is held stationary 
+    during a DRE exposure; only luminance varies.
+-->
+<div class="vop-sheet dre-sheet">
+    <div class="sheet-row dre-header">
+        <div>#</div>
+        <div data-title="Frame Number">FR</div>
+        <div data-title="Interpolation Mode">INT</div>
+        <div data-title="Exposure Time (Sec) - total DRE sequence length">EXP</div>
+        <div data-title="DRE Step Count - sub-exposures per frame, more = finer bit depth">DRE<br>STEPS</div>
+        <div data-title="Projector Gel">PG</div>
+        <div data-title="Camera Gel">CG</div>
+        <div></div>
+    </div>
+    <div id="dre_sheet_body"></div>
+</div>
+<div class="add-row dre-add-row">
+    <button class="dre-add-btn" onclick="addDREKeyframe()">+ ADD DRE KEYFRAME</button>
+</div>

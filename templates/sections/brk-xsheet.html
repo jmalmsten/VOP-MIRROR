@@ -1,0 +1,105 @@
+<!--
+###########################################################################
+#
+#                                   VOP
+#                       Copyright (C) 2025  jmalmsten
+#
+#     This program is free software: you can redistribute it and/or modify
+#     it under the terms of the GNU Affero General Public License as
+#     published by the Free Software Foundation, either version 3 of the
+#     License, or (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful, but
+#     WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+#     Affero General Public License for more details.
+#
+#     You should have received a copy of the GNU Affero General Public
+#     License along with this program.  If not, see
+#     <http://www.gnu.org/licenses/>.
+#
+#     Source code for this application can be found at
+#     https://codeberg.org/jmalmsten-com/VOP
+###########################################################################
+
+BRK Exposure Sheet (Bracketed exposures)
+
+BRK works around the 8bpc projection monitor bottleneck by capturing
+N exposures per frame, each showing a different overlapping slice of
+the source's 16bpc range. The N captures are then merged in-VOP to
+produce a single latent TIFF per frame.
+
+Per-keyframe fields:
+    FR          - frame number (timeline position)
+    PM JK       - GATE / STP for PM (3 inputs, GATE+CAM+STP like SSS)
+    PM SP       - POS / ROT for PM
+    BP1 JK      - GATE / CAM / STP for BiPack 1
+    BP1 SP      - POS / ROT for BiPack 1
+    BP2 JK      - GATE / CAM / STP for BiPack 2
+    BP2 SP      - POS / ROT for BiPack 2
+    PG / CG     - projector and camera gel colors
+
+What is intentionally absent: per-keyframe exposure time (T_peak from
+calibration.json governs all BRK captures), smear start/stop (BRK is
+frame-locked, no smear), interpolation between keyframes (each BRK
+keyframe holds steady until the next).
+
+Per-job BRK settings (bracket_count, bracket_stops) are added in slice 9
+and will appear in the Hardware Constants section of the right column.
+
+Visibility hooks: the .has-pm-video / .has-bp1-video / .has-bp2-video
+classes drive JK column visibility just like in SSS/MDS - if the
+layer is a still image (no JK printer columns needed) those columns
+collapse. Eye-toggle visibility (.layer-disabled-*) likewise hides
+spatial columns when the user disables a layer.
+-->
+
+<div class="vop-sheet brk-sheet">
+    <div class="sheet-row brk-header">
+        <!-- Identity and frame number -->
+        <div>#</div>
+        <div data-title="Frame Number">FR</div>
+
+        <!-- PM JK printer columns (GATE / CAM / STP).
+             Hidden via CSS when PM layer is still-image or eye-disabled. -->
+        <div class="pm-jk-cell" data-title="Projection Mag GATE">PM<br>GATE</div>
+        <div class="pm-jk-cell" data-title="Projection Mag CAM">PM<br>CAM</div>
+        <div class="pm-jk-cell" data-title="Projection Mag STP (Frame Step)">PM<br>STP</div>
+
+        <!-- BP1 JK printer columns -->
+        <div class="bp1-jk-cell bp1-header-text" data-title="BiPack 1 GATE">BP1<br>GATE</div>
+        <div class="bp1-jk-cell bp1-header-text" data-title="BiPack 1 CAM">BP1<br>CAM</div>
+        <div class="bp1-jk-cell bp1-header-text" data-title="BiPack 1 STP (Frame Step)">BP1<br>STP</div>
+
+        <!-- BP2 JK printer columns -->
+        <div class="bp2-jk-cell bp2-header-text" data-title="BiPack 2 GATE">BP2<br>GATE</div>
+        <div class="bp2-jk-cell bp2-header-text" data-title="BiPack 2 CAM">BP2<br>CAM</div>
+        <div class="bp2-jk-cell bp2-header-text" data-title="BiPack 2 STP (Frame Step)">BP2<br>STP</div>
+
+        <!-- PM spatial transforms -->
+        <div class="pm-spatial-cell" data-title="Projection Mag Position (X,Y,Z)">PM POS</div>
+        <div class="pm-spatial-cell" data-title="Projection Mag Rotation (Pitch,Roll,Yaw)">PM ROT</div>
+
+        <!-- BP1 spatial transforms -->
+        <div class="bp1-spatial-cell bp1-header-text" data-title="BiPack 1 Position (X,Y,Z)">BP1 POS</div>
+        <div class="bp1-spatial-cell bp1-header-text" data-title="BiPack 1 Rotation (Pitch,Roll,Yaw)">BP1 ROT</div>
+
+        <!-- BP2 spatial transforms -->
+        <div class="bp2-spatial-cell bp2-header-text" data-title="BiPack 2 Position (X,Y,Z)">BP2 POS</div>
+        <div class="bp2-spatial-cell bp2-header-text" data-title="BiPack 2 Rotation (Pitch,Roll,Yaw)">BP2 ROT</div>
+
+        <!-- Gels -->
+        <div data-title="Projector Gel">PG</div>
+        <div data-title="Camera Gel">CG</div>
+
+        <!-- Delete button column -->
+        <div></div>
+    </div>
+
+    <!-- Body filled dynamically by addBRKKeyframe() in main.js. -->
+    <div id="brk_sheet_body"></div>
+</div>
+
+<div class="add-row brk-add-row">
+    <button class="brk-add-btn" onclick="addBRKKeyframe()">+ ADD BRK KEYFRAME</button>
+</div>

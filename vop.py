@@ -45,6 +45,11 @@ from flask import Flask, jsonify, request, render_template, send_from_directory,
 # Append the modules directory to the system path for local imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 
+# Calibration store for reading the persisted hardware-calibration
+# values. Used by the /calibration_state GET route to expose the
+# current state to the frontend.
+import calibration_store as cstore
+
 # Suppress default Flask HTTP request logging to keep the terminal output clean for audit logs
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
@@ -63,7 +68,7 @@ CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 # The Flask server writes JSON payloads here; engine.py polls this file to execute commands
 COMMAND_FILE = "/tmp/vop_cmd.json" 
 
-VOP_VERSION ="0.6.5"
+VOP_VERSION ="0.10.0"
 
 # Initialize required directory structure on boot if missing
 PRORES_DIR = os.path.join(BASE_DIR, "ProRes")
@@ -98,32 +103,63 @@ def process_video_ingestion(filepath, target_dir):
     If so, extracts all frames to zero-padded TIFFs matching the engine's
     playhead expectations (0000.tif, 0001.tif) and deletes the original video.
     
-    Forces 8-bit RGB output (-pix_fmt rgb24) because higher bit-depth source 
-    codecs like ProRes 422 HQ would otherwise produce 16-bit TIFFs that the 
-    moderngl texture pipeline (which expects 8-bit RGB) cannot consume.
+    Pixel format is mode-aware (issue #169)
+      - SSS / MDS jobs: force 8-bit rgb24, matching the moderngl texture
+        pipeline that currently expects 8bpc RGB.
+      - DRE jobs: preserve up to 16-bit precision via rgb48le. The DRE
+        mode is the whole point of keeping that range, since it uses
+        the extra bits to drive temporal luminance encoding during
+        exposure.
+    
+    The Current mode is read from current_job.json. If the file is missing
+    or unparseable we fall back to the safe 8-bit path, since an DRE-mode
+    16-bit TIFF would crash the current texture pipeline.
     """
     ext = os.path.splitext(filepath)[1].lower()
     video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
 
-    if ext in video_exts:
-        print(f"[VOP SERVER] Video detected! Extracting {filepath} to TIFF sequence...")
+    if ext not in video_exts:
+        return  # Stills pass through untouched, same as before
 
-        output_pattern = os.path.join(target_dir, "%04d.tif")
+    # --- Determine target bit depth from current job mode -------------
+    # We read CURRENT_JOB_FILE rather than receiving the mode as an arg
+    # because every caller of this function (PM, BP1, BP2 upload routes)
+    # would otherwise need plumbping. Reading the file once per upload is 
+    # cheap and keeps the call sites unchanged.
+    pix_fmt = "rgb24" # safe 8-bit default - won't crash smear pipelines
+    try:
+        if os.path.exists(CURRENT_JOB_FILE):
+            with open(CURRENT_JOB_FILE, 'r') as jf:
+                job_mode = json.load(jf).get('smear_mode', 'SSS').upper()
+            if job_mode == 'DRE':
+                # rgb48le = 16-bit RGB little-endian. Preserves the full
+                # tonal range of 10/12 bit source codecs (ProRes, DNxHR)
+                # into 16 bit TIFFs that the TextureManager will 
+                # consume natively.
+                pix_fmt = "rgb48le"
+    except (json.JSONDecodeError, OSError) as e:
+        # Don't fail the upload just because the job file is weird;
+        # log it and fall back to the safe 8-bit path
+        print(f"[VOP SERVER] WARN: Could not read job mode for ingestion "
+              f"({e}). Falling back to 8-bit rgb24.")
+    
+    print(f"[VOP SERVER] Video detected! Extracting {filepath} "
+          f"to TIFF sequence (pix_fmt={pix_fmt})...")
+    
+    output_pattern = os.path.join(target_dir, "%04d.tif")
+    cmd = [
+        "ffmpeg", "-y", "-i", filepath,
+        "-pix_fmt", pix_fmt,          # mode-aware: rgb or rgb48le
+        "-start_number", "0",
+        output_pattern
+    ]
 
-        cmd = [
-            "ffmpeg", "-y", "-i", filepath,
-            "-pix_fmt", "rgb24",          # ← force 8-bit RGB output
-            "-start_number", "0",
-            output_pattern
-        ]
-
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("[VOP SERVER] Frame extraction complete.")
-            os.remove(filepath)
-        
-        except subprocess.CalledProcessError as e:
-            print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion failed: {e}")
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("[VOP SERVER] Frame extraction complete.")
+        os.remove(filepath)
+    except subprocess.CalledProcessError as e:
+        print(f"[VOP SERVER] CRITICAL: FFMPEG ingestion feiled: {e}")
 
 def count_source_frames(directory):
     """
@@ -140,6 +176,45 @@ def count_source_frames(directory):
     valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
     return len([f for f in os.listdir(directory) if f.lower().endswith(valid_exts)])
 
+# ---------------------------------------------------------
+# DISPLAY RESOLUTION ACCESSOR
+# ---------------------------------------------------------
+# The engine detects the panel resolution at boot (via EDID through
+# pygame.display.get_desktop_sizes()) and writes it to this file.
+# We read once and cache - the value can't change at runtime since
+# the panel is hot-plug-but-not-really on the Pi 4 HDMI port; you
+# need a reboot to renegotiate anyway.
+#
+# Module-level cache rather than a class because vop.py is already
+# heavily module-scoped (Flask routes, globals, etc.) and a single
+# resolution doesn't justify a new abstraction.
+DISPLAY_INFO_FILE = "/tmp/vop_display.json"
+_display_size_cache = None
+
+def get_display_size():
+    """
+    Returns (width, height) of the projection monitor. Reads the 
+    engine's published JSON on first call, caches thereafter.
+    
+    Falls back to (1920, 1080) if the file is missing - happens 
+    transiently during the brief window after vop.py boots but 
+    before the engine has written its first display info. Any 
+    affected request will get correct math on the next call once 
+    the engine has come up.
+    """
+    global _display_size_cache
+    if _display_size_cache is not None:
+        return _display_size_cache
+    try:
+        with open(DISPLAY_INFO_FILE, 'r') as f:
+            info = json.load(f)
+            _display_size_cache = (int(info['width']), int(info['height']))
+            return _display_size_cache
+    except (OSError, ValueError, KeyError):
+        # Don't cache the fallback - we want to retry on the next 
+        # call in case the engine has just come up. The transient 
+        # window is small but worth handling cleanly.
+        return (1920, 1080)
 
 def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit", screen_width=1920, screen_height=1080):
     """
@@ -494,7 +569,14 @@ def calculate_fit():
         aspect = float(data.get('aspect_ratio', 1.777))
         mode = data.get('mode', 'fit')      # 'fit' or 'fill'
         
-        req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode)
+        # Pull the live panel dimensions so frustum-bounds math matches 
+        # what the engine is actually rendering into. Without this, Fit/Fill 
+        # FOV would compute against a fictional 1920x1080 frustum and the 
+        # button would set the user a few degrees off on a 3:2 or UHD panel.
+        screen_w, screen_h = get_display_size()
+        req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode,
+                                               screen_width=screen_w,
+                                               screen_height=screen_h)
         return jsonify({"status": "ok", "scale": req_scale})
     except Exception as e:
         print(f"[VOP SERVER] Fit Calc Error: {e}")
@@ -629,11 +711,12 @@ def cam_probe():
     if not os.path.exists(latent_file):
         print(f"[VOP SERVER] CAM PROBE: no latent at frame {frame_num} - writing placeholder")
         try:
-            # Match Proj Probe's dimensions (1920x1080) so the placeholder
-            # scales identically in the preview panel. The probe_img CSS
-            # uses object-fit:contain so source dimensions don't really
-            # affect display size, but matching keeps things tidy.
-            ph_w, ph_h = 1920, 1080
+            # Match Proj Probe's actual dimensions so the placeholder 
+            # scales identically in the preview panel. The probe_img CSS 
+            # uses object-fit:contain so source dimensions don't really 
+            # affect display size, but matching keeps things tidy and 
+            # makes the placeholder layout look right at any panel size.
+            ph_w, ph_h = get_display_size()
 
             # Background: very dark gray (BGR), close to --bg-panel from
             # style.css. Pure black would be visually indistinguishable
@@ -765,6 +848,76 @@ def lab_invert():
     # Dispatches the mathematical 16-bit negative inversion process
     dispatch_engine('lab_invert', request.json)
     return jsonify({"status": "started"})
+
+@app.route('/single_peak_measurement', methods=['POST'])
+def single_peak_measurement():
+    # Calibration page: "Single Measurement" button.
+    #
+    # Dispatches a single capture at the supplied exposure time,
+    # measuring centre-patch brightness against a synthetic white
+    # patch. Result lands in calibration.json under the
+    # last_single_measurement key.
+    #
+    # Fire-and-forget. Frontend polls /status to detect completion
+    # and then GETs /calibration_state to read the new measurement.
+    # See the IPC-busy-state convention notes in
+    # modules/calibration_store.py for how the polling works.
+    dispatch_engine('single_peak_measurement', request.json)
+    return jsonify({"status": "started"})
+
+
+@app.route('/measure_peak_white', methods=['POST'])
+def measure_peak_white():
+    # Calibration page: "ACB" (Auto Calibrate for Brackets) button.
+    #
+    # Runs the bisection-with-doubling-bootstrap search for T_peak -
+    # the exposure time at which the projection monitor's synthetic
+    # white lands at the user-defined target brightness range. On
+    # convergence, persists t_peak (and metadata) to calibration.json.
+    #
+    # This task is potentially long-running (up to max_iterations
+    # camera captures, each taking 4-5 seconds including libcamera
+    # overhead). Fire-and-forget like the other measurement routes;
+    # the frontend will see /status flip to "rendering" for the
+    # duration and back to "idle" on completion.
+    dispatch_engine('measure_peak_white', request.json)
+    return jsonify({"status": "started"})
+
+
+@app.route('/measure_peak_black', methods=['POST'])
+def measure_peak_black():
+    # Calibration page: "Include black level measurement" checkbox
+    # companion to ACB.
+    #
+    # Single capture at the supplied exposure time (intended to be
+    # the just-measured T_peak) with the projection monitor showing
+    # synthetic black. Persists black_floor_at_t_peak to
+    # calibration.json.
+    #
+    # The frontend sequencer is responsible for calling this AFTER
+    # /measure_peak_white completes, with the exposure_s parameter
+    # set to whatever t_peak the ACB run produced. We don't chain
+    # them automatically server-side because the user might want
+    # to run them independently (e.g. re-measuring black floor
+    # without re-running ACB, to check sensor drift between job
+    # runs).
+    dispatch_engine('measure_peak_black', request.json)
+    return jsonify({"status": "started"})
+
+
+@app.route('/calibration_state', methods=['GET'])
+def calibration_state():
+    # Returns the current contents of calibration.json as a normalised
+    # JSON dict. Frontend uses this to populate the Calibration page's
+    # readouts after each measurement task completes.
+    #
+    # Wrapping this in a route (rather than serving calibration.json
+    # as a static file) gives us a stable contract: always a dict,
+    # never a 404 on missing-file. The static_dir global is the
+    # same path the engine writes to via cstore.save() - so what's
+    # written by the engine is exactly what we read here.
+    static_dir = os.path.join(BASE_DIR, "static")
+    return jsonify(cstore.load(static_dir))
 
 @app.route('/panic', methods=['POST'])
 def panic():

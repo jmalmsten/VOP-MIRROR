@@ -77,7 +77,7 @@ class Timeline:
             'bp1_pos': [], 'bp1_rot': [], 
             'bp2_pos': [], 'bp2_rot': [], 
             'pg': [], 'cg': [], 
-            'exp': [], 'sd': [], 'ph': [],
+            'exp': [], 'sd': [], 'ph': [], 'dre_steps': [],
             # JK Optical Printer playhead inputs (per-layer: PM=ProjMag, BP1/BP2=BiPack reels)
             'pm_gate': [], 'pm_cam': [], 'pm_stp': [],
             'bp1_gate': [], 'bp1_cam': [], 'bp1_stp': [],
@@ -88,10 +88,59 @@ class Timeline:
             'start_bp2_p': [], 'stop_bp2_p': [], 'start_bp2_r': [], 'stop_bp2_r': [],
             'start_c': [], 'stop_c': [], 'start_cg': [], 'stop_cg': []
         }
-        
+
         self.mode = job_data.get('smear_mode', 'SSS').lower()
-        prefix = "mds_" if self.mode == 'mds' else "sss_"
-        
+        if self.mode == 'mds':
+            prefix = "mds_"
+        elif self.mode == 'sss':
+            prefix = "sss_"
+        elif self.mode == 'dre':
+            # DRE mode (Dynamic Range Extender, issue #169). The exposure
+            # sheet schema is intentionally minimal: frame number, exposure
+            # time, DRE step count, and per-keyframe projector/camera gels.
+            # No spatial transforms, no smear start/stop, no JK printer
+            # columns - the frame is held stationary while luminance is
+            # animated by the engine's DRE path.
+            prefix = "dre_"
+        elif self.mode == 'brk':
+            # BRK mode (Bracketed exposures).
+            #
+            # BRK keyframes populate self.tracks via the same
+            # shared parser loop as SSS / MDS / DRE - the BRK
+            # xsheet field names (brk_pm_pos<n>, brk_pm_gate<n>,
+            # brk_c<n>_hex, etc.) were designed to match the
+            # existing track-naming convention precisely so this
+            # works out of the box.
+            #
+            # BRK-specific behaviour relative to the other modes:
+            #
+            #   - No per-keyframe EXP field. The exposure time is
+            #     governed by t_peak from calibration.json (a
+            #     job-global hardware value, not a timeline value).
+            #     require_float's fallback handles the missing
+            #     brk_exp<n> key - we set the default to 1.0 so
+            #     the track has a sane value even though the engine
+            #     never reads it.
+            #
+            #   - Frame-locked hold semantics across keyframes
+            #     instead of smooth or linear interpolation. The
+            #     engine reads BRK state via get_brk_state() (below
+            #     in this file), which uses step-hold lookup
+            #     against self.tracks - it returns the most recent
+            #     keyframe's values rather than interpolating
+            #     between adjacent ones.
+            #
+            # Everything else (POS, ROT, JK printer GATE/CAM/STP,
+            # per-bipack-layer fields, gels) flows through the
+            # shared parser unchanged. So this branch is just a
+            # one-liner: set the prefix and fall through.
+            prefix = "brk_"
+        else:
+            raise ValueError(
+                f"Unknown smear_mode '{self.mode}' in job data. "
+                f"Expected one of: SSS, MDS, DRE, BRK."
+            )
+
         row_ids = set()
         for k in job_data.keys():
             if k.startswith(prefix + "f"):
@@ -210,8 +259,28 @@ class Timeline:
             self.tracks['cg'].append({'f': f_val, 'val': hex_to_rgb(job_data.get(f"{prefix}cg{idx}_hex", "#ffffff"))})
             
             # --- THESE LINES ENFORCE STRICT PARSING ---
-            exp_key = f"{prefix}s{idx}" if self.mode == 'mds' else f"{prefix}exp{idx}"
-            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key)})
+            # EXP field name varies by mode:
+            #   sss_exp<n>  (SSS)
+            #   mds_s<n>    (MDS; legacy short name)
+            #   dre_exp<n>  (DRE; matches SSS convention)
+            # Both SSS and DRE use the long "exp" name; only MDS uses "s".
+            if self.mode == 'mds':
+                exp_key = f"{prefix}s{idx}"
+            else:
+                exp_key = f"{prefix}exp{idx}"
+            # DRE-only field. SSS/MDS jobs skip this (the key won't 
+            # exist; require_float falls back to the default of 256). 
+            # Parsing it unconditionally keeps the track-array lengths 
+            # aligned across all rows regardless of mode, which is what 
+            # _get_val expects.
+            self.tracks['dre_steps'].append({'f': f_val, 'val': require_float(f"{prefix}steps{idx}", 256.0)})
+            # BRK has no per-keyframe EXP field (uses t_peak from
+            # calibration instead). Pass a 1.0 fallback so a missing
+            # brk_exp<n> key doesn't trip require_float's strict-blank
+            # check. The 1.0 value goes into self.tracks['exp'] for
+            # shape consistency with the other modes but the engine
+            # never reads it for BRK (see execute_brk_exposure).
+            self.tracks['exp'].append({'f': f_val, 'val': require_float(exp_key, fallback_if_unsubmitted=1.0)})
             self.tracks['sd'].append({'f': f_val, 'val': require_float(f"{prefix}sd{idx}", 1.0)})
             self.tracks['ph'].append({'f': f_val, 'val': require_float(f"{prefix}ph{idx}", 0.5)})
             
@@ -385,6 +454,155 @@ class Timeline:
             'bp2_p': st_base['bp2_p'], 'bp2_r': st_base['bp2_r'], 'lbp2_p': lbp2_p, 'lbp2_r': lbp2_r,
             'pg': pg_val, 'cg': cg_val, 'exp': st_base['exp'], 'sd': st_base['sd'], 'ph': st_base['ph']
         }
+    
+    def get_dre_state(self, frame_num):
+        """
+        Returns the resolved DRE state at a given frame.
+        
+        DRE (Dynamic Range Extender) mode schema is minimal compared 
+        to SSS / MDS:
+            exp        : exposure window in seconds (interpolated)
+            dre_steps  : number of temporal luminance sub-exposures 
+                         (interpolated, then cast to int)
+            pg         : projector gel as RGB float array (interpolated)
+            cg         : camera gel as RGB float array (interpolated)
+        
+        No position, rotation, scale, smear start/stop, or JK printer 
+        columns - the frame is held stationary while luminance is 
+        animated by engine.py's execute_dre_exposure path.
+        
+        Phase 3 of issue #169.
+        """
+        # No keyframes at all -> sane defaults so the engine can at 
+        # least try to render. Matches the behavior of get_state's 
+        # empty-tracks short-circuit.
+        if not any(self.tracks.values()):
+            return {
+                'exp': 1.0,
+                'dre_steps': 256,
+                'pg': np.array([1, 1, 1], dtype='f4'),
+                'cg': np.array([1, 1, 1], dtype='f4'),
+            }
+        
+        # Use the real interpolation helper _get_val. Pass True as the 
+        # third arg for color fields (signals RGB-array interpolation 
+        # rather than scalar). Default fallbacks mirror get_state's 
+        # safe_val / safe_col / safe_float pattern.
+        def safe_float(key, default_val):
+            v = self._get_val(key, frame_num)
+            return float(v) if v is not None else default_val
+        
+        def safe_col(key, default_arr):
+            v = self._get_val(key, frame_num, True)
+            return v if v is not None else default_arr
+        
+        exp       = safe_float('exp', 1.0)
+        dre_steps_f = safe_float('dre_steps', 256.0)
+        # Round to nearest int; engine will further clamp against the 
+        # panel refresh floor at exposure time.
+        dre_steps = max(2, int(round(dre_steps_f)))
+        
+        pg = safe_col('pg', np.array([1, 1, 1], dtype='f4'))
+        cg = safe_col('cg', np.array([1, 1, 1], dtype='f4'))
+        
+        return {
+            'exp': exp,
+            'dre_steps': dre_steps,
+            'pg': pg,
+            'cg': cg,
+        }
+
+    def get_brk_state(self, frame_num):
+        """
+        BRK mode per-frame state lookup.
+
+        Frame-locked-hold semantics: returns the values of the
+        most recent keyframe whose frame number is <= frame_num.
+        No interpolation between keyframes - BRK keyframes are
+        discrete settings that snap into effect at their frame
+        number and stay until the next keyframe (or end of job).
+        This matches how a real optical printer holds a setup
+        while it cranks through frames at that setup, then
+        re-pegs for the next setup.
+
+        Reads from self.tracks (populated by the shared parser
+        loop, same as SSS / MDS / DRE). Empty-tracks fallback
+        returns identity defaults so the engine can render a
+        BRK job that has no keyframes at all without crashing.
+
+        Returns a dict with the same shape as get_state() /
+        get_dre_state() so downstream engine code can consume
+        BRK state without mode-specific branching at most
+        callsites:
+            'p'     : PM position (numpy vec3, default 0,0,-1.0)
+            'r'     : PM rotation (numpy vec3, default 0,0,0)
+            'bp1_p' : BP1 position
+            'bp1_r' : BP1 rotation
+            'bp2_p' : BP2 position
+            'bp2_r' : BP2 rotation
+            'lp', 'lr', 'lbp1_p', 'lbp1_r', 'lbp2_p', 'lbp2_r'
+                    : local-offset versions, all zero for BRK
+                      (no smear / no per-tick local motion)
+            'pg'    : projector gel (numpy float RGB, default
+                      identity white)
+            'cg'    : camera gel (numpy float RGB, default
+                      identity white)
+            'exp'   : exposure time. NOT used by the engine for
+                      BRK (engine reads t_peak from calibration
+                      instead), but populated so the state dict
+                      shape matches the other modes.
+            'sd', 'ph' : smear duration / playhead-phase. Defaults
+                      (1.0 / 0.5), unused by BRK but kept for
+                      shape consistency.
+        """
+        # No keyframes parsed -> sane defaults so the engine
+        # can at least try to render. Matches get_state's and
+        # get_dre_state's empty-tracks short-circuit pattern.
+        if not any(self.tracks.values()):
+            return self.get_default_state()
+
+        # Step-hold lookup for each track. _get_step_held is
+        # the existing helper used by calculate_playhead_at
+        # for JK printer CAM/STP, so we're reusing an
+        # already-tested code path. The pattern: pass the
+        # track name and frame_num, get back the most-recent
+        # keyframe's value (or the default if frame_num
+        # precedes all keyframes).
+        def hold(key, default):
+            v = self._get_step_held(key, frame_num, default=None)
+            return v if v is not None else default
+
+        return {
+            # PM spatial
+            'p':  hold('pos', np.array([0, 0, -1.0], dtype='f4')),
+            'r':  hold('rot', np.array([0, 0,  0.0], dtype='f4')),
+            # BP1 spatial
+            'bp1_p': hold('bp1_pos', np.array([0, 0, -1.0], dtype='f4')),
+            'bp1_r': hold('bp1_rot', np.array([0, 0,  0.0], dtype='f4')),
+            # BP2 spatial
+            'bp2_p': hold('bp2_pos', np.array([0, 0, -1.0], dtype='f4')),
+            'bp2_r': hold('bp2_rot', np.array([0, 0,  0.0], dtype='f4')),
+            # Local-offset slots, always zero for BRK (no smear,
+            # no per-tick motion within an exposure).
+            'lp':     np.zeros(3, 'f4'),
+            'lr':     np.zeros(3, 'f4'),
+            'lbp1_p': np.zeros(3, 'f4'),
+            'lbp1_r': np.zeros(3, 'f4'),
+            'lbp2_p': np.zeros(3, 'f4'),
+            'lbp2_r': np.zeros(3, 'f4'),
+            # Gels
+            'pg': hold('pg', np.array([1, 1, 1], dtype='f4')),
+            'cg': hold('cg', np.array([1, 1, 1], dtype='f4')),
+            # Shape-consistency fields. The engine reads t_peak
+            # from calibration.json for BRK; 'exp' is here only
+            # so callsites that destructure state['exp'] don't
+            # KeyError when handed a BRK state dict.
+            'exp': float(hold('exp', 1.0)),
+            'sd':  float(hold('sd',  1.0)),
+            'ph':  float(hold('ph',  0.5)),
+        }
+
+    
 
     def get_default_state(self):
         return {
@@ -400,22 +618,51 @@ class Timeline:
 
     def _get_step_held(self, key, t, default=None):
         """
-        Step-hold (no interpolation) lookup. returns the value of the most recent
-        keyframe at or before t. Used for discrete inputs like CAM and STP that 
-        should HOLD their value between keyframes rather than smoothly transition.
+        Step-hold (no interpolation) lookup. Returns the value of the most
+        recent keyframe at or before t. If no keyframe applies (track is
+        empty OR t is before the first keyframe's frame number), returns
+        the supplied default.
 
-        Why not _get_val? _get_val does linear/cosine interpolation between
-        keyframes - correct for spatial values like position and rotation, but 
-        wrong for integer rate controls. If the user sets CAM:STP to 3:2 at
-        keyframe 1 and 1:1 at keyframe 5 we want a hard switch at frame 5,
-        not a gradual ease from 3:2 to 1:1
+        Used for:
+          - JK Optical Printer CAM/STP rate lookups inside
+            calculate_playhead_at, where the caller has already walked
+            backward to find an "anchor" keyframe and then forward-walks
+            looking up rates per frame.
+          - BRK frame-locked-hold lookups inside get_brk_state, where the
+            caller wants "the most recent BRK keyframe's value, or
+            defaults if no keyframe has fired yet."
+
+        Why not _get_val? _get_val does linear/cosine interpolation
+        between keyframes - correct for spatial values like position and
+        rotation IN SSS/MDS where smooth tweening is the intent, but
+        wrong for both integer rate controls (CAM/STP, where a 3:2 ->
+        1:1 transition should be a hard switch at the new keyframe) AND
+        for BRK's frame-locked-hold semantics (which is fundamentally
+        snap-and-stay, no tweening at all).
+
+        Semantics for t before the first keyframe: returns default.
+        This matters for BRK in particular - a job with a keyframe at
+        frame 5 should not retroactively apply that keyframe's values to
+        frames 1-4. Frame-locked-hold means "snaps into effect at the
+        keyframe's frame number," not "applies forward and backward."
         """
         track = self.tracks.get(key, [])
         if not track:
             return default
-        
-        # Walk forward; the last keyframe whose frame <= t wins.
-        val = track[0]['val'] if track[0]['val'] is not None else default
+
+        # Initialize to default, not to the first keyframe's value. If
+        # t is before any keyframe, the for-loop below never enters its
+        # update branch and we return default - the correct "no keyframe
+        # applies yet" answer.
+        #
+        # The previous version of this function initialized to
+        # track[0]['val'], which produced retroactive application: a
+        # query at t=1 against a track whose only keyframe was at t=5
+        # would return the t=5 keyframe's value. That was harmless for
+        # JK printer use (the only caller pre-BRK never queried before
+        # the anchor) but wrong as general step-hold semantics. The fix
+        # is loud here because BRK exposed the latent bug.
+        val = default
         for k in track:
             if k['f'] <= t:
                 if k['val'] is not None:

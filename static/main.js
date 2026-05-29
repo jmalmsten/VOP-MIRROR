@@ -33,6 +33,15 @@ Description:    Frontend logic.
 let local_sync_ts = 0; 
 let mdsMasterCount = 0;
 let sssMasterCount = 0;
+let dreMasterCount = 0;
+// BRK keyframe counter. Same role as dreMasterCount / sssMasterCount:
+// incremented on add, used as the suffix in input IDs (brk_f1, brk_f2...).
+// Not decremented on delete - if a user deletes row 3 of 5, the
+// remaining rows keep IDs 1,2,4,5 and the next add becomes 6. That's
+// fine because IDs only need uniqueness, not contiguity. Rehydration
+// from saved jobs scans for highest-numbered ID and rebuilds enough
+// rows to cover it.
+let brkMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
 let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
@@ -44,18 +53,29 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMode = modeSelect.value;
         toggleSheetVisibility();
         
+        // MODE SWITCH HANDLER
+        //
+        // Non-destructive: switching modes only updates which sheet is
+        // visible and which mode the engine will dispatch on. The other
+        // modes' keyframe rows stay in the DOM (hidden via wrapper
+        // display:none) and their values stay in current_job.json
+        // keyed by their mode prefix (mds_*, sss_*, dre_*, brk_*).
+        // So switching SSS -> MDS -> SSS is round-trip-safe: your SSS
+        // keyframes are still there when you come back.
+        //
+        // The earlier version of this handler popped a confirm() and
+        // wiped sheet bodies on OK. Browsers suppress repeated confirms
+        // on the same page after the first one, which made the dropdown
+        // un-switchable (the suppressed confirm returns false, the
+        // cancel branch fired, and 'this.value = currentMode' snapped
+        // the dropdown back). The destructive model was also wrong on
+        // its own terms - there's no reason mode switching needs to be
+        // a one-way operation. Nuke Job already exists for the
+        // "I want a clean slate" use case.
         modeSelect.addEventListener('change', function(e) {
-            if (confirm("Switching modes is destructive. All keyframing will be thrown out. Are you sure you want to continue?")) {
-                currentMode = this.value;
-                document.getElementById('mds_sheet_body').innerHTML = '';
-                document.getElementById('sss_sheet_body').innerHTML = '';
-                mdsMasterCount = 0;
-                sssMasterCount = 0;
-                toggleSheetVisibility();
-                triggerSync();
-            } else {
-                this.value = currentMode; // Revert dropdown if cancelled
-            }
+            currentMode = this.value;
+            toggleSheetVisibility();
+            triggerSync();
         });
     }
 });
@@ -63,8 +83,30 @@ document.addEventListener('DOMContentLoaded', () => {
 function toggleSheetVisibility() {
     const mdsWrap = document.getElementById('mds_wrapper');
     const sssWrap = document.getElementById('sss_wrapper');
+    const dreWrap = document.getElementById('dre_wrapper');
+    const brkWrap = document.getElementById('brk_wrapper');
+    // BRK MODE BODY CLASS
+    //
+    // Drives the visibility of any element with the
+    // .brk-constants class (currently bracket_count and
+    // bracket_stops in the Hardware Constants column). See
+    // static/style.css for the matching rule. Done via a body
+    // class rather than per-element classList toggles so that
+    // future BRK-only controls added anywhere in the DOM are
+    // covered automatically - just add .brk-constants to them
+    // and they're picked up for free.
+    // Body classes drive CSS-only visibility for mode-scoped controls
+    // that live in the DOM unconditionally (so collectParams() always
+    // captures their values) but should only be VISIBLE in their mode.
+    // Currently: .brk-constants and .brk-probe-controls key off
+    // body.brk-mode; .dre-probe-controls keys off body.dre-mode.
+    // See static/style.css for the matching rules.
+    document.body.classList.toggle('brk-mode', currentMode === 'BRK');
+    document.body.classList.toggle('dre-mode', currentMode === 'DRE');
     if (mdsWrap) mdsWrap.style.display = (currentMode === 'MDS') ? 'block' : 'none';
     if (sssWrap) sssWrap.style.display = (currentMode === 'SSS') ? 'block' : 'none';
+    if (dreWrap) dreWrap.style.display = (currentMode === 'DRE') ? 'block' : 'none';
+    if (brkWrap) brkWrap.style.display = (currentMode === 'BRK') ? 'block' : 'none';
 }
 
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
@@ -433,6 +475,165 @@ function reindexMDS() {
     });
 }
 
+// addBRKKeyframe adds one row to the BRK exposure sheet.
+//
+// Field naming convention mirrors SSS/MDS where the column maps to
+// an existing concept (POS, ROT, GATE, CAM, STP, gels) so the
+// engine's spatial-transform and JK-printer parsing can reuse the
+// existing code paths once the engine-side BRK mode branch is in
+// place (slice 12). The fields that DON'T map to existing concepts
+// (per-job bracket_count and bracket_stops) are not per-keyframe;
+// those land in the Hardware Constants section in slice 9.
+//
+// Fields per keyframe:
+//   brk_f<n>                   frame number
+//   brk_pm_gate<n>             PM JK gate frame number
+//   brk_pm_cam<n>              PM JK camera index
+//   brk_pm_stp<n>              PM JK step
+//   brk_bp1_gate<n>            BP1 JK gate frame
+//   brk_bp1_cam<n>             BP1 JK camera index
+//   brk_bp1_stp<n>             BP1 JK step
+//   brk_bp2_gate<n>            BP2 JK gate frame
+//   brk_bp2_cam<n>             BP2 JK camera index
+//   brk_bp2_stp<n>             BP2 JK step
+//   brk_p<n>                   PM position (X,Y,Z as "x,y,z" string)
+//                              (Naming matches SSS/MDS/DRE: PM is
+//                              the implicit default layer, so its
+//                              spatial fields drop the pm_ prefix.
+//                              Bipack layers get explicit bp1_ /
+//                              bp2_ prefixes below.)
+//   brk_r<n>                   PM rotation (Pitch,Roll,Yaw)
+//   brk_bp1_pos<n>             BP1 position
+//   brk_bp1_rot<n>             BP1 rotation
+//   brk_bp2_pos<n>             BP2 position
+//   brk_bp2_rot<n>             BP2 rotation
+//   brk_c<n>_hex               projector gel color
+//   brk_cg<n>_hex              camera gel color
+//
+// The universal collectParams() walks all <input>/<select> elements
+// and uses their IDs as JSON keys, so any new BRK field added here
+// is automatically included in the saved job state - no separate
+// serializer to maintain.
+function addBRKKeyframe() {
+    brkMasterCount++;
+    const idx = brkMasterCount;
+
+    // Suggest a frame number one ahead of the last keyframe. Matches
+    // the SSS/MDS/DRE adders' affordance - users almost always want
+    // sequential frames.
+    const existingRows = document.querySelectorAll('.brk-keyframe-row');
+    let suggestedFrame = 1;
+    if (existingRows.length > 0) {
+        const lastFrameInput = existingRows[existingRows.length - 1]
+            .querySelector('input[id^="brk_f"]');
+        if (lastFrameInput) {
+            suggestedFrame = (parseInt(lastFrameInput.value) || 0) + 1;
+        }
+    }
+
+    const row = document.createElement('div');
+    row.className = 'sheet-row brk-keyframe-row';
+    row.innerHTML = `
+        <div>${idx}</div>
+        <div><input type="number" id="brk_f${idx}" value="${suggestedFrame}" min="1"></div>
+
+        <div class="pm-jk-cell"><input type="number" class="jk-input" id="brk_pm_gate${idx}" value="1" min="1"></div>
+        <div class="pm-jk-cell"><input type="number" class="jk-input" id="brk_pm_cam${idx}" value="1" min="1"></div>
+        <div class="pm-jk-cell"><input type="number" class="jk-input" id="brk_pm_stp${idx}" value="1" min="1"></div>
+
+        <div class="bp1-jk-cell"><input type="number" class="jk-input bp1-input" id="brk_bp1_gate${idx}" value="1" min="1"></div>
+        <div class="bp1-jk-cell"><input type="number" class="jk-input bp1-input" id="brk_bp1_cam${idx}" value="1" min="1"></div>
+        <div class="bp1-jk-cell"><input type="number" class="jk-input bp1-input" id="brk_bp1_stp${idx}" value="1" min="1"></div>
+
+        <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_gate${idx}" value="1" min="1"></div>
+        <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_cam${idx}" value="1" min="1"></div>
+        <div class="bp2-jk-cell"><input type="number" class="jk-input bp2-input" id="brk_bp2_stp${idx}" value="1" min="1"></div>
+
+        <div class="pm-spatial-cell"><input type="text" id="brk_p${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="pm-spatial-cell"><input type="text" id="brk_r${idx}" value="0,0,0" placeholder="p,r,y"></div>
+
+        <div class="bp1-spatial-cell"><input type="text" class="bp1-input" id="brk_bp1_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="bp1-spatial-cell"><input type="text" class="bp1-input" id="brk_bp1_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>
+
+        <div class="bp2-spatial-cell"><input type="text" class="bp2-input" id="brk_bp2_pos${idx}" value="0,0,-1.0" placeholder="x,y,z"></div>
+        <div class="bp2-spatial-cell"><input type="text" class="bp2-input" id="brk_bp2_rot${idx}" value="0,0,0" placeholder="p,r,y"></div>
+
+        <div><input type="color" id="brk_c${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
+        <div><input type="color" id="brk_cg${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
+
+        <div><button onclick="this.closest('.brk-keyframe-row').remove(); triggerSync();">×</button></div>
+    `;
+
+    // Wire every input/select in the new row to triggerSync on change,
+    // matching the other adders' behavior so editing feels uniform
+    // across modes.
+    row.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', triggerSync);
+    });
+
+    document.getElementById('brk_sheet_body').appendChild(row);
+    triggerSync();
+}
+
+// addDREKeyframe adds one row to the DRE exposure sheet.
+// 
+// Field naming convention mirrors SSS (so the interpolator parser 
+// can reuse the existing 'exp' track without special-casing): 
+//     dre_f<n>        frame number
+//     dre_m<n>        interpolation mode (S/L, matches SSS values)
+//     dre_exp<n>      exposure seconds
+//     dre_steps<n>    DRE step count (DRE-only)
+//     dre_c<n>_hex    projector gel color
+//     dre_cg<n>_hex   camera gel color
+//
+// The universal collectParams() walks all <input> and <select> 
+// elements and uses their IDs as JSON keys, so there's no separate 
+// serializer to update - any new DRE field added here is 
+// automatically included in the saved job state.
+function addDREKeyframe() {
+    dreMasterCount++;
+    const idx = dreMasterCount;
+    
+    // Suggest a frame number one ahead of the last keyframe. This 
+    // matches the affordance the SSS adder has - users almost always 
+    // want sequential frames and shouldn't have to type them.
+    const existingRows = document.querySelectorAll('.dre-keyframe-row');
+    let suggestedFrame = 1;
+    if (existingRows.length > 0) {
+        const lastFrameInput = existingRows[existingRows.length - 1]
+            .querySelector('input[id^="dre_f"]');
+        if (lastFrameInput) {
+            suggestedFrame = (parseInt(lastFrameInput.value) || 0) + 1;
+        }
+    }
+    
+    const row = document.createElement('div');
+    row.className = 'sheet-row dre-keyframe-row';
+    row.innerHTML = `
+        <div>${idx}</div>
+        <div><input type="number" id="dre_f${idx}" value="${suggestedFrame}" min="1"></div>
+        <div>
+            <select id="dre_m${idx}">
+                <option value="S" selected>S</option>
+                <option value="L">L</option>
+            </select>
+        </div>
+        <div><input type="number" id="dre_exp${idx}" value="1.0" step="0.1" min="0.1"></div>        <div><input type="number" id="dre_steps${idx}" value="256" step="1" min="2" max="1024"></div>
+        <div><input type="color" id="dre_c${idx}_hex" value="#ffffff"></div>
+        <div><input type="color" id="dre_cg${idx}_hex" value="#ffffff"></div>
+        <div><button onclick="this.closest('.dre-keyframe-row').remove(); triggerSync();">×</button></div>
+    `;
+    
+    // Wire every input in the new row to trigger a save after edit.
+    // Matches the SSS adder's behavior so DRE feels identical to use.
+    row.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', triggerSync);
+    });
+    
+    document.getElementById('dre_sheet_body').appendChild(row);
+    triggerSync();
+}
+
 function addSSSKeyframe() {
     sssMasterCount++; 
     const idx = sssMasterCount;
@@ -618,7 +819,13 @@ setInterval(async () => {
             let maxMDS = 0;
             let maxSSS = 0;
 
-            // 1. Scan the imported parameters to find the highest keyframe index
+            // 1. Scan the imported parameters to find the highest keyframe index.
+            //
+            // NOTE: DRE is missing from this scan - pre-existing bug,
+            // filed for the niggles cleanup pass. Adding BRK in
+            // parallel with MDS/SSS here matches the convention but
+            // doesn't fix the DRE gap.
+            let maxBRK = 0;
             for (const key of Object.keys(st.params)) {
                 if (key.startsWith('mds_f')) {
                     const idx = parseInt(key.replace('mds_f', ''));
@@ -628,17 +835,35 @@ setInterval(async () => {
                     const idx = parseInt(key.replace('sss_f', ''));
                     if (idx > maxSSS) maxSSS = idx;
                 }
+                // Match brk_f<n> but NOT other brk_* fields. The leading
+                // 'brk_f' followed by a digit distinguishes the frame-
+                // number field from siblings like brk_pm_pos1.
+                if (/^brk_f\d/.test(key)) {
+                    const idx = parseInt(key.replace('brk_f', ''));
+                    if (idx > maxBRK) maxBRK = idx;
+                }
             }
 
             // 2. Clear out any existing rows to prevent duplicates
             document.getElementById('mds_sheet_body').innerHTML = '';
             document.getElementById('sss_sheet_body').innerHTML = '';
+            // Defensive existence check: brk_sheet_body only exists after
+            // slice 8 lands. Older clients reloading saved jobs without
+            // the new template would crash without this guard.
+            const brkBody = document.getElementById('brk_sheet_body');
+            if (brkBody) brkBody.innerHTML = '';
             mdsMasterCount = 0;
             sssMasterCount = 0;
+            brkMasterCount = 0;
 
             // 3. Dynamically build the exact number of empty HTML rows needed
             for (let i = 0; i < maxMDS; i++) addMDSKeyframe();
             for (let i = 0; i < maxSSS; i++) addSSSKeyframe();
+            // BRK rows only if the template loaded - older saved jobs
+            // running on pre-slice-8 clients shouldn't error here.
+            if (brkBody) {
+                for (let i = 0; i < maxBRK; i++) addBRKKeyframe();
+            }
 
             // 4. Now that the input fields exist, hydrate them with the saved values
             for (const [k, v] of Object.entries(st.params)) {
@@ -683,10 +908,18 @@ setInterval(async () => {
                 const sizeStr = mb > 1024 ? (mb / 1024).toFixed(2) + " GB" : mb + " MB";
                 if (etaEl) etaEl.innerText = `ETA: ${h}:${m}:${s} | TOTAL PROJ: ${sizeStr}`;
             }
-        } else {
+       } else {
             if (isEngineRunning) {
                 document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
                 isEngineRunning = false;
+                // Calibration page may have a task in flight that
+                // just completed. Let its controller refresh its
+                // readouts and re-enable its buttons. Safe to call
+                // every time - it no-ops when no calibration task
+                // was in flight. See slice 7's calibration.onEngineComplete().
+                if (typeof calibration !== 'undefined' && calibration.onEngineComplete) {
+                    calibration.onEngineComplete();
+                }
             }
             msgEl.innerHTML = st.workprint ? `IDLE | <a href="${st.workprint}" target="_blank" style="color:#0cf">VIEW WORKPRINT</a>` : "Ready...";
             bar.style.width = "0%";
@@ -1020,4 +1253,362 @@ async function importJob(input) {
         alert("A network error occurred during import.");
         input.value = "";
     }
+}
+// ====================================================================
+// CALIBRATION PAGE CONTROLLER (slice 7)
+// ====================================================================
+//
+// Wires up the Peak White calibration controls to the engine endpoints
+// added in slice 5. Hooks into the existing /status polling loop rather
+// than running its own timer - see the calibration_store.py module
+// docstring for the IPC busy-state convention this relies on.
+//
+// State machine for a calibration task lifecycle:
+//
+//   1. User clicks a button (Single Measurement / ACB).
+//   2. handler POSTs to the appropriate Flask route, sets
+//      calibration.taskInFlight, disables buttons, sets status "Measuring".
+//   3. /status polling (in the existing setInterval at line ~678) sees
+//      isEngineRunning flip from true to false when the engine deletes
+//      COMMAND_FILE.
+//   4. The existing polling code calls calibration.onEngineComplete() at
+//      that moment (see the integration edit below).
+//   5. onEngineComplete() refreshes the preview image, fetches
+//      /calibration_state, updates the readouts, re-enables buttons,
+//      sets status "Ready". If the just-completed task was ACB and the
+//      user checked Include Black Level, it kicks off the follow-up
+//      black-floor task by recursing through step 2.
+//
+// All DOM ids match the IDs declared in templates/sections/calibration.html.
+// Buttons are wired by id, not by inline onclick, so the HTML stays free
+// of JS coupling and slice 6 part 2 can be re-styled or restructured
+// without breaking the JS bindings here.
+
+const calibration = {
+    // Tracks whether *this* page's UI has initiated a task.
+    // Different from the global isEngineRunning (which fires for ANY
+    // engine task, including Main page jobs) - we only want to react
+    // to completions of tasks we initiated.
+    taskInFlight: null,  // null | 'single' | 'acb' | 'acb_black_followup'
+
+    // When the user clicks ACB with "Include black level" checked, we
+    // need to remember to fire the follow-up task. Captured at task
+    // start so a mid-run uncheck doesn't cancel it.
+    pendingBlackFollowup: false,
+
+    // The exposure time ACB just converged on. Captured from the
+    // calibration_state response and passed to the black-floor task.
+    lastTPeak: null,
+
+    init() {
+        // Attach button handlers. Done via addEventListener rather than
+        // inline onclick to keep the HTML JS-free and to make it easy
+        // to add additional handlers later (e.g. keyboard shortcuts)
+        // without conflict.
+        const singleBtn = document.getElementById('cal_single_btn');
+        const acbBtn = document.getElementById('cal_acb_btn');
+        if (singleBtn) singleBtn.addEventListener('click', () => this.runSingle());
+        if (acbBtn) acbBtn.addEventListener('click', () => this.runAcb());
+
+        // Initial population of the Current Calibration readout panel.
+        // If the engine has been running and writing to calibration.json,
+        // this populates the page on load so the user sees real state
+        // instead of "--" placeholders.
+        this.refreshState();
+    },
+
+    // ----------------------------------------------------------------
+    // Helpers used by both task handlers
+    // ----------------------------------------------------------------
+
+    setStatus(text) {
+        const el = document.getElementById('cal_status_text');
+        if (el) el.innerText = text;
+    },
+
+    setButtonsEnabled(enabled) {
+        const singleBtn = document.getElementById('cal_single_btn');
+        const acbBtn = document.getElementById('cal_acb_btn');
+        if (singleBtn) singleBtn.disabled = !enabled;
+        if (acbBtn) acbBtn.disabled = !enabled;
+    },
+
+    // Pull the WB and gain values from Main page's Hardware Constants.
+    // Calibration tasks need these for accurate captures - they reflect
+    // the user's current camera setup. If the user hasn't filled them
+    // in (fresh page load) we fall back to identity defaults that won't
+    // produce sensible results but also won't crash.
+    getCurrentHardwareParams() {
+        const num = (id, fallback) => {
+            const el = document.getElementById(id);
+            const v = el ? parseFloat(el.value) : NaN;
+            return isNaN(v) ? fallback : v;
+        };
+        const str = (id, fallback) => {
+            const el = document.getElementById(id);
+            return (el && el.value) ? el.value : fallback;
+        };
+        return {
+            gain:    num('gain', 1.0),
+            awb_r:   num('awb_r', 1.0),
+            awb_b:   num('awb_b', 1.0),
+            cam_res: str('cam_res', '2028x1520'),
+        };
+    },
+
+    // ----------------------------------------------------------------
+    // Task triggers (POST to slice 5 routes)
+    // ----------------------------------------------------------------
+
+    async runSingle() {
+        // Single Measurement: capture once at the exposure time the
+        // user typed in the cal_exposure_s field. Used for sanity-
+        // checking specific exposures by hand without invoking the
+        // ACB search.
+        const exposure = parseFloat(document.getElementById('cal_exposure_s').value);
+        if (isNaN(exposure) || exposure <= 0) {
+            this.setStatus('Bad exposure value');
+            return;
+        }
+
+        this.taskInFlight = 'single';
+        this.setButtonsEnabled(false);
+        this.setStatus('Measuring...');
+
+        const payload = {
+            exposure_s: exposure,
+            ...this.getCurrentHardwareParams(),
+        };
+
+        try {
+            await fetch('/single_peak_measurement', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+            // No await on response body needed - the route returns
+            // immediately with {"status": "started"}, and the actual
+            // completion is detected via the existing /status polling
+            // hook. See onEngineComplete() below.
+        } catch (e) {
+            // Network errors are rare on a local-network Pi setup but
+            // shouldn't strand the UI in a "Measuring" state if they
+            // happen. Reset to Ready and the user can retry.
+            this.setStatus('Network error');
+            this.taskInFlight = null;
+            this.setButtonsEnabled(true);
+        }
+    },
+
+    async runAcb() {
+        // ACB: auto-converge T_peak via bisection-with-doubling-
+        // bootstrap. The four ACB parameters come from the
+        // cal_acb_* fields on the page. WB and gain come from the
+        // Main page's Hardware Constants.
+        const initial = parseFloat(document.getElementById('cal_acb_initial').value);
+        const tlow = parseFloat(document.getElementById('cal_acb_target_low').value);
+        const thigh = parseFloat(document.getElementById('cal_acb_target_high').value);
+        const maxIter = parseInt(document.getElementById('cal_acb_max_iter').value);
+        if (isNaN(initial) || isNaN(tlow) || isNaN(thigh) || isNaN(maxIter)) {
+            this.setStatus('Bad ACB parameters');
+            return;
+        }
+
+        // Capture whether to follow up with black-floor at task start.
+        // If the user toggles the checkbox while ACB is running, we
+        // honour the state they had at click-time, not their later
+        // state - keeps the operation predictable.
+        this.pendingBlackFollowup = document.getElementById('cal_include_black').checked;
+
+        this.taskInFlight = 'acb';
+        this.setButtonsEnabled(false);
+        this.setStatus('Measuring (ACB)...');
+
+        const payload = {
+            initial_exposure_s: initial,
+            target_low: tlow,
+            target_high: thigh,
+            max_iterations: maxIter,
+            ...this.getCurrentHardwareParams(),
+        };
+
+        try {
+            await fetch('/measure_peak_white', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+        } catch (e) {
+            this.setStatus('Network error');
+            this.taskInFlight = null;
+            this.setButtonsEnabled(true);
+        }
+    },
+
+    async runAcbBlackFollowup() {
+        // Called automatically by onEngineComplete() after ACB
+        // converges, IF the user enabled the checkbox at ACB click
+        // time. Uses the just-measured T_peak as the exposure for the
+        // black capture.
+        if (this.lastTPeak == null || this.lastTPeak <= 0) {
+            // Defensive: if ACB didn't actually produce a valid T_peak
+            // (e.g. didn't converge and metadata is missing), skip the
+            // follow-up rather than firing a black-floor capture with
+            // a bogus exposure.
+            this.setStatus('Skipped black floor (no valid T_peak)');
+            this.pendingBlackFollowup = false;
+            this.setButtonsEnabled(true);
+            return;
+        }
+
+        this.taskInFlight = 'acb_black_followup';
+        this.setStatus('Measuring (black floor)...');
+
+        const payload = {
+            exposure_s: this.lastTPeak,
+            ...this.getCurrentHardwareParams(),
+        };
+
+        try {
+            await fetch('/measure_peak_black', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+        } catch (e) {
+            this.setStatus('Network error');
+            this.taskInFlight = null;
+            this.setButtonsEnabled(true);
+        }
+    },
+
+    // ----------------------------------------------------------------
+    // Completion handler (called from /status polling loop)
+    // ----------------------------------------------------------------
+
+    async onEngineComplete() {
+        // Called when the existing /status polling sees isEngineRunning
+        // flip true->false. This is the moment the engine has finished
+        // SOMETHING - it might or might not be one of our tasks. If we
+        // don't have a task in flight, this is somebody else's
+        // completion (e.g. Main page job) and we should not act.
+        if (!this.taskInFlight) return;
+
+        const completedTask = this.taskInFlight;
+        this.taskInFlight = null;
+
+        // Refresh the preview image. The engine just wrote a new
+        // probe_live.jpg as part of the measurement, so swap our img
+        // element's src with a cache-busting query string.
+        const img = document.getElementById('cal_probe_img');
+        if (img) {
+            img.src = '/static/probe_live.jpg?t=' + Date.now();
+        }
+
+        // Pull fresh state from calibration.json and update readouts.
+        await this.refreshState();
+
+        // Decide what happens next based on which task just completed.
+        if (completedTask === 'acb' && this.pendingBlackFollowup) {
+            // Fire the follow-up. lastTPeak was populated by
+            // refreshState() above.
+            this.pendingBlackFollowup = false;
+            // setStatus and setButtonsEnabled are managed inside
+            // runAcbBlackFollowup; no need to set Ready here.
+            await this.runAcbBlackFollowup();
+            return;
+        }
+
+        // Normal completion (no follow-up pending).
+        this.setStatus('Ready');
+        this.setButtonsEnabled(true);
+    },
+
+    // ----------------------------------------------------------------
+    // State sync
+    // ----------------------------------------------------------------
+
+    async refreshState() {
+        // Fetch /calibration_state and populate the Current Calibration
+        // readout panel. Also writes the Single Measurement readout if
+        // last_single_measurement is present.
+        try {
+            const r = await fetch('/calibration_state');
+            const state = await r.json();
+
+            // Capture T_peak for use by the black-floor follow-up.
+            this.lastTPeak = (typeof state.t_peak === 'number') ? state.t_peak : null;
+
+            // Current Calibration readout panel.
+            const tpeakEl = document.getElementById('cal_readout_t_peak');
+            const floorEl = document.getElementById('cal_readout_black_floor');
+            const wbEl = document.getElementById('cal_readout_wb');
+            const convergedEl = document.getElementById('cal_readout_converged');
+
+            if (tpeakEl) tpeakEl.innerText = (state.t_peak != null) ?
+                state.t_peak.toFixed(4) + ' s' : '--';
+            if (floorEl) floorEl.innerText = (state.black_floor_at_t_peak != null) ?
+                state.black_floor_at_t_peak.toFixed(6) : '--';
+
+            // WB readout: pull from t_peak_meta which records what WB
+            // the calibration was run under. Useful for the user to
+            // see at-a-glance whether the current Main page WB matches
+            // what T_peak was measured at.
+            if (wbEl) {
+                if (state.t_peak_meta) {
+                    const m = state.t_peak_meta;
+                    wbEl.innerText = `R=${m.awb_r}, B=${m.awb_b}`;
+                } else {
+                    wbEl.innerText = '--';
+                }
+            }
+
+            // Converged flag: from t_peak_meta.converged. If absent
+            // (no ACB has ever run), show "--". If false, show in a
+            // way the user notices.
+            if (convergedEl) {
+                if (state.t_peak_meta && typeof state.t_peak_meta.converged === 'boolean') {
+                    convergedEl.innerText = state.t_peak_meta.converged ? 'Yes' : 'No (max iter)';
+                } else {
+                    convergedEl.innerText = '--';
+                }
+            }
+
+            // Single Measurement readout. If a single measurement has
+            // ever been recorded, show its value colour-coded by
+            // brightness range. The colour buckets are the ones we
+            // agreed during planning:
+            //   < 0.5         info  (blue, "should be brighter")
+            //   0.5 .. 0.85   ok    (green, "in range")
+            //   0.85 .. 0.95  ok    (green)
+            //   0.95 .. 0.99  warn  (yellow, "close to clip")
+            //   >= 0.99       danger(red, "clipped")
+            const singleEl = document.getElementById('cal_single_result');
+            if (singleEl && state.last_single_measurement) {
+                const m = state.last_single_measurement;
+                const b = m.brightness;
+                singleEl.innerText = b.toFixed(4) + ' @ ' + m.exposure_s.toFixed(3) + 's';
+                // Clear previous colour classes before applying a new one.
+                singleEl.classList.remove('info', 'ok', 'warn', 'danger');
+                if (b < 0.5) singleEl.classList.add('info');
+                else if (b < 0.95) singleEl.classList.add('ok');
+                else if (b < 0.99) singleEl.classList.add('warn');
+                else singleEl.classList.add('danger');
+            }
+        } catch (e) {
+            // Silent fail - the readout staying at "--" is the
+            // visible signal that something is wrong with the fetch.
+            // A console.error helps future-me diagnose.
+            console.error('Calibration state fetch failed:', e);
+        }
+    },
+};
+
+// Initialise after the DOM is parsed. The script tag for main.js is
+// near the bottom of the body, so DOMContentLoaded has typically
+// already fired by the time main.js executes - we handle both cases.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => calibration.init());
+} else {
+    calibration.init();
 }
