@@ -2109,6 +2109,193 @@ def run_persistent_engine():
                     })
 
                     log_audit(f">>> BLACK FLOOR: {floor:.6f} at {exposure_s:.4f}s <<<")
+                
+                elif task == 'measure_white_balance':
+                    # Calibration page: "Auto White Balance".
+                    # 
+                    # Semi-auto WB gain finder, CLOSED LOOP on --awbgains.
+                    # For DNGs, libraw's default WB come from the
+                    # AsShotNeutral that rpicam writes from --awbgains, so
+                    # driving the camera gains directly changes the decoded
+                    # TIFF. Verified on real captures: unity gain floors red
+                    # to black; 3.3/1.42 lands the grey ramp neutrall.
+                    # 
+                    # "Semi": runs once here, stores awb_r/awb_b, jobs reuse
+                    # them every frame -> WB can't drift mid-render.
+                    #
+                    # GELS: grey is drawn with ctx.clear(), bypassing
+                    # render_world / the timeline, so no PG/CG applies.
+                    # 
+                    # WB math (green is the reference, gain 1.0):
+                    #   measured R = awb_r * raw_red_response
+                    #   measured G =   1.0 * raw_green_response
+                    #   measured B = awb_b * raw_blue_response
+                    # To neutralise grey we want measured R == G == B, so:
+                    #   awb_r_new = awb_r_cur * (G / R)
+                    #   awb_b_new = awb_b_cur * (G / B)
+                    # Linear, so this converges in 1-2 iterations.
+
+                    grey_level          = float(job_data.get('grey_level'0.5))
+                    initial_exposure    = float(job_data.get('initial_exposure_s', 1.0))
+                    # Safe per-channel-max window for the grey capture: above
+                    # the noise floor, clear of clipping.
+                    expo_low            = float(job_data.get('expo_target_low', 0.45))
+                    expo_high           = float(job_data.get('expo_target_high', 0.70))
+                    max_expo_iter       = int(job_data.get('max_iterations',12))
+                    # WB convergence: stop when both channels are within tol
+                    # of green, 0.01 = 1% ("accountant's truth").
+                    tol                 = float(job_data.get('wb_tolerance', 0.01))
+                    max_wb_iter         = int(job_data.get('max_wb_iterations', 4))
+                    # A channel reading below this (normalized) is floored /
+                    # noise-dominated: its G/ratio is meaningless. We bootstrap
+                    # its gain up instead of dividing by ~zero.
+                    noise_min           = float(job_data.get('wb_noise_min', 0.04)) 
+                    bootstrap_factor    = float(job_data.get('wb_bootstrap', 4.0))
+
+                    gain    = float(job_data.get('gain', 1.0))
+                    cam_res = job_data.get('cam_res', '2028x1520')
+
+                    # START FROM CURRENT GAINS, NOT UNITY. At 1.0/1.0 red
+                    # floors to black on this screen(measured), so G/R would
+                    # explode. The Main page hands us the user's working gains
+                    # if absent, fall back to a sane non-unity guess rather
+                    # than 1.0 so the very first capture has signal in red.
+                    awb_r = float(job_data.get('awb_r', 3.0)) or 3.0
+                    awb_b = float(job_data.get('awb_b', 1.4)) or 1.4
+
+                    if expo_low >= expo_high:
+                        log_audit(f"AWB | Invalid expo window, clamping")
+                        expo_low, expo_high = .45, 0.70
+                    
+                    log_audit(
+                        f"AWB | Start | grey={grey_level:.2f} "
+                        f"init_awb=(R={awb_r:.3f},B={awb_b:.3f}) "
+                        f"expo_window=[{expo_low:.2f},{expo_high:.2f}] "
+                        f"tol={tol*100:.1f}% max_wb_iter={max_wb_iter}"
+                    )
+
+                    # One grey captureat the CURRENT gains. note awb_r/awb_b
+                    # are read from the enclosing scope each call, so as the
+                    # loop updates them, captures track. Returns the dict form
+                    # for per-channel values. Write probe_live.jpg too.
+                    def _measure_grey(exp_s):
+                        ctx.screen.use()
+                        ctx.clear(grey_level, grey_levl, grey_level, 1.0)
+                        pygame.display.flip()
+                        total_ms= exp_s * 1000.0
+                        buf_f = "/tmp/vop_wb_buf.dng"
+                        cam_proc = hw.trigger_capture(
+                            buf_f, total_ms, gain, awbr, awb_b, cam_res,
+                        )
+                        hw.wait_for_sensor_prime()
+                        time.sleep(total_ms / 1000.0)
+                        cam_proc.wait()
+                        return cutil.measure_centre_brightness(
+                            buf_f, static_dir, return_dict=True
+                        )
+                    
+                    # --- PHASE 1: exposure search (ACB-shaped bisection. run
+                    # at the starting gains so all channels have signal).---
+                    low_bound = high_bound = None
+                    current_exposure = initial_exposure
+                    last = None
+                    expo_found = False
+                    for it in range(1, max_expo_iter + 1):
+                        m = _measure_grey(current_exposure)
+                        last = m
+                        pcm = m['per_channel_max']
+                        r, g, b = m['channel_maxes']
+                        log_audit(f"AWB | Expo {it}/{max_expo_iter} | "
+                                  f"exp={current_exposure:.4f}s pcm={pcm:.4f} "
+                                  f"(R={r:.3f},G={g:.3f},B={b:.3f}")
+                        if pcm < expo_low:
+                            low_bound = current_exposure
+                            current_exposure = (current_exposure * 2.0
+                                if high_bound is None
+                                else(low_bound + high_bound) / 2.0)
+                        elif pcm > expo_high:
+                            high_bound = current_exposure
+                            current_exposure = (current_exposure / 2.0
+                                if low_bound is None
+                                else (low_bound + high_bound) / 2.0)
+                        else:
+                            expo_found = True
+                            break
+                    log_audit(f"AWB | Exposure {'found' if expo_found else 'NOT found'}: "
+                              f"{current_exposure:.4f}s")
+                    
+                    # --- PHASE 2: WB closed loop at the converged exposure. ---
+                    eps = 1e-6
+                    wb_converged = False
+                    for it in range(1, max_wb_iter +):
+                        m = _measure_grey(current_exposure)
+                        r, g, b = m['channel_maxes']
+
+                        # Bootstrap any floored channel: if it's in the noise,
+                        # G/ratio is garbage, so just multiply it's gain up by a
+                        # fixed factor and try again rather than computing a 
+                        # ratio. (This is what rescues a near-unity start.)
+                        floored = False
+                        if r < noise_min:
+                            awb_r *= bootstrap_factor; floored = True
+                        if b < noise_min:
+                            awb_b *= bootstrap_factor; floored = True
+                        if floored:
+                            log_audit(f"AWB | WB {it}: channel floored "
+                                      f"(R={r:.4f},B={b:.4f} -> bootstrap "
+                                      f"awb=(R={awb_r:.3f},B={awb_b:.3f})")
+                            continue
+
+                        res_r = abs(r - g) / max(g, eps)
+                        res_b = abs(r - b) / max(g, eps)
+                        log_audit(f"AWB | WB {it}/{max_wb_iter} | "
+                                  f"awb=(R={res_r*100:+.2f}% B={res_b*100:+.2f}%")
+                        if res_r <= tol and res_b <= tol:
+                            wb_converged = Trueee
+                            break
+                        
+                        # Green-referenced correction. Clamp the per-step
+                        # factor so one noisy read can't fling the gain wild
+                        fr = min(max(g / max(r, eps), 0.5), 2.0)
+                        fb = min(max(g / max(b, eps), 0.5), 2.0)
+                        awb_r = min(max(awb_r * fr, 0.25), 16.0)
+                        awb_b = min(max(awb_b * fr, 0.25), 16.0)
+
+                    # --- Phase 3: confirm. Capture grey at the FINAL gains and
+                    # report how neutral it actually came out. This is the real
+                    # accountant's truth: not a predicted residual, but what the
+                    # camera genuinely produces at the gains we're about to 
+                    # store. (no digital multiply needed - the gains are baked
+                    # into this capture via --awbgains.) ---
+                    mc = _measure_grey(current_exposure)
+                    rc, gc, bc = mc['channel_maxes']
+                    res_r = abs(rc - gc) / max(gc, eps)
+                    res_b = abs(rc - gc) / max(gc, eps)
+                    passed = (res_r <= tol) and (res_b <= tol)
+                    log_audit(f"AWB | CONFIRM | awb=(R={awb_r:.3f},B={awb_b:.3f}) "
+                              f"residual R={res_r*100:+.2f}% B={res_b*100:+.2f} "
+                              f"-> {'PASS' if passed else 'FAIL'}")
+                    
+                    # Persist as awb_r/awb_b - the same keys jobs already use
+                    cstore.save(static_dir, {
+                        'awb_r': awb_r,
+                        'awb_b': awb_b,
+                        'wb_meta': {
+                            'exposure_s': current_exposure,
+                            'grey_level': grey_level,
+                            'confirm_channels': [rc, gc, bc],
+                            'confirm_residual_r': res_r,
+                            'confirm_residual_b': res_b,
+                            'tolerance': tol,
+                            'passed': passed,
+                            'wb_converged': wb_converged,
+                            'exposure_found': expo_found,
+                            'gain': gain,
+                        }
+                    })
+                    log_audit(f">>> WB: awb_r={awb_r:.4f} awb_b={awb_b:.4f} "
+                              f"(passed={passed}) <<<")
+                              
                 elif task == 'map_hot_pixels':
                     probe_f = float(job_data.get('probe_frame', 1))
                     st = timeline.get_state(probe_f)

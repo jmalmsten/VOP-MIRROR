@@ -823,6 +823,19 @@ def execute_seq():
     dispatch_engine('execute', request.json)
     return jsonify({"status": "started"})
 
+@app.route('/measure_white_balance', methods=['POST'])
+def measure_white_balance():
+    # Calibration page: "Auto White Balance".
+    #
+    # Fire-and-forget, exactly like ACB. The engine runs at the full
+    # exposure-search -> WB loop -> confirm sequence in one task
+    # (unlike ACB+black which split because they're independently
+    # useful; WB search/solve/confirm is one logical operation).
+    # Frontend sees /status go "rendering" then "idle", then GETs
+    # /calibration_state to read the derived gains.
+    dispatch_engine('measure_white_balance', request.json)
+    return jsonify({"status": "started"})
+
 @app.route('/measure_noise', methods=['POST'])
 def measure_noise():
     # Dispatches the dark frame noise floor measurement

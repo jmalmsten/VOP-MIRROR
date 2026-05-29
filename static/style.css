@@ -400,6 +400,27 @@ body {
     font-weight:        bold;
 }
 
+/* Auto White Balance param grid - mirror .cal-acb-params spacing so the
+   two calibration sections read as siblings. If .constants-zone already
+   grids its children this is harmless; included so the WB section doesn't
+   depend on whatever .constants-zone happens to do today.
+*/
+.cal-wb-params {
+    display:                grid;
+    grid-template-columns:  repeat(2, 1fr);
+    gap:                    0.5rem;
+}
+
+/* Pass/fail colouring for the accountant's-truth readout. Reuses the same
+   green/red language as the single-measurement readout buckets.
+*/
+.cal-wb-readout-pass {
+    color: var(--ok-color, #4caf4c);
+}
+.cal-wb-readout-fail {
+    color: var(--danger-color, #e53935);
+}
+
 
 /* ###################### HEADER AND STATUS ############################ */
 /* Force flex parent to full width to enable right-justification */
