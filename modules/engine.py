@@ -1648,7 +1648,30 @@ def run_persistent_engine():
                         except Exception as e:
                             log_audit(f"Proj Probe target-shape calc failed: {e}")
 
-                    img_data = cutil.letterbox_into(img_data, target_w, target_h)
+                    # Step 5: bake an explicit "inside camera, outside panel"
+                    # indicator band into the JPG itself. The default fill
+                    # (26,26,26) matches --bg-panel in style.css, which used
+                    # to be desirable - the JPG letterbox visually merged
+                    # into the preview-area background so the seam was
+                    # invisible. For Proj Probe specifically that's exactly
+                    # the wrong behavior: we WANT the user to see where the
+                    # projection panel ends and the camera frame still
+                    # continues, because that gap is the whole point of the
+                    # PAR + screen-shape preview.
+                    #
+                    # Picking (64,64,64) = #404040 here gives a clearly
+                    # lighter mid-grey that:
+                    #   - reads as distinct from --bg-panel (#1a1a1a) outside,
+                    #   - reads as distinct from chart blacks (0) inside,
+                    #   - stays neutral enough not to compete with image
+                    #     content for attention.
+                    # Only this Proj Probe call site overrides the default;
+                    # letterbox_into itself keeps its old default so any
+                    # future caller that DOES want the seam-blending
+                    # behavior gets it for free without re-specifying.
+                    img_data = cutil.letterbox_into(
+                        img_data, target_w, target_h, fill_bgr=(64, 64, 64)
+                    )
 
                     out_file = os.path.join(static_dir, "probe_live.jpg")
                     cv2.imwrite(out_file, img_data)
