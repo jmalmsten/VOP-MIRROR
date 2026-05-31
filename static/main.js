@@ -260,18 +260,36 @@ async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
     const aspectData = await aspectReq.json();
     const imgAspect = aspectData.aspect || 1.777;
 
-    // 2. Ping the Python backend to calculate the exact static scale
+    // 2. Read the current PAR values from the GUI. We pull these at click time
+    //    rather than relying on a cached job state so the FIT/FILL FOV buttons
+    //    always reflect what the user is *currently* about to render with.
+    //    If a user types 1.6 into par_x and immediately hits FIT FOV, the math
+    //    needs to know about that 1.6 without a triggerSync round-trip first.
+    //    Defaults to 1.0 mirror the Python-side defaults so any element-missing
+    //    edge case (e.g. a future GUI variant without the PAR fields) still
+    //    cleanly reproduces unsqueezed behavior.
+    const parX = parseFloat(document.getElementById('par_x')?.value) || 1.0;
+    const parY = parseFloat(document.getElementById('par_y')?.value) || 1.0;
+
+    // 3. Ping the Python backend to calculate the exact static scale
     try {
         const fitReq = await fetch('/calculate_fit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect, mode: mode })
+            body: JSON.stringify({
+                fov: fov,
+                ref_z: zDist,
+                aspect_ratio: imgAspect,
+                mode: mode,
+                par_x: parX,
+                par_y: parY
+            })
         });
         const fitData = await fitReq.json();
 
         if (fitData.status === 'ok') {
             document.getElementById(scaleId).value = fitData.scale.toFixed(4);
-            console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)}`);
+            console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)} (PAR ${parX}:${parY})`);
             await triggerSync();
         } else {
             console.error("Fit Calc Error:", fitData.message);
@@ -1310,6 +1328,11 @@ const calibration = {
         if (singleBtn) singleBtn.addEventListener('click', () => this.runSingle());
         if (acbBtn) acbBtn.addEventListener('click', () => this.runAcb());
 
+        // Auto White Balance button. Same addEventListener pattern as the
+        // others so the HTML stays JS-free.
+        const wbBtn = document.getElementById('cal_wb_btn')
+        if (wbBtn) wbBtn.addEventListener('click', () => this.runWhiteBalance());
+
         // Initial population of the Current Calibration readout panel.
         // If the engine has been running and writing to calibration.json,
         // this populates the page on load so the user sees real state
@@ -1326,11 +1349,12 @@ const calibration = {
         if (el) el.innerText = text;
     },
 
+    // Gate all calibration buttons (including WB) while anytask runs.
     setButtonsEnabled(enabled) {
-        const singleBtn = document.getElementById('cal_single_btn');
-        const acbBtn = document.getElementById('cal_acb_btn');
-        if (singleBtn) singleBtn.disabled = !enabled;
-        if (acbBtn) acbBtn.disabled = !enabled;
+        ['cal_single_btn', 'cal_acb_btn', 'cal_wb_btn'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = !enabled;
+        })
     },
 
     // Pull the WB and gain values from Main page's Hardware Constants.
@@ -1397,6 +1421,53 @@ const calibration = {
             this.setStatus('Network error');
             this.taskInFlight = null;
             this.setButtonsEnabled(true);
+        }
+    },
+
+    // WB has its own status line on the page, so route its messages there.
+    setWbStatus(text) {
+        const el = document.getElementById('cal_wb_status_text');
+        if (el) el.innerText = text;
+    },
+
+    async runWhiteBalance() {
+        // Kick off the semi-auto WB routine. Params come from the cal_wb_*
+        // fields: gain/awb/res come from Main page hardware constants. The
+        // current Main-page awb_r/awb_b are the loop's STARTING gains - leave
+        // them near your working values (e.g. 3.3/1.4) so it refines rather
+        // than climbing red out of the floor from scratch.
+        const grey      = parseFloat(document.getElementById('cal_wb_grey').value);
+        const initial   = parseFloat(document.getElementById('cal_wb_initial').value);
+        const elow      = parseFloat(document.getElementById('cal_wb_expo_low').value);
+        const ehigh     = parseFloat(document.getElementById('cal_wb_expo_high').value);
+        if ([grey, initial, elow, ehigh].some(isNaN)) {
+            this.setWbStatus('Bad WB parameters');
+            return;
+        }
+
+        // 'wb' lets onEngineComplete tell this completion apart from ACB's.
+        this.taskInFlight = 'wb';
+        this.setButtonsEnabled(false);
+        this.setWbStatus('Measuring (WB)...');
+
+        const payload = {
+            grey_level: grey,
+            initial_exposure_s: initial,
+            expo_target_low: elow,
+            expo_target_high: ehigh,
+            ...this.getCurrentHardwareParams(),
+        };
+
+        try {
+            await fetch('/measure_white_balance', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+        } catch (e) {
+            this.setWbStatus('Network error');
+            this.taskInFlight = null;
+            this.setButtonsEnabled(true); 
         }
     },
 
@@ -1519,6 +1590,22 @@ const calibration = {
             return;
         }
 
+        // WB just finished: pull the derived gains and write them into the
+        // Main page's Hardware Constants so the next dispatched job uses them.
+        // This is the "semi-auto" hinge - measure once here, every subsequent
+        // job reuses these exact values, so WB stays locked frame-to-frame.
+        if (completedTask === 'wb') {
+            try {
+                const r = await fetch('/calibration_state');
+                const s = await r.json();
+                const rEl = document.getElementById('awb_r');
+                const bEl = document.getElementById('awb_b');
+                if (rEl && typeof s.awb_r === 'number') rEl.value = s.awb_r.toFixed(4);
+                if (bEl && typeof s.awb_b === 'number') bEl.value = s.awb_b.toFixed(4);
+            } catch (e) { console.error('WB write-back failed:', e); }
+            this.setWbStatus('Ready');
+        }
+
         // Normal completion (no follow-up pending).
         this.setStatus('Ready');
         this.setButtonsEnabled(true);
@@ -1594,6 +1681,30 @@ const calibration = {
                 else if (b < 0.95) singleEl.classList.add('ok');
                 else if (b < 0.99) singleEl.classList.add('warn');
                 else singleEl.classList.add('danger');
+            }
+
+            // Auto White Balance readout. These are camera gains (awb_r/awb_b),
+            // the same keys jobs consume, written by the WB task.
+            const wbREl     = document.getElementById('cal_wb_readout_r');
+            const wbBEl     = document.getElementById('cal_wb_readout_b');
+            const wbPassEl  = document.getElementById('cal_wb_readout_pass');
+            if (wbREl) wbREl.innerText = (typeof state.awb_r === 'number')
+                ? state.awb_r.toFixed(4) : '--';
+            if (wbBEl) wbBEl.innerText = (typeof state.awb_b === 'number')
+                ? state.awb_b.toFixed(4) : '--';
+            if (wbPassEl) {
+                wbPassEl.classList.remove('cal-wb-readout-pass', 'cal-wb-readout-fail');
+                if (state.wb_meta && typeof state.wb_meta.passed === 'boolean') {
+                    const p = state.wb_meta.passed;
+                    // Show the worst residual so a near-miss is visible.
+                    const worst = Math.max(state.wb_meta.confirm_residual_r || 0,
+                                           state.wb_meta.confirm_residual_b || 0);
+                    wbPassEl.innerText = (p ? 'PASS' : 'FAIL') +
+                        ' (' + (worst * 100).toFixed(2) + '%)';
+                    wbPassEl.classList.add(p ? 'cal-wb-readout-pass' : 'cal-wb-readout-fail');
+                } else {
+                    wbPassEl.innerText = '--';
+                }
             }
         } catch (e) {
             // Silent fail - the readout staying at "--" is the

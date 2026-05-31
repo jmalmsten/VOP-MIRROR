@@ -216,31 +216,66 @@ def get_display_size():
         # window is small but worth handling cleanly.
         return (1920, 1080)
 
-def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit", screen_width=1920, screen_height=1080):
+def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit",
+                               screen_width=1920, screen_height=1080,
+                               par_x=1.0, par_y=1.0):
     """
-    Calculates the required scaling factor to size an image of arbitrary aspect ratio
-    against the frustum bounds at a specific Z-depth.
-    
-    mode="fit"  - returns the smaller scale, fitting the entire image inside the 
+    Calculates the required scaling factor to size an image of arbitrary aspect
+    ratio against the frustum bounds at a specific Z-depth.
+
+    mode="fit"  - returns the smaller scale, fitting the entire image inside the
                   frustum (letterbox/pillarbox behavior, no cropping).
-    mode="fill" - returns the larger scale, filling the frustum entirely with the 
+    mode="fill" - returns the larger scale, filling the frustum entirely with the
                   image (image overflow on the shorter axis is intentional).
+
+    PAR awareness:
+        vop_math.get_frustum_fit_matrix post-multiplies an anamorphic squeeze
+        onto the projection matrix:
+            sx_anam = min(1.0, 1.0/par)   # shrinks X when PAR > 1
+            sy_anam = min(1.0, par)       # shrinks Y when PAR < 1
+        That squeeze cuts the rendered quad's NDC footprint on whichever axis
+        is squeezed. If we ignore it here, FIT/FILL FOV sizes the quad for
+        the *unsqueezed* frustum and the renderer then trims it inwards,
+        producing windowboxing on the squeezed axis.
+
+        To compensate, we divide each axis's scale budget by its squeeze
+        factor. The result: the geometry is intentionally OVER-sized in
+        world space, but the squeeze brings it back so it lands exactly on
+        the desired frustum edge in NDC. PAR=1:1 (sx_anam=sy_anam=1.0)
+        collapses cleanly to the original behavior, so old jobs are
+        unaffected.
     """
-    # Prevent division by zero
+    # Prevent division by zero on the depth axis - a 0 ref_z would otherwise
+    # nuke the frustum to a single point.
     z_dist = abs(float(ref_z))
-    if z_dist == 0: z_dist = 0.1 
-        
+    if z_dist == 0:
+        z_dist = 0.1
+
     fov_rad = math.radians(float(fov))
     screen_aspect = screen_width / screen_height
-    
-    # Calculate physical frustum bounds
+
+    # Physical frustum bounds at ref_z. frustum_h is the FULL height of the
+    # visible plane at that Z; frustum_w follows from the panel's aspect.
     frustum_h = 2.0 * z_dist * math.tan(fov_rad / 2.0)
     frustum_w = frustum_h * screen_aspect
-    
-    # Calculate dimensional scaling requirements
-    scale_for_width = frustum_w / (2.0 * img_aspect)
-    scale_for_height = frustum_h / 2.0
-    
+
+    # Mirror the squeeze factors used by vop_math.get_frustum_fit_matrix.
+    # Guard against zero/negative PAR inputs the same way the renderer does
+    # so the two stay in lockstep regardless of malformed UI input.
+    px = float(par_x) if float(par_x) > 0 else 1.0
+    py = float(par_y) if float(par_y) > 0 else 1.0
+    par = px / py
+    sx_anam = min(1.0, 1.0 / par)   # <=1.0 always; ==1.0 when PAR<=1
+    sy_anam = min(1.0, par)         # <=1.0 always; ==1.0 when PAR>=1
+
+    # Dimensional scaling requirements, with the per-axis squeeze divided
+    # OUT of the budget. The "/ sx_anam" looks like it's making the quad
+    # bigger - and it is, in world space - but the squeeze in the projection
+    # matrix shrinks the NDC footprint back down by the same factor, so the
+    # quad lands exactly on the frustum edge the user expects.
+    scale_for_width  = (frustum_w / (2.0 * img_aspect)) / sx_anam
+    scale_for_height = (frustum_h / 2.0) / sy_anam
+
     # Pick min for fit (image inside frustum) or max for fill (frustum inside image)
     if mode == "fill":
         return max(scale_for_width, scale_for_height)
@@ -564,19 +599,26 @@ def calculate_fit():
     print("[VOP SERVER] ACTION: CALCULATE FIT FOV")
     data = request.json
     try:
-        fov = float(data.get('fov', 45.0))
-        ref_z = float(data.get('ref_z', 1.0))
-        aspect = float(data.get('aspect_ratio', 1.777))
-        mode = data.get('mode', 'fit')      # 'fit' or 'fill'
-        
-        # Pull the live panel dimensions so frustum-bounds math matches 
-        # what the engine is actually rendering into. Without this, Fit/Fill 
-        # FOV would compute against a fictional 1920x1080 frustum and the 
+        fov     = float(data.get('fov', 45.0))
+        ref_z   = float(data.get('ref_z', 1.0))
+        aspect  = float(data.get('aspect_ratio', 1.777))
+        mode    = data.get('mode', 'fit')      # 'fit' or 'fill'
+        # New: anamorphic PAR values forwarded from the GUI's PAR inputs.
+        # Defaults to 1:1 so any old/stripped client (or a manual curl
+        # request that pre-dates this field) still gets the original
+        # unsqueezed behavior - no silent surprises on legacy callers.
+        par_x   = float(data.get('par_x', 1.0))
+        par_y   = float(data.get('par_y', 1.0))
+
+        # Pull the live panel dimensions so frustum-bounds math matches
+        # what the engine is actually rendering into. Without this, Fit/Fill
+        # FOV would compute against a fictional 1920x1080 frustum and the
         # button would set the user a few degrees off on a 3:2 or UHD panel.
         screen_w, screen_h = get_display_size()
         req_scale = calculate_static_fit_scale(fov, ref_z, aspect, mode=mode,
                                                screen_width=screen_w,
-                                               screen_height=screen_h)
+                                               screen_height=screen_h,
+                                               par_x=par_x, par_y=par_y)
         return jsonify({"status": "ok", "scale": req_scale})
     except Exception as e:
         print(f"[VOP SERVER] Fit Calc Error: {e}")
@@ -821,6 +863,19 @@ def cam_probe():
 def execute_seq():
     # Dispatches the full frame sequence exposure task
     dispatch_engine('execute', request.json)
+    return jsonify({"status": "started"})
+
+@app.route('/measure_white_balance', methods=['POST'])
+def measure_white_balance():
+    # Calibration page: "Auto White Balance".
+    #
+    # Fire-and-forget, exactly like ACB. The engine runs the full
+    # exposure-search -> WB loop -> confirm sequence in one task
+    # (unlike ACB+black which split because they're independently
+    # useful; WB search/solve/confirm is one logical operation).
+    # Frontend sees /status go "rendering" then "idle", then GETs
+    # /calibration_state to read the derived gains.
+    dispatch_engine('measure_white_balance', request.json)
     return jsonify({"status": "started"})
 
 @app.route('/measure_noise', methods=['POST'])
