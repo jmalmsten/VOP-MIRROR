@@ -626,6 +626,120 @@ def upload_proj_bipack2():
     process_video_ingestion(filepath, PROJ_BIPACK2_DIR)
     return jsonify({"status": "ok", "filename": file.filename})
 
+# Maximum frame index that fits in the 4-digit %04d pattern used by
+# the engine's playhead. Frame 9999 is the last valid one; frame
+# 10000 would produce a 5-digit filename (latent_10000.tif) which
+# breaks the engine's glob-based readers and the LAB/INVERT sorter.
+# A future migration to %05d or a pure integer key could lift this -
+# tracked separately. For now: enforce here so users get a clear
+# error instead of a corrupted job.
+CAM_MAG_FRAME_LIMIT = 9999
+
+@app.route('/upload_cam_mag', methods=['POST'])
+def upload_cam_mag():
+    """
+    Cam Mag video ingest. Unlike Proj Mag / BiPack uploads, this route
+    only accepts video containers (no stills) - a single still loaded
+    as a cam-mag has no meaningful frame correspondence with the timeline.
+    
+    Pre-flight: probe the video's frame count and reject if it exceeds
+    the engine's 4-digit playhead range. Without this check, a 30-min
+    reel would happily spend 10+ minutes filling the SSD with files
+    that the engine then can't address. The 9999 limit corresponds to
+    ~6.9 min @24fps; longer reels need to be split externally for now.
+    
+    On accept, the route nukes any existing cam-mag contents (matching
+    the destructive semantics of the other UPLOAD buttons in this
+    project), then runs ffmpeg with latent_NNNN.tif naming starting at
+    frame 1. That naming is identical to what engine.py's execute path
+    produces, so the LIME / Cam Probe / Comp View / ProRes render code
+    all consume ingested reels with zero special-casing.
+    
+    Pix-fmt is rgb48le unconditionally: cam mag frames feed the LIME
+    pipeline which is 16-bit throughout, so the mode-aware downgrade
+    that protects Proj Mag textures doesn't apply here.
+    """
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    # Reject non-video uploads up front. The frontend's <input accept>
+    # filters by extension but it's only an advisory hint in the
+    # browser - we have to enforce server-side too.
+    ext = os.path.splitext(file.filename)[1].lower()
+    video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
+    if ext not in video_exts:
+        return jsonify({
+            "error": f"Cam Mag accepts video files only "
+                     f"({', '.join(video_exts)}). Got: {ext or '(no extension)'}"
+        }), 400
+    
+    print(f"[VOP SERVER] ACTION: UPLOAD CAM MAG -> {file.filename}")
+    
+    # Save to a temp path BEFORE the cam-mag is nuked. That way, if
+    # the pre-flight check rejects the file, we haven't trashed the
+    # user's existing reel for nothing. Temp lives in CamMag dir
+    # itself so the rename-into-place after the check is atomic on
+    # the same filesystem.
+    tmp_path = os.path.join(CAM_MAG_DIR, f".incoming_{file.filename}")
+    file.save(tmp_path)
+    
+    # Pre-flight: probe the frame count. If we can't determine it,
+    # err on the side of letting the ingest proceed - the worst case
+    # is wasted disk space, which the user can recover with NUKE.
+    # If we DO get a count and it's over the limit, reject cleanly.
+    frame_count = probe_video_frame_count(tmp_path)
+    if frame_count is not None and frame_count > CAM_MAG_FRAME_LIMIT:
+        os.remove(tmp_path)
+        return jsonify({
+            "error": f"Reel too long: {frame_count} frames exceeds the "
+                     f"current {CAM_MAG_FRAME_LIMIT}-frame limit "
+                     f"(~{CAM_MAG_FRAME_LIMIT // 24} sec @24fps). "
+                     f"Split the reel externally and ingest a shorter "
+                     f"segment, or trim it in your NLE first."
+        }), 413  # 413 Payload Too Large is the closest HTTP semantic
+    
+    # Past the check - now we can safely wipe the existing cam-mag.
+    # Same predicate as nuke_mag() (only .tif files) so we don't
+    # accidentally delete our own .incoming_* tempfile mid-flight.
+    for f in os.listdir(CAM_MAG_DIR):
+        if f.endswith(".tif"):
+            os.remove(os.path.join(CAM_MAG_DIR, f))
+    
+    # Move temp into place under its real name, then ingest. The
+    # rename keeps the file off-limits to the .endswith('.tif')
+    # sweeper during the brief window between nuke and ffmpeg start.
+    filepath = os.path.join(CAM_MAG_DIR, file.filename)
+    os.rename(tmp_path, filepath)
+    
+    process_video_ingestion(
+        filepath, CAM_MAG_DIR,
+        filename_prefix="latent_",
+        start_number=1,
+        pix_fmt_override="rgb48le",
+    )
+    
+    # Stash the loaded reel's filename in current_job.json so a page
+    # refresh can show the user what's currently in the cam mag. The
+    # actual TIFF files on disk are anonymous (latent_0001.tif etc.),
+    # so without this we'd lose the human-readable source name.
+    try:
+        job = {}
+        if os.path.exists(CURRENT_JOB_FILE):
+            with open(CURRENT_JOB_FILE, 'r') as jf:
+                job = json.load(jf) or {}
+        job['cam_mag_filename'] = file.filename
+        with open(CURRENT_JOB_FILE, 'w') as jf:
+            json.dump(job, jf, indent=2)
+    except (json.JSONDecodeError, OSError) as e:
+        # Non-fatal: the upload succeeded, just the label won't
+        # survive a page refresh. Log and continue.
+        print(f"[VOP SERVER] WARN: Could not record cam_mag_filename: {e}")
+    
+    return jsonify({"status": "ok", "filename": file.filename})
+
 @app.route('/nuke_proj_mag', methods=['POST'])
 def nuke_proj_mag():
     # Deletes all primary projection assets
@@ -1081,10 +1195,28 @@ def panic():
 
 @app.route('/nuke_mag', methods=['POST'])
 def nuke_mag():
-    # Deletes all captured latent TIFFs
+    # Deletes all captured latent TIFFs. Now also clears the recorded
+    # cam_mag_filename, since the reel that label refers to no longer
+    # exists on disk - leaving the label stale would mislead the UI
+    # into showing a phantom reel name.
     print("[VOP SERVER] ACTION: NUKE CAM MAG")
     for f in os.listdir(CAM_MAG_DIR):
         if f.endswith(".tif"): os.remove(os.path.join(CAM_MAG_DIR, f))
+    
+    # Best-effort clear of the filename label. Same fail-soft pattern
+    # as upload_cam_mag - if the job file is unreadable we log and
+    # move on rather than reporting a 500 for a cosmetic concern.
+    try:
+        if os.path.exists(CURRENT_JOB_FILE):
+            with open(CURRENT_JOB_FILE, 'r') as jf:
+                job = json.load(jf) or {}
+            if 'cam_mag_filename' in job:
+                job.pop('cam_mag_filename', None)
+                with open(CURRENT_JOB_FILE, 'w') as jf:
+                    json.dump(job, jf, indent=2)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[VOP SERVER] WARN: Could not clear cam_mag_filename: {e}")
+    
     return jsonify({"status": "mag_cleared"})
 
 @app.route('/nuke_job', methods=['POST'])
