@@ -260,18 +260,36 @@ async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
     const aspectData = await aspectReq.json();
     const imgAspect = aspectData.aspect || 1.777;
 
-    // 2. Ping the Python backend to calculate the exact static scale
+    // 2. Read the current PAR values from the GUI. We pull these at click time
+    //    rather than relying on a cached job state so the FIT/FILL FOV buttons
+    //    always reflect what the user is *currently* about to render with.
+    //    If a user types 1.6 into par_x and immediately hits FIT FOV, the math
+    //    needs to know about that 1.6 without a triggerSync round-trip first.
+    //    Defaults to 1.0 mirror the Python-side defaults so any element-missing
+    //    edge case (e.g. a future GUI variant without the PAR fields) still
+    //    cleanly reproduces unsqueezed behavior.
+    const parX = parseFloat(document.getElementById('par_x')?.value) || 1.0;
+    const parY = parseFloat(document.getElementById('par_y')?.value) || 1.0;
+
+    // 3. Ping the Python backend to calculate the exact static scale
     try {
         const fitReq = await fetch('/calculate_fit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fov: fov, ref_z: zDist, aspect_ratio: imgAspect, mode: mode })
+            body: JSON.stringify({
+                fov: fov,
+                ref_z: zDist,
+                aspect_ratio: imgAspect,
+                mode: mode,
+                par_x: parX,
+                par_y: parY
+            })
         });
         const fitData = await fitReq.json();
 
         if (fitData.status === 'ok') {
             document.getElementById(scaleId).value = fitData.scale.toFixed(4);
-            console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)}`);
+            console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)} (PAR ${parX}:${parY})`);
             await triggerSync();
         } else {
             console.error("Fit Calc Error:", fitData.message);
