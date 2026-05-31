@@ -97,24 +97,91 @@ def ensure_engine_running():
         engine_script = os.path.join(BASE_DIR, "modules", "engine.py")
         engine_process = subprocess.Popen([sys.executable, engine_script])
 
-def process_video_ingestion(filepath, target_dir):
+def probe_video_frame_count(filepath):
     """
-    Checks if an uploaded file is a video container.
-    If so, extracts all frames to zero-padded TIFFs matching the engine's
-    playhead expectations (0000.tif, 0001.tif) and deletes the original video.
+    Returns the frame count of a video file as an int, or None if the
+    count cannot be determined.
     
-    Pixel format is mode-aware (issue #169)
-      - SSS / MDS jobs: force 8-bit rgb24, matching the moderngl texture
-        pipeline that currently expects 8bpc RGB.
-      - DRE jobs: preserve up to 16-bit precision via rgb48le. The DRE
-        mode is the whole point of keeping that range, since it uses
-        the extra bits to drive temporal luminance encoding during
-        exposure.
+    Used as a pre-flight check before invoking process_video_ingestion
+    on long videos. Catching an oversized reel here avoids minutes of
+    wasted ffmpeg work plus disk I/O - the user gets an immediate error
+    instead of a silent failure deep in a sequence.
     
-    The Current mode is read from current_job.json. If the file is missing
-    or unparseable we fall back to the safe 8-bit path, since an DRE-mode
-    16-bit TIFF would crash the current texture pipeline.
+    Strategy:
+      1. Cheap path: read the container's nb_frames metadata. This is
+         instant (header-only) and accurate for MOV/MP4/ProRes which
+         write the count at encode time.
+      2. Fallback: use ffprobe -count_frames, which actually decodes
+         the entire stream. Slow (~seconds for a multi-minute reel)
+         but unavoidable for streaming-friendly containers like MKV
+         that often report nb_frames=N/A.
+    
+    Returns int frame count on success, or None on any failure (no
+    ffprobe binary, no video stream, malformed file, etc.). Callers
+    should treat None as "couldn't verify" and decide whether to
+    proceed cautiously or reject.
     """
+    # Step 1: cheap header read. -v error suppresses ffprobe's noisy
+    # banner so we can parse the single line of output cleanly.
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-select_streams", "v:0",
+             "-count_packets", "-show_entries", "stream=nb_read_packets",
+             "-of", "csv=p=0", filepath],
+            check=True, capture_output=True, text=True, timeout=10
+        )
+        raw = result.stdout.strip()
+        if raw and raw != "N/A":
+            return int(raw)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, ValueError) as e:
+        # Fall through to the slow path. Log so the user knows why
+        # ingestion takes a few seconds before the real work starts.
+        print(f"[VOP SERVER] Frame-count header read failed ({e}); "
+              f"falling back to full stream count.")
+    
+    # Step 2: slow but reliable. -count_frames forces a full decode
+    # to populate nb_read_frames. Used when the container's nb_frames
+    # is N/A or when step 1 raised. Capped with a generous timeout so
+    # a pathological input can't hang the upload route forever.
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-select_streams", "v:0",
+             "-count_frames", "-show_entries", "stream=nb_read_frames",
+             "-of", "csv=p=0", filepath],
+            check=True, capture_output=True, text=True, timeout=120
+        )
+        raw = result.stdout.strip()
+        if raw and raw != "N/A":
+            return int(raw)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, ValueError) as e:
+        print(f"[VOP SERVER] Frame-count full scan failed ({e}). "
+              f"Cannot verify reel length.")
+    
+    return None
+
+def process_video_ingestion(filepath, target_dir, filename_prefix="", start_number=0, pix_fmt_override=None):
+    """
+    [signature note]
+    filename_prefix : str, default "". Prepended to the numeric pattern,
+                      e.g. "latent_" produces latent_0001.tif. Empty
+                      string keeps the legacy 0000.tif behavior used by
+                      Proj Mag and BiPack uploads.
+    start_number    : int, default 0. ffmpeg's -start_number value.
+                      Cam Mag uses 1 because engine.py's playhead is
+                      1-indexed (latent_0001.tif is the first frame),
+                      while Proj Mag stays at 0 for backward compat.
+    pix_fmt_override: str or None, default None. When set, bypasses the
+                      job-mode-aware logic and uses this pix_fmt directly.
+                      Cam Mag passes 'rgb48le' unconditionally because
+                      its target is the LIME pipeline which is 16-bit
+                      throughout, and unlike Proj Mag textures there's
+                      no moderngl 8-bit constraint to worry about.
+    """
+
     ext = os.path.splitext(filepath)[1].lower()
     video_exts = ['.mp4', '.mov', '.avi', '.mkv', '.webm']
 
@@ -126,31 +193,47 @@ def process_video_ingestion(filepath, target_dir):
     # because every caller of this function (PM, BP1, BP2 upload routes)
     # would otherwise need plumbping. Reading the file once per upload is 
     # cheap and keeps the call sites unchanged.
-    pix_fmt = "rgb24" # safe 8-bit default - won't crash smear pipelines
-    try:
-        if os.path.exists(CURRENT_JOB_FILE):
-            with open(CURRENT_JOB_FILE, 'r') as jf:
-                job_mode = json.load(jf).get('smear_mode', 'SSS').upper()
-            if job_mode == 'DRE':
-                # rgb48le = 16-bit RGB little-endian. Preserves the full
-                # tonal range of 10/12 bit source codecs (ProRes, DNxHR)
-                # into 16 bit TIFFs that the TextureManager will 
-                # consume natively.
-                pix_fmt = "rgb48le"
-    except (json.JSONDecodeError, OSError) as e:
-        # Don't fail the upload just because the job file is weird;
-        # log it and fall back to the safe 8-bit path
-        print(f"[VOP SERVER] WARN: Could not read job mode for ingestion "
-              f"({e}). Falling back to 8-bit rgb24.")
+    # Cam Mag explicitly passes 'rgb48le' to skip the mode-aware logic
+    # below. The mode-awareness exists because moderngl's Proj Mag /
+    # BiPack texture pipeline used to choke on 16-bit input in SSS/MDS
+    # mode. Cam Mag's frames never become textures - they're consumed by
+    # cv2.imread inside LIME, which handles 16-bit natively - so the
+    # constraint doesn't apply and we want the full bit depth.
+    if pix_fmt_override is not None:
+        pix_fmt = pix_fmt_override
+    else:
+        pix_fmt = "rgb24" # safe 8-bit default - won't crash smear pipelines
+        try:
+            if os.path.exists(CURRENT_JOB_FILE):
+                with open(CURRENT_JOB_FILE, 'r') as jf:
+                    job_mode = json.load(jf).get('smear_mode', 'SSS').upper()
+                if job_mode == 'DRE':
+                    # rgb48le = 16-bit RGB little-endian. Preserves the full
+                    # tonal range of 10/12 bit source codecs (ProRes, DNxHR)
+                    # into 16 bit TIFFs that the TextureManager will 
+                    # consume natively.
+                    pix_fmt = "rgb48le"
+        except (json.JSONDecodeError, OSError) as e:
+            # Don't fail the upload just because the job file is weird;
+            # log it and fall back to the safe 8-bit path
+            print(f"[VOP SERVER] WARN: Could not read job mode for ingestion "
+                  f"({e}). Falling back to 8-bit rgb24.")
     
     print(f"[VOP SERVER] Video detected! Extracting {filepath} "
           f"to TIFF sequence (pix_fmt={pix_fmt})...")
     
-    output_pattern = os.path.join(target_dir, "%04d.tif")
+    # Build the output pattern with the optional caller-supplied prefix.
+    # PM / BP1 / BP2 pass "" so the result is plain "%04d.tif" - same as
+    # before. Cam Mag passes "latent_" + start_number=1 so frames are
+    # written as latent_0001.tif onward, matching exactly what
+    # engine.py's execute path writes during a normal exposure run.
+    # That uniformity is what lets the LIME / Cam Probe / ProRes render
+    # code consume an ingested reel without any branching.
+    output_pattern = os.path.join(target_dir, f"{filename_prefix}%04d.tif")
     cmd = [
         "ffmpeg", "-y", "-i", filepath,
-        "-pix_fmt", pix_fmt,          # mode-aware: rgb or rgb48le
-        "-start_number", "0",
+        "-pix_fmt", pix_fmt,
+        "-start_number", str(start_number),
         output_pattern
     ]
 
