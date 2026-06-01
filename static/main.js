@@ -198,8 +198,19 @@ function panic() {
         fetch('/panic', {method: 'POST'}); 
     }
 }
+
 function nukeMag() { 
-    if (confirm("This deletes all latent frames that has been exposed. All will be trashed. Are you sure? This cannot be undone.")){
+    // Wording updated for v0.12 - the Cam Mag now holds either
+    // exposed latents (from Execute) OR an ingested video reel
+    // (from the new Cam Mag UPLOAD), so the confirm text shouldn't
+    // imply one or the other.
+    if (confirm("This deletes everything in the Cam Mag (loaded reels or exposed latents). Are you sure? This cannot be undone.")){
+        // Also clear the on-screen reel name immediately so the UI
+        // doesn't show a phantom filename until the next /status poll.
+        // The /nuke_mag route clears the server-side label too, so the
+        // next poll won't repopulate it.
+        const el = document.getElementById('cam_mag_filename');
+        if (el) el.value = '';
         fetch('/nuke_mag', {method: 'POST'}); 
     }
 }
@@ -990,9 +1001,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Bind drop zones to the text input fields showing the active image
-    setupDropZone('image',          'file_input',     'image',          '/upload_target');
-    setupDropZone('bipack1_image',  'bp1_file_input', 'bipack1_image',  '/upload_proj_bipack1');
-    setupDropZone('bipack2_image',  'bp2_file_input', 'bipack2_image',  '/upload_proj_bipack2');
+    setupDropZone('image',            'file_input',          'image',            '/upload_target');
+    setupDropZone('bipack1_image',    'bp1_file_input',      'bipack1_image',    '/upload_proj_bipack1');
+    setupDropZone('bipack2_image',    'bp2_file_input',      'bipack2_image',    '/upload_proj_bipack2');
+    setupDropZone('cam_mag_filename', 'cam_mag_file_input',  'cam_mag_filename', '/upload_cam_mag');
     
     // Wire eye-toggle change events so column visibility reacts immediately. 
     // Without this, toggling a layer's eye would only update the columns on 

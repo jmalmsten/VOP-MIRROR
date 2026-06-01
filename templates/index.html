@@ -31,7 +31,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>VOP v0.10</title>
+    <title>VOP v0.12</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.14">
 </head>
 <body>
@@ -43,7 +43,7 @@
         
         <div class="vop-header">
             <!-- Page title -->
-            <h2>VOP v0.10.0</h2>
+            <h2>VOP v0.12.0</h2>
 
             <!-- Page navigation. Click to switch between Main
                  (job editor + status + xsheet) and Calibration
@@ -75,7 +75,7 @@
 
             <div class="controls-area">
                 <div class="group-box">
-                    <div class="group-title">Probe / Preview / Execution</div>
+                    <div class="group-title">Camera</div>
                     <div class="input-row">
                         <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
                         <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
@@ -132,6 +132,42 @@
                         <hr class="section-divider">
                         <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
                         <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
+                    </div>
+                </div>
+
+                <!-- Cam Mag block.
+                     Sits between the Camera section (probe/preview/execute
+                     controls above) and the Projection Mag section (active
+                     image and projection geometry below). The Cam Mag is the
+                     destination for both exposure runs (Execute Sequence
+                     writes here frame by frame) and direct ingest (the
+                     UPLOAD button below ffmpegs a ProRes/etc. reel into
+                     latent_NNNN.tif sequence here, ready for further LIME
+                     passes from the camera).
+                     
+                     Frame range is capped server-side at 9999 frames because
+                     the latent filename pattern is 4-digit %04d. The error
+                     message from /upload_cam_mag explains the limit if hit.
+                -->
+                <div class="group-box">
+                    <div class="group-title">Cam Mag</div>
+                    <div class="upload-cluster">
+                        <div class="c-box layer-vis-box">
+                            <label>Active Reel</label>
+                            <div class="layer-vis-row">
+                                <!-- No eye-toggle here (unlike PM/BP boxes):
+                                     Cam Mag isn't a render layer, it's the
+                                     destination buffer for exposures. There's
+                                     nothing to "hide" or "pass through" for. -->
+                                <input type="text" id="cam_mag_filename" readonly>
+                            </div>
+                        </div>
+                        <!-- Accept only video extensions. The server route
+                             enforces this too, but listing them here gives
+                             the browser's file picker the right filter. -->
+                        <input type="file" id="cam_mag_file_input" class="hidden-file-input" accept=".mp4,.mov,.avi,.mkv,.webm" onchange="uploadFile('cam_mag_file_input', 'cam_mag_filename', '/upload_cam_mag')">
+                        <button class="mini-btn" onclick="document.getElementById('cam_mag_file_input').click()" title="Load a video reel into the Cam Mag. ProRes 4444 in linear gamma recommended for highest fidelity.">UPLOAD</button>
+                        <button class="mini-btn danger" onclick="nukeMag()" title="Deletes everything in the Cam Mag (loaded reels or exposed latents)">NUKE</button>
                     </div>
                 </div>
 

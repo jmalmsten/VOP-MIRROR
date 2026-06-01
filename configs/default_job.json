@@ -8,6 +8,7 @@
     "fit_z": "-1.0",
     "coord_scale": "1.0",
     "image": "",
+    "cam_mag_filename": "",
     "smear_mode": "SSS",
     "bracket_count": "3",
     "bracket_stops": "1.0",
