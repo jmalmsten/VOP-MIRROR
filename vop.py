@@ -163,7 +163,7 @@ def probe_video_frame_count(filepath):
     
     return None
 
-def process_video_ingestion(filepath, target_dir, filename_prefix="", start_number=0, pix_fmt_override=None):
+def process_video_ingestion(filepath, target_dir, filename_prefix="", start_number=0, pix_fmt_override=None, scale_to=None):
     """
     [signature note]
     filename_prefix : str, default "". Prepended to the numeric pattern,
@@ -180,6 +180,20 @@ def process_video_ingestion(filepath, target_dir, filename_prefix="", start_numb
                       its target is the LIME pipeline which is 16-bit
                       throughout, and unlike Proj Mag textures there's
                       no moderngl 8-bit constraint to worry about.
+    scale_to        : (int, int) tuple or None, default None. When set,
+                      forces every output frame to exactly W x H pixels
+                      via ffmpeg's scale filter. Non-uniform - aspect
+                      ratio is NOT preserved - which is intentional:
+                      Cam Mag uses this to slam an arbitrary input reel
+                      (say 1280x720 webcam footage) onto the camera's
+                      native resolution (2028x1520 at half-res) so the
+                      downstream LIME / Comp View / cv2.add pipeline
+                      sees consistent dimensions on every latent.
+                      The aspect-ratio distortion that introduces is
+                      meant to be compensated for at composite time via
+                      the job's PAR_X / PAR_Y values, the same way an
+                      anamorphic lens squeeze is unsqueezed in post.
+                      PM / BP / BiPack pass None and behave as before.
     """
 
     ext = os.path.splitext(filepath)[1].lower()
@@ -230,13 +244,39 @@ def process_video_ingestion(filepath, target_dir, filename_prefix="", start_numb
     # That uniformity is what lets the LIME / Cam Probe / ProRes render
     # code consume an ingested reel without any branching.
     output_pattern = os.path.join(target_dir, f"{filename_prefix}%04d.tif")
+    
+    # Base command - same as before for the no-scale path that PM / BP /
+    # BiPack still use. We build the list and then conditionally insert
+    # the scale filter, rather than building two parallel commands,
+    # because the scale filter is the ONLY thing that varies between
+    # the two call patterns. Keeping a single source of truth for the
+    # rest of the args means future flags only need to be added once.
     cmd = [
         "ffmpeg", "-y", "-i", filepath,
         "-pix_fmt", pix_fmt,
         "-start_number", str(start_number),
         output_pattern
     ]
-
+    
+    # Conditional scaling. ffmpeg's scale filter with explicit W:H and
+    # no force_original_aspect_ratio flag will stretch non-uniformly
+    # to fill - which is what we want for Cam Mag. Default flags pick
+    # bicubic, which is a reasonable middle-ground for arbitrary input
+    # reels (sharper than bilinear, no ringing like lanczos can give
+    # on synthetic test patterns).
+    #
+    # Inserted right before the output_pattern so the filter chain
+    # applies in the encoder's pre-output stage. -vf accepts the
+    # filter spec as a single string.
+    if scale_to is not None:
+        target_w, target_h = scale_to
+        # Insert at position -1 (just before output_pattern). list.insert
+        # shifts the output_pattern out by one slot, so the final order
+        # remains [..., -vf, scale=..., output_pattern].
+        cmd.insert(-1, "-vf")
+        cmd.insert(-1, f"scale={int(target_w)}:{int(target_h)}")
+        print(f"[VOP SERVER] Scaling ingest to {target_w}x{target_h} "
+              f"(non-uniform; compensate with PAR at composite time).")
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("[VOP SERVER] Frame extraction complete.")
@@ -714,11 +754,48 @@ def upload_cam_mag():
     filepath = os.path.join(CAM_MAG_DIR, file.filename)
     os.rename(tmp_path, filepath)
     
+    # Read the target camera resolution from the active job so the
+    # ingest can stretch the input reel to match. Without this, an
+    # input video of any other resolution (say 1280x720 from a
+    # webcam) produces latent_NNNN.tif files that don't match the
+    # dimensions of frames produced by Execute Sequence - which
+    # then makes Comp View / cv2.add / LIME refuse to composite
+    # because their array shapes mismatch.
+    #
+    # cam_res convention is "WxH" string, matching engine.py's
+    # parsing pattern at lines ~1623-1630. We follow the same
+    # fallback policy: malformed or missing -> (2028, 1520), the
+    # Pi HQ camera's binned half-res mode which is the project's
+    # canonical default.
+    cam_res_str = '2028x1520'
+    try:
+        if os.path.exists(CURRENT_JOB_FILE):
+            with open(CURRENT_JOB_FILE, 'r') as jf:
+                cam_res_str = (json.load(jf) or {}).get('cam_res', '2028x1520')
+    except (json.JSONDecodeError, OSError) as e:
+        # Non-fatal - fall through to the hardcoded default. Same
+        # philosophy as the pix_fmt-mode read above: a broken job
+        # file shouldn't kill the upload, since the user can fix
+        # the job and re-upload.
+        print(f"[VOP SERVER] WARN: Could not read cam_res for ingestion "
+              f"({e}). Falling back to {cam_res_str}.")
+    
+    try:
+        cw_str, ch_str = cam_res_str.lower().split('x')
+        target_resolution = (int(cw_str), int(ch_str))
+    except (ValueError, AttributeError):
+        # Defensive fallback - never let a malformed cam_res string
+        # crash an upload. Matches engine.py's defensive parsing.
+        print(f"[VOP SERVER] WARN: Malformed cam_res '{cam_res_str}'. "
+              f"Falling back to (2028, 1520).")
+        target_resolution = (2028, 1520)
+    
     process_video_ingestion(
         filepath, CAM_MAG_DIR,
         filename_prefix="latent_",
         start_number=1,
         pix_fmt_override="rgb48le",
+        scale_to=target_resolution,
     )
     
     # Stash the loaded reel's filename in current_job.json so a page
