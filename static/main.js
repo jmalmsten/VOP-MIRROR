@@ -1058,11 +1058,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dropZone.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            dropZone.style.border = "";
+            dropZone.classList.remove('drag-hover');
         });
 
         dropZone.addEventListener('drop', async (e) => {
             e.preventDefault();
+            dropZone.classList.remove('drag-hover');
             dropZone.style.border = "";
             
             if (e.dataTransfer.files.length > 0) {
