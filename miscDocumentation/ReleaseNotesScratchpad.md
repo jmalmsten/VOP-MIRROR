@@ -1,13 +1,15 @@
-# V0.12.1 (YYYYMMDD)
-## Notes: 
-## Added: 
-###  fixed ratio mismatch for Cam Mag ingest
-In order to get the camera's ingestion to match the PAR of the projection monitor, A change was done so that the ingested video matches the aspect ratio of the monitor while still fitting inside the camera resolution with a letterbox. And when the upload is done, the gui suggests the PAR that's needed to bring the final image back. This can then be applied by the user by simply clicking the suggestion. 
+# V0.12.2 (20260601)
+## fixed: 
+### Removed auto-updating of Proj Probe
+Proj Probe kept getting in the way when I wanted to quickly check things. So I removed the auto-updating function for Proj Probe. Now, if you want to update the preview. You press the appropriate button to trigger that update. 
 
 ### Other stuff
 The other stuff that has been added in the previous prereleases survived so check out those release notes. Wait. I never did releases for them. Well. here they are: 
 
-### V0.12.0 Video ingestion for the Cam Mag
+#### fixed ratio mismatch for Cam Mag ingest
+In order to get the camera's ingestion to match the PAR of the projection monitor, A change was done so that the ingested video matches the aspect ratio of the monitor while still fitting inside the camera resolution with a letterbox. And when the upload is done, the gui suggests the PAR that's needed to bring the final image back. This can then be applied by the user by simply clicking the suggestion. 
+
+#### V0.12.0 Video ingestion for the Cam Mag
 In order to fascilitate an initial pass with full color fidelity, a function has been added to be able to feed the cam mag with a video file directly. Upon uploading, the VOP will generate a tiff sequence that matches the camera resolution. And then it will be there for regular LIME compositions. 
 
 #### V0.11.0 - Auto Whitebalance Measure.
