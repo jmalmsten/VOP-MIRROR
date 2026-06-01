@@ -501,18 +501,18 @@ def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit",
         return max(scale_for_width, scale_for_height)
     return min(scale_for_width, scale_for_height)
 
-def dispatch_engine(task_type, payload):
+def dispatch_engine(task, payload):
     """
     Writes the task command to the IPC JSON file.
     Emulates synchronous blocking for preview tasks to ensure frontend UI sync.
     """
     global engine_process
-    print(f"\n[VOP SERVER] ACTION: {task_type.upper()}")
+    print(f"\n[VOP SERVER] ACTION: {task.upper()}")
 
     # Guarantee background daemon is active before dispatching
     ensure_engine_running()
 
-    payload['type'] = task_type
+    payload['task'] = task
     payload['vop_version'] = VOP_VERSION 
     
     # Serialize UI state payload to disk for persistence
@@ -529,7 +529,7 @@ def dispatch_engine(task_type, payload):
     # comp_preview is included here for the same reason cam_preview is:
     # the front end reloads probe_live.jpg right after the POST returns,
     # so we must not return until the engine has actually written the JPG.
-    if task_type in ['preview', 'cam_preview', 'comp_preview']:
+    if task in ['preview', 'cam_preview', 'comp_preview']:
         timeout = 45.0
         start_t = time.time()
         while os.path.exists(COMMAND_FILE):

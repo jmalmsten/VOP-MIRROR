@@ -263,7 +263,7 @@ def run_persistent_engine():
                 time.sleep(0.016)
                 continue
 
-            task = job_data.get('type')
+            task = job_data.get('task')
 
             if task == 'panic':
                 log_audit("Panic received. Flushing command and returning to idle.")
