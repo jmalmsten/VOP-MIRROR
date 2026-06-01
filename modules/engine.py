@@ -1774,12 +1774,12 @@ def run_persistent_engine():
                     ctx.clear(1.0, 1.0, 1.0, 1.0)
                     pygame.display.flip()
 
-                    # Capture using the same trigger pattern as
-                    # measure_noise. PRIME_WAIT_MS is added by
-                    # trigger_capture's caller convention (the
-                    # measure_noise task adds it the same way) - this
-                    # accounts for libcamera's startup window before
-                    # the sensor is actually integrating photons.
+                    # Capture using the same trigger pattern as every
+                    # other calibration task: plain total_ms as the
+                    # shutter argument, with the sensor prime handled
+                    # separately by trigger_capture's `-t` flag and the
+                    # wait_for_sensor_prime() call below. Do NOT add
+                    # PRIME_WAIT_MS to the shutter (see issue #187).
                     buf_f = "/tmp/vop_peak_buf.dng"
                     cam_proc = hw.trigger_capture(
                         buf_f,
