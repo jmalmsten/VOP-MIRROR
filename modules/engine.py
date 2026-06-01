@@ -1713,7 +1713,24 @@ def run_persistent_engine():
                     pygame.display.flip()
 
                     buf_f = "/tmp/vop_noise_buf.dng"
-                    cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0),
+                    # Capture the dark frame.
+                    #
+                    # The shutter argument must be plain total_ms - do NOT
+                    # add PRIME_WAIT_MS here. trigger_capture already bakes
+                    # the prime delay into rpicam-still's `-t` flag, and the
+                    # wait_for_sensor_prime() call below mirrors that same
+                    # delay on the Python side. The shutter we actually want
+                    # is total_ms (frame exposure + the 1000ms header/tail
+                    # pad) - the IDENTICAL integration time a real exposure
+                    # of this frame uses (the normal exposure path also
+                    # passes plain total_ms).
+                    #
+                    # The old code added PRIME_WAIT_MS, stretching the
+                    # shutter by 1.5s. Since sensor dark current grows
+                    # roughly linearly with integration time, that made the
+                    # reported noise floor correspond to a longer-than-
+                    # claimed exposure - i.e. overstated. (issue #187)
+                    cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0),
                                                   job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
                                                   job_data.get('cam_res', '2028x1520'))
                     hw.wait_for_sensor_prime()
@@ -2385,7 +2402,26 @@ def run_persistent_engine():
                     pygame.display.flip()
 
                     buf_f = "/tmp/vop_hp_buf.dng"
-                    cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0),
+                    # Capture the dark frame for hot-pixel detection.
+                    #
+                    # Shutter argument is plain total_ms - do NOT add
+                    # PRIME_WAIT_MS. trigger_capture already bakes the prime
+                    # delay into rpicam-still's `-t` flag, and the
+                    # wait_for_sensor_prime() call below mirrors it on the
+                    # Python side. The integration time we want is total_ms
+                    # (frame exposure + the 1000ms header/tail pad) - the
+                    # same time a real exposure of this frame uses.
+                    #
+                    # The old code added PRIME_WAIT_MS, stretching the
+                    # shutter by 1.5s. For hot-pixel mapping that's not
+                    # merely a logged-vs-actual mismatch (as in #187's
+                    # noise floor): a longer dark frame lets MORE pixels
+                    # drift past the hot threshold, so we were mapping
+                    # pixels that only misbehave at exposures we never
+                    # actually shoot. Matching the real integration time
+                    # maps the pixels that are genuinely hot at the
+                    # exposures our jobs use. (sibling of issue #187)
+                    cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0),
                                                   job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
                                                   job_data.get('cam_res', '2028x1520'))
                     hw.wait_for_sensor_prime()

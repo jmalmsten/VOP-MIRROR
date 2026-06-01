@@ -6,4 +6,4 @@
 
 
 ## Fixed: 
-
+- #187 - corrected exposure time for noise measure and hot pixel mapping.
