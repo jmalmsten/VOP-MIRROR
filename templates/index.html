@@ -152,15 +152,38 @@
                 <div class="group-box">
                     <div class="group-title">Cam Mag</div>
                     <div class="upload-cluster">
-                        <div class="c-box layer-vis-box">
+                        <!-- Plain .c-box rather than .c-box.layer-vis-box.
+                             The .layer-vis-box modifier turns the container
+                             into a horizontal flex row, which makes sense
+                             for PM/BP where label + eye-toggle + input sit
+                             on one line. Cam Mag has no eye-toggle (it's a
+                             destination buffer, not a render layer), so the
+                             horizontal-flex behavior was already a slight
+                             mismatch - and once the recommendation div was
+                             added below the input, it became a real layout
+                             bug: the recommendation landed inline as the
+                             third flex child, between the input and the
+                             UPLOAD button.
+                             Dropping .layer-vis-box reverts to plain block
+                             flow inside .c-box, the same pattern used by
+                             every other simple label-plus-input c-box in
+                             the app (Frame, Sub, Ref Z, etc.). Label and
+                             input stack vertically; the recommendation
+                             then naturally lands below the input. We also
+                             drop the now-redundant .layer-vis-row wrapper
+                             since it only held the input. -->
+                        <div class="c-box">
                             <label>Active Reel</label>
-                            <div class="layer-vis-row">
-                                <!-- No eye-toggle here (unlike PM/BP boxes):
-                                     Cam Mag isn't a render layer, it's the
-                                     destination buffer for exposures. There's
-                                     nothing to "hide" or "pass through" for. -->
-                                <input type="text" id="cam_mag_filename" readonly>
-                            </div>
+                            <input type="text" id="cam_mag_filename" readonly>
+                            <!-- Recommended PAR readout. Populated by the
+                                 /upload_cam_mag response when an ingest
+                                 completes. Empty until then; a successful
+                                 upload writes a clickable span here whose
+                                 click handler copies the values into the
+                                 par_x / par_y fields in Hardware Constants.
+                                 Same UX pattern as Noise Crusher's measured
+                                 value, reusing the .noise-clickable class. -->
+                            <div id="cam_mag_par_recommendation" class="par-recommendation"></div>
                         </div>
                         <!-- Accept only video extensions. The server route
                              enforces this too, but listing them here gives

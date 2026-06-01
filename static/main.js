@@ -131,6 +131,52 @@ async function uploadFile(inputId, textId, endpoint) {
         const data = await resp.json();
         // Show the original filename so the user knows what was loaded
         textEl.value = data.filename;
+        
+        // If the response carries a PAR recommendation (Cam Mag does
+        // this; PM / BP don't), render it as a clickable readout
+        // below the filename. Same UX pattern as the Noise Crusher's
+        // measured-value link: span with .noise-clickable, click
+        // copies the values into the target fields.
+        //
+        // We look the recommendation container up by a fixed ID
+        // because there's only one Cam Mag block - if more upload
+        // endpoints grow recommendations in the future this can be
+        // generalized to a per-target mapping.
+        const parEl = document.getElementById('cam_mag_par_recommendation');
+        if (parEl) {
+            // Clear any prior recommendation first - a fresh upload
+            // supersedes whatever was shown for the previous reel.
+            parEl.innerHTML = '';
+            
+            if (data.recommended_par) {
+                const px = data.recommended_par.par_x;
+                const py = data.recommended_par.par_y;
+                // Format with up to 4 decimals, trimming trailing zeros
+                // for readability ("1.185" not "1.1850").
+                const fmt = (n) => parseFloat(n.toFixed(4)).toString();
+                parEl.innerHTML = `Recommended PAR: <span class="noise-clickable" title="Click to apply to Hardware Constants PAR fields">${fmt(px)} : ${fmt(py)}</span>`;
+                
+                // Wire the click. Listener attached after innerHTML
+                // because the span doesn't exist until the parse.
+                parEl.querySelector('.noise-clickable').addEventListener('click', () => {
+                    const parX = document.getElementById('par_x');
+                    const parY = document.getElementById('par_y');
+                    if (parX && parY) {
+                        parX.value = fmt(px);
+                        parY.value = fmt(py);
+                        // Fire the existing onchange handler so the
+                        // sync pipeline picks up the new PAR values
+                        // and re-renders Proj Probe / Comp View etc.
+                        // par_x/par_y have onchange="triggerSync()" in
+                        // index.html, but assigning .value doesn't
+                        // trigger that - we have to dispatch manually.
+                        parX.dispatchEvent(new Event('change', { bubbles: true }));
+                        parY.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+            }
+        }
+        
         await triggerSync();
     } catch(e) {
         console.error("Upload failed", e);
@@ -1069,7 +1115,7 @@ async function triggerMeasurement() {
                             target.value = measured;
                             // Dispatch a change event so any sync logic listening to the
                             // input (like the auto-save / job-state tracker) picks it up
-                            target.dispatchEvent(new Event('chagne', { bubbles: true}));
+                            target.dispatchEvent(new Event('change', { bubbles: true}));
                         });
                     } else {
                         resTxt.innerText = "ERR";

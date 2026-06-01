@@ -1573,3 +1573,19 @@ body.dre-mode .dre-probe-controls {
 body.brk-mode .brk-probe-controls {
     display:            block;
 }
+
+/* Cam Mag's "recommended PAR" readout, populated after a successful
+ * video ingest. Lives in the Cam Mag group-box, directly under the
+ * Active Reel filename input. Visually understated by default - it's
+ * a hint, not a primary control - but its inner .noise-clickable
+ * span (rendered from JS once a recommendation arrives) makes the
+ * number itself clearly interactive. Reusing the noise-clickable
+ * class here keeps the affordance consistent with the rest of the
+ * UI (same dotted underline, same accent hover). */
+.par-recommendation {
+    font-size:          0.85em;
+    color:              var(--text-secondary);
+    margin-top:         4px;
+    min-height:         1.2em;  /* reserve space so the layout doesn't
+                                   jump when content arrives */
+}

@@ -1,11 +1,14 @@
-# V0.12.0 (YYYYMMDD)
+# V0.12.1 (YYYYMMDD)
 ## Notes: 
 ## Added: 
-### Video ingestion for the Cam Mag
-In order to fascilitate an initial pass with full color fidelity, a function has been added to be able to feed the cam mag with a video file directly. Upon uploading, the VOP will generate a tiff sequence that matches the camera resolution. And then it will be there for regular LIME compositions. 
+###  fixed ratio mismatch for Cam Mag ingest
+In order to get the camera's ingestion to match the PAR of the projection monitor, A change was done so that the ingested video matches the aspect ratio of the monitor while still fitting inside the camera resolution with a letterbox. And when the upload is done, the gui suggests the PAR that's needed to bring the final image back. This can then be applied by the user by simply clicking the suggestion. 
 
 ### Other stuff
 The other stuff that has been added in the previous prereleases survived so check out those release notes. Wait. I never did releases for them. Well. here they are: 
+
+### V0.12.0 Video ingestion for the Cam Mag
+In order to fascilitate an initial pass with full color fidelity, a function has been added to be able to feed the cam mag with a video file directly. Upon uploading, the VOP will generate a tiff sequence that matches the camera resolution. And then it will be there for regular LIME compositions. 
 
 #### V0.11.0 - Auto Whitebalance Measure.
 Now we finally have a tool in the VOP that does the white-balance more automatically (though the AWB-R and AWB-B will remain accessible in the GUI as a way to tweak outside of the "accountants truth"). How it works is simple. It first tries to find an exposure where middle grey is not in the noise floor and not having a channel clipped. Then it takes the middle section of the screen and does a measurement to see how far off from neutral middle grey it is. It applies what it thinks should be applied to the channel gains to get there. It fires off another exposure. Does a new measurement and loops through that until it reaches a satisfactorally amount of neutral grey. It then presents you with the results, the image of the latest VOP approved exposure and applies the values to the AWB-R and AWB-B in the main section.
