@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modeSelect.addEventListener('change', function(e) {
             currentMode = this.value;
             toggleSheetVisibility();
-            triggerSync();
+            saveJob();
         });
     }
 });
@@ -177,7 +177,7 @@ async function uploadFile(inputId, textId, endpoint) {
             }
         }
         
-        await triggerSync();
+        await saveJob();
     } catch(e) {
         console.error("Upload failed", e);
         textEl.value = 'UPLOAD FAILED';
@@ -185,10 +185,42 @@ async function uploadFile(inputId, textId, endpoint) {
 }    
     
 
-async function triggerSync() {
+/* Silent state save. POSTs the current DOM state to /save_job, which
+ * writes current_job.json to disk WITHOUT dispatching the engine.
+ *
+ * This is what every "input changed" handler now calls. Previously
+ * those handlers called triggerSync(), which fired /preview - the
+ * engine then queued a Proj Probe render every time the user typed
+ * a number, picked a dropdown, etc. That was the source of the
+ * "I pressed CAM VIEW but it ran a probe first" behavior: the probe
+ * was already queued from the input change a moment earlier.
+ *
+ * Auto-save of UI state is still preserved (it's how a phone/laptop/
+ * desktop can pick up where the other left off), but the visible
+ * preview only refreshes when the user explicitly asks for it via
+ * the PROJ PROBE / CAM VIEW / COMP VIEW buttons.
+ */
+async function saveJob() {
     local_sync_ts = Date.now();
-    await fetch('/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
-    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+    await fetch('/save_job', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+    });
+}
+
+/* Back-compat alias for triggerSync(). The codebase used to wire every
+ * input's onchange to this name, and some dynamically-added inputs
+ * (BRK / MDS keyframe rows, eventually anything still referencing it)
+ * may still call it. Rather than chase every call site at once, we
+ * point it at saveJob so anything we missed silently does the safe
+ * thing - save state, don't dispatch the engine.
+ *
+ * Marked for removal in a future cleanup pass once every reference
+ * in the tree is verifiably gone.
+ */
+async function triggerSync() {
+    return saveJob();
 }
 
 function collectParams() {
@@ -265,7 +297,7 @@ function nukeProjMag() {
     if (confirm("This deletes whatever is in the Projector Magazine. Are you sure? This cannot be undone.")) {
         fetch('/nuke_proj_mag', {method: 'POST'});
         document.getElementById('image').value = '';
-        triggerSync();
+        saveJob();
     }
 }
 
@@ -273,7 +305,7 @@ function nukeProjBiPack1() {
     if (confirm("This deletes whatever is in Projector BiPack 1. Are you sure? This cannot be undone.")) {
         fetch('/nuke_proj_bipack1', {method: 'POST'});
         document.getElementById('bipack1_image').value = '';
-        triggerSync();
+        saveJob();
     }
 }
 
@@ -281,7 +313,7 @@ function nukeProjBiPack2() {
     if (confirm("This deletes whatever is in Projector BiPack 2. Are you sure? This cannot be undone.")) {
         fetch('/nuke_proj_bipack2', {method: 'POST'});
         document.getElementById('bipack2_image').value = '';
-        triggerSync();
+        saveJob();
     }
 }
 
@@ -347,7 +379,7 @@ async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
         if (fitData.status === 'ok') {
             document.getElementById(scaleId).value = fitData.scale.toFixed(4);
             console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)} (PAR ${parX}:${parY})`);
-            await triggerSync();
+            await saveJob();
         } else {
             console.error("Fit Calc Error:", fitData.message);
         }
@@ -636,7 +668,7 @@ function addBRKKeyframe() {
         <div><input type="color" id="brk_c${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
         <div><input type="color" id="brk_cg${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
 
-        <div><button onclick="this.closest('.brk-keyframe-row').remove(); triggerSync();">×</button></div>
+        <div><button onclick="this.closest('.brk-keyframe-row').remove(); saveJob();">×</button></div>
     `;
 
     // Wire every input/select in the new row to triggerSync on change,

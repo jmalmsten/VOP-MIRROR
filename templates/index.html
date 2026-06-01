@@ -77,8 +77,8 @@
                 <div class="group-box">
                     <div class="group-title">Camera</div>
                     <div class="input-row">
-                        <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
-                        <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
+                        <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('saveJob()')"></div>
+                        <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('saveJob()')"></div>
                         <!--
                             To make it more easy to see what the DRE steps in DRE mode are doing
                             we have here a little checkbox that enables the probe system to check
@@ -93,7 +93,7 @@
                         <div class="c-box dre-probe-controls" id="dre_probe_controls"
                                             title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
                             <label>DRE</label>
-                            <input type="checkbox" id="probe_dre" onchange="runTask('preview')">
+                            <input type="checkbox" id="probe_dre" onchange="runTask('saveJob()')">
                         </div>
                         <!--
                             BRK probe toggle. Parallel to the DRE one above.
@@ -113,7 +113,7 @@
                         <div class="c-box brk-probe-controls" id="brk_probe_controls"
                                             title="BRK Mode only. When ON, Proj Probe shows one bracket's slice on the projection monitor; the Sub (0-1.0) field picks which bracket (0.0 = peak, 1.0 = deepest). When OFF, shows the raw composite.">
                             <label>BRK</label>
-                            <input type="checkbox" id="probe_brk" onchange="runTask('preview')">
+                            <input type="checkbox" id="probe_brk" onchange="runTask('saveJob()')">
                         </div>
                     </div>
                     <div class="probe-controls spaced">
@@ -276,8 +276,8 @@
                         <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>
                         <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
                         <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
-                        <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
-                        <div class="const-group"><label>Rotation Order</label><select id="rot_order" onchange="triggerSync()" title="Order in which the three Euler axes are applied. Read left-to-right: leftmost axis is applied first (innermost / local-axis spin), rightmost is applied last (outermost / dominant sweep). XYZ is the conventional default and matches the previous hardcoded behavior.">
+                        <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="saveJob()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                        <div class="const-group"><label>Rotation Order</label><select id="rot_order" onchange="saveJob()" title="Order in which the three Euler axes are applied. Read left-to-right: leftmost axis is applied first (innermost / local-axis spin), rightmost is applied last (outermost / dominant sweep). XYZ is the conventional default and matches the previous hardcoded behavior.">
                             <option value="XYZ" selected>XYZ (Pitch → Roll → Yaw)</option>
                             <option value="XZY">XZY (Pitch → Yaw → Roll)</option>
                             <option value="YXZ">YXZ (Roll → Pitch → Yaw)</option>
@@ -299,11 +299,11 @@
                             squeezed. -->
                         <div class="const-group crush-group par-group">
                             <label>PAR (anamorphics)</label>
-                            <input type="number" step="0.0001" id="par_x" value="1.0" onchange="triggerSync()" title="Pixel width component of PAR. PAR > 1 (e.g. 4:3 = 1.333) squeezes X. PAR < 1 squeezes Y.">
+                            <input type="number" step="0.0001" id="par_x" value="1.0" onchange="saveJob()" title="Pixel width component of PAR. PAR > 1 (e.g. 4:3 = 1.333) squeezes X. PAR < 1 squeezes Y.">
                             <span class="par-colon">:</span>
-                            <input type="number" step="0.0001" id="par_y" value="1.0" onchange="triggerSync()" title="Pixel height component of PAR.">
+                            <input type="number" step="0.0001" id="par_y" value="1.0" onchange="saveJob()" title="Pixel height component of PAR.">
                             <label class="par-preview-toggle" title="Show the unsqueezed image in the preview window only. The HDMI render and the captured latent TIFFs remain squeezed.">
-                                <input type="checkbox" id="preview_unsqueeze" onchange="triggerSync()">
+                                <input type="checkbox" id="preview_unsqueeze" onchange="saveJob()">
                                 Preview unsqueeze
                             </label>
                         </div>
@@ -350,7 +350,7 @@
                     <div class="brk-sheet-settings brk-constants">
                         <div class="brk-setting">
                             <label>Bracket Count</label>
-                            <select id="bracket_count" onchange="triggerSync()" title="Number of bracketed captures per frame. Peak bracket maps source top to screen white; each shadow bracket maps a slice bracket_stops further down the source range.">
+                            <select id="bracket_count" onchange="saveJob()" title="Number of bracketed captures per frame. Peak bracket maps source top to screen white; each shadow bracket maps a slice bracket_stops further down the source range.">
                                 <option value="1">1 (Peak only)</option>
                                 <option value="2">2</option>
                                 <option value="3" selected>3 (default)</option>
@@ -362,7 +362,7 @@
                         </div>
                         <div class="brk-setting">
                             <label>Bracket Stops</label>
-                            <input type="number" id="bracket_stops" value="1.0" min="0.25" max="4.0" step="0.25" onchange="triggerSync()" title="Distance between brackets in photographic stops. 1 stop = factor of 2 in source space.">
+                            <input type="number" id="bracket_stops" value="1.0" min="0.25" max="4.0" step="0.25" onchange="saveJob()" title="Distance between brackets in photographic stops. 1 stop = factor of 2 in source space.">
                         </div>
                     </div>
                     <div class="mode-control">
