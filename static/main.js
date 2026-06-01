@@ -1051,7 +1051,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropZone.style.border = "2px dashed #0cf";
+            // Add the drag-hover class instead of writing style.border
+            // inline - keeps styling in style.css (zero-inline-styles rule).
+            dropZone.classList.add('drag-hover');
         });
 
         dropZone.addEventListener('dragleave', (e) => {

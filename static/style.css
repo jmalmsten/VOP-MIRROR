@@ -132,6 +132,15 @@ Description:        Stylings for the whole GUI
     transform:          translateX(-50%) translateY(0); 
 }
 
+/* Drag-and-drop hover state for upload target fields.
+   Toggled by setupDropZone() in main.js on dragover/dragleave/drop.
+   Lives here (not as an inline style.border write in JS) to keep all
+   styling in the stylesheet - see the zero-inline-styles rule.
+   Uses --color-accent so it tracks the rest of the UI's accent borders
+   rather than the old hardcoded #0cf. */
+.drag-hover {
+    border: 2px dashed var(--color-accent) !important;
+}
 
 /* ############### Universal Button Polish ############### */
 /* Applied to every button class in the UI for consistent feel. */
