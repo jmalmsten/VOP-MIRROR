@@ -1543,6 +1543,20 @@ if __name__ == '__main__':
     port = 5000
     ip_addr = get_ip()
 
+    # Publish the WebGUI address for the engine's idle screen.
+    # engine.py runs as a separate process (it holds the KMSDRM lock)
+    # so it cannot call get_ip() directly. We drop the IP+port to a
+    # small JSON file - the same on-disk-IPC pattern the engine uses
+    # to publish display info back to us (see /tmp/vop_display.json).
+    # The engine reads this when rendering the idle screen so the user
+    # can see where to point their browser. Non-fatal if it fails:
+    # the engine falls back to a placeholder string.
+    try:
+        with open("/tmp/vop_ip.json", 'w') as f:
+            json.dump({'ip': ip_addr, 'port': port}, f)
+    except OSError as e:
+        print(f"[VOP SERVER] Could not publish IP info: {e}")
+
     print("\n" + "="*50)
     print(f" VOP Server is online.")
     print(f" Status: Waiting for jobs")
