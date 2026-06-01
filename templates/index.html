@@ -161,6 +161,15 @@
                                      nothing to "hide" or "pass through" for. -->
                                 <input type="text" id="cam_mag_filename" readonly>
                             </div>
+                            <!-- Recommended PAR readout. Populated by the
+                                 /upload_cam_mag response when an ingest
+                                 completes. Empty until then; a successful
+                                 upload writes a clickable span here whose
+                                 click handler copies the values into the
+                                 par_x / par_y fields in Hardware Constants.
+                                 Same UX pattern as Noise Crusher's measured
+                                 value, reusing the .noise-clickable class. -->
+                            <div id="cam_mag_par_recommendation" class="par-recommendation"></div>
                         </div>
                         <!-- Accept only video extensions. The server route
                              enforces this too, but listing them here gives

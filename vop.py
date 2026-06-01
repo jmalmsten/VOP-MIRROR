@@ -163,7 +163,37 @@ def probe_video_frame_count(filepath):
     
     return None
 
-def process_video_ingestion(filepath, target_dir, filename_prefix="", start_number=0, pix_fmt_override=None, scale_to=None):
+def probe_video_dimensions(filepath):
+    """
+    Returns (width, height) of the first video stream in `filepath`,
+    or None if dimensions cannot be determined.
+    
+    Used by upload_cam_mag to compute the recommended PAR. Cheap
+    operation - reads the container header only, doesn't decode any
+    frames. Returns None on any failure (no ffprobe, no video stream,
+    malformed file) and callers should treat None as "no PAR
+    recommendation available" rather than aborting the upload.
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-select_streams", "v:0",
+             "-show_entries", "stream=width,height",
+             "-of", "csv=p=0:s=x", filepath],
+            check=True, capture_output=True, text=True, timeout=10
+        )
+        # Output is "WxH" on one line, e.g. "1280x720"
+        raw = result.stdout.strip()
+        if 'x' in raw:
+            w_str, h_str = raw.split('x')
+            return (int(w_str), int(h_str))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, ValueError) as e:
+        print(f"[VOP SERVER] Video dimension probe failed ({e}); "
+              f"PAR recommendation will be unavailable.")
+    return None
+
+def process_video_ingestion(filepath, target_dir, filename_prefix="", start_number=0, pix_fmt_override=None, fit_to_monitor_in_camera=None):
     """
     [signature note]
     filename_prefix : str, default "". Prepended to the numeric pattern,
@@ -180,20 +210,34 @@ def process_video_ingestion(filepath, target_dir, filename_prefix="", start_numb
                       its target is the LIME pipeline which is 16-bit
                       throughout, and unlike Proj Mag textures there's
                       no moderngl 8-bit constraint to worry about.
-    scale_to        : (int, int) tuple or None, default None. When set,
-                      forces every output frame to exactly W x H pixels
-                      via ffmpeg's scale filter. Non-uniform - aspect
-                      ratio is NOT preserved - which is intentional:
-                      Cam Mag uses this to slam an arbitrary input reel
-                      (say 1280x720 webcam footage) onto the camera's
-                      native resolution (2028x1520 at half-res) so the
-                      downstream LIME / Comp View / cv2.add pipeline
-                      sees consistent dimensions on every latent.
-                      The aspect-ratio distortion that introduces is
-                      meant to be compensated for at composite time via
-                      the job's PAR_X / PAR_Y values, the same way an
-                      anamorphic lens squeeze is unsqueezed in post.
-                      PM / BP / BiPack pass None and behave as before.
+    fit_to_monitor_in_camera : dict or None, default None.
+                      Cam Mag passes a dict of:
+                          {
+                              "cam_w":     int, camera frame width,
+                              "cam_h":     int, camera frame height,
+                              "monitor_w": int, projection monitor width,
+                              "monitor_h": int, projection monitor height,
+                          }
+                      and the ingest then:
+                        1. non-uniformly stretches every input frame to
+                           a sub-rectangle whose ASPECT matches the
+                           projection monitor (monitor_w / monitor_h),
+                           sized to the largest such rectangle that fits
+                           inside the camera frame (cam_w x cam_h),
+                        2. letterboxes that monitor-aspect rectangle
+                           with pure black to fill the full camera frame.
+                      The non-uniform stretch is intentional - it bakes
+                      the input video's aspect onto the monitor surface
+                      as if the user had played the video on the monitor
+                      and pointed the camera at it. The user then sets
+                      par_x = input_aspect / monitor_aspect in Hardware
+                      Constants to unsqueeze at composite time. The
+                      letterbox fill is black because that simulates
+                      what a real camera would see around a physical
+                      monitor in a dark room - geometrically equivalent
+                      to a true optical-printer capture.
+                      PM / BP / BiPack pass None and behave as before
+                      (no scaling, no letterbox).
     """
 
     ext = os.path.splitext(filepath)[1].lower()
@@ -258,25 +302,78 @@ def process_video_ingestion(filepath, target_dir, filename_prefix="", start_numb
         output_pattern
     ]
     
-    # Conditional scaling. ffmpeg's scale filter with explicit W:H and
-    # no force_original_aspect_ratio flag will stretch non-uniformly
-    # to fill - which is what we want for Cam Mag. Default flags pick
-    # bicubic, which is a reasonable middle-ground for arbitrary input
-    # reels (sharper than bilinear, no ringing like lanczos can give
-    # on synthetic test patterns).
+    # Conditional fit-and-letterbox for Cam Mag. The geometry:
     #
-    # Inserted right before the output_pattern so the filter chain
-    # applies in the encoder's pre-output stage. -vf accepts the
-    # filter spec as a single string.
-    if scale_to is not None:
-        target_w, target_h = scale_to
+    #   Camera frame (cam_w x cam_h) is the FINAL latent dimensions.
+    #     For 2028x1520 (Pi HQ half-res), aspect = 4:3 = 1.333.
+    #
+    #   Inside the camera frame, we carve out a CONTENT rectangle
+    #   whose aspect matches the projection monitor.
+    #     For a 2160x1440 monitor, aspect = 3:2 = 1.500.
+    #
+    #   That content rectangle is the LARGEST rectangle of the
+    #   monitor's aspect that fits inside the camera frame:
+    #     - width-bind if monitor is wider than camera: content_w =
+    #       cam_w, content_h = cam_w / monitor_aspect
+    #     - height-bind if monitor is taller: content_h = cam_h,
+    #       content_w = cam_h * monitor_aspect
+    #
+    #   Input video gets stretched non-uniformly to content_w x
+    #   content_h (whatever its source aspect was - the user fixes
+    #   the resulting squeeze with PAR at composite time).
+    #
+    #   The space between the content rect and the camera frame
+    #   gets padded with pure black, simulating the dark room around
+    #   a physical monitor that an actual camera would capture.
+    #
+    # ffmpeg filtergraph implementing this:
+    #   scale=CW:CH,pad=FW:FH:(FW-CW)/2:(FH-CH)/2:black
+    # which scales to the content rect then centers it on a black
+    # canvas of the camera frame's size.
+    if fit_to_monitor_in_camera is not None:
+        cam_w = int(fit_to_monitor_in_camera["cam_w"])
+        cam_h = int(fit_to_monitor_in_camera["cam_h"])
+        mon_w = int(fit_to_monitor_in_camera["monitor_w"])
+        mon_h = int(fit_to_monitor_in_camera["monitor_h"])
+        
+        cam_aspect = cam_w / cam_h
+        mon_aspect = mon_w / mon_h
+        
+        # Pick width-bind vs height-bind. If the monitor is WIDER
+        # (larger aspect) than the camera, we width-bind: the
+        # content's width = camera's width, but its height shrinks
+        # to monitor-aspect. If the monitor is TALLER (smaller
+        # aspect), we height-bind: content's height = camera's
+        # height but width pillarboxes inward.
+        if mon_aspect >= cam_aspect:
+            # Width-bind: letterbox top/bottom
+            content_w = cam_w
+            content_h = int(round(cam_w / mon_aspect))
+        else:
+            # Height-bind: pillarbox left/right
+            content_h = cam_h
+            content_w = int(round(cam_h * mon_aspect))
+        
+        # Build the filter as a single comma-separated chain. ffmpeg
+        # applies them left to right, so scale runs before pad.
+        # Important: scale forces target dims with no aspect-preserve,
+        # so input gets non-uniformly stretched to content rect. pad
+        # then centers that on the cam-frame-sized black canvas.
+        filter_chain = (
+            f"scale={content_w}:{content_h},"
+            f"pad={cam_w}:{cam_h}:"
+            f"{(cam_w - content_w) // 2}:{(cam_h - content_h) // 2}:"
+            f"black"
+        )
+        
         # Insert at position -1 (just before output_pattern). list.insert
         # shifts the output_pattern out by one slot, so the final order
-        # remains [..., -vf, scale=..., output_pattern].
+        # remains [..., -vf, "scale=...,pad=...", output_pattern].
         cmd.insert(-1, "-vf")
-        cmd.insert(-1, f"scale={int(target_w)}:{int(target_h)}")
-        print(f"[VOP SERVER] Scaling ingest to {target_w}x{target_h} "
-              f"(non-uniform; compensate with PAR at composite time).")
+        cmd.insert(-1, filter_chain)
+        print(f"[VOP SERVER] Cam Mag ingest: input stretched to "
+              f"{content_w}x{content_h} (monitor-aspect content rect), "
+              f"letterboxed black into {cam_w}x{cam_h} camera frame.")
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("[VOP SERVER] Frame extraction complete.")
@@ -754,49 +851,110 @@ def upload_cam_mag():
     filepath = os.path.join(CAM_MAG_DIR, file.filename)
     os.rename(tmp_path, filepath)
     
-    # Read the target camera resolution from the active job so the
-    # ingest can stretch the input reel to match. Without this, an
-    # input video of any other resolution (say 1280x720 from a
-    # webcam) produces latent_NNNN.tif files that don't match the
-    # dimensions of frames produced by Execute Sequence - which
-    # then makes Comp View / cv2.add / LIME refuse to composite
-    # because their array shapes mismatch.
+    # === Geometry inputs for the Cam Mag fit ====================
+    # The ingested latent must match the camera frame's dimensions
+    # so cv2.add can composite without array-shape errors, AND its
+    # CONTENT must occupy a sub-rectangle of the monitor's aspect
+    # so geometry survives the engine's panel-shaped render at
+    # composite time. We need three resolutions:
     #
-    # cam_res convention is "WxH" string, matching engine.py's
-    # parsing pattern at lines ~1623-1630. We follow the same
-    # fallback policy: malformed or missing -> (2028, 1520), the
-    # Pi HQ camera's binned half-res mode which is the project's
-    # canonical default.
+    #   1. Camera resolution - from current_job.json's cam_res.
+    #      That defines the final latent dimensions.
+    #   2. Monitor resolution - from EDID via get_display_size().
+    #      That defines the content sub-rectangle's aspect.
+    #   3. Input video resolution - from ffprobe on the upload.
+    #      That's used purely to compute the recommended PAR for
+    #      the UI - it does NOT affect the ingest itself, since
+    #      the input gets stretched non-uniformly anyway.
+    # ============================================================
+    
+    # 1. Camera resolution from job file. Same parse pattern as
+    #    engine.py's cam_res handling (~lines 1623-1630).
     cam_res_str = '2028x1520'
     try:
         if os.path.exists(CURRENT_JOB_FILE):
             with open(CURRENT_JOB_FILE, 'r') as jf:
                 cam_res_str = (json.load(jf) or {}).get('cam_res', '2028x1520')
     except (json.JSONDecodeError, OSError) as e:
-        # Non-fatal - fall through to the hardcoded default. Same
-        # philosophy as the pix_fmt-mode read above: a broken job
-        # file shouldn't kill the upload, since the user can fix
-        # the job and re-upload.
+        # Non-fatal - fall through to the hardcoded default.
         print(f"[VOP SERVER] WARN: Could not read cam_res for ingestion "
               f"({e}). Falling back to {cam_res_str}.")
     
     try:
         cw_str, ch_str = cam_res_str.lower().split('x')
-        target_resolution = (int(cw_str), int(ch_str))
+        cam_w, cam_h = int(cw_str), int(ch_str)
     except (ValueError, AttributeError):
-        # Defensive fallback - never let a malformed cam_res string
-        # crash an upload. Matches engine.py's defensive parsing.
         print(f"[VOP SERVER] WARN: Malformed cam_res '{cam_res_str}'. "
               f"Falling back to (2028, 1520).")
-        target_resolution = (2028, 1520)
+        cam_w, cam_h = 2028, 1520
     
+    # 2. Monitor resolution from EDID. get_display_size() handles
+    #    its own fallback (1920x1080) if /tmp/vop_display.json
+    #    isn't there yet, so we don't double-handle.
+    mon_w, mon_h = get_display_size()
+    
+    # 3. Input video dimensions for the PAR recommendation. This
+    #    can return None if the file is exotic - in that case we
+    #    just skip the recommendation, the ingest still works fine.
+    src_dims = probe_video_dimensions(filepath)
+    
+    # === Run the ingest =========================================
     process_video_ingestion(
         filepath, CAM_MAG_DIR,
         filename_prefix="latent_",
         start_number=1,
         pix_fmt_override="rgb48le",
-        scale_to=target_resolution,
+        fit_to_monitor_in_camera={
+            "cam_w": cam_w,
+            "cam_h": cam_h,
+            "monitor_w": mon_w,
+            "monitor_h": mon_h,
+        },
     )
+    
+    # === Compute recommended PAR for the response ===============
+    # Goal: keep circles round end-to-end. The input video has its
+    # own aspect (src_aspect); we just stretched it to fill the
+    # monitor-aspect content rect (mon_aspect). To undo the
+    # stretch at composite time, the engine's anamorphic squeeze
+    # must apply a factor of src_aspect / mon_aspect on the X
+    # axis (or its inverse on Y if < 1; the engine handles both
+    # directions via min(1.0, 1.0/par) and min(1.0, par)).
+    #
+    # Convention: we surface par_x and par_y separately so the
+    # display reads naturally - "1.185 : 1.000" for a 16:9 source
+    # on a 3:2 monitor - even though it's mathematically just a
+    # single ratio.
+    recommended_par = None
+    if src_dims is not None and mon_w > 0 and mon_h > 0:
+        src_w, src_h = src_dims
+        if src_w > 0 and src_h > 0:
+            src_aspect = src_w / src_h
+            mon_aspect = mon_w / mon_h
+            ratio = src_aspect / mon_aspect
+            
+            # Surface a "natural" two-component reading. If the
+            # ratio is >= 1 we put it in par_x (X squeeze); if
+            # < 1 we put its inverse in par_y (Y squeeze) so
+            # neither field ever goes below 1.0 in normal usage.
+            # That matches how a cinematographer would think
+            # about anamorphic squeezes.
+            if ratio >= 1.0:
+                recommended_par = {"par_x": round(ratio, 4), "par_y": 1.0}
+            else:
+                recommended_par = {"par_x": 1.0, "par_y": round(1.0 / ratio, 4)}
+    
+    # === Stash filename in current_job.json (unchanged) =========
+    try:
+        job = {}
+        if os.path.exists(CURRENT_JOB_FILE):
+            with open(CURRENT_JOB_FILE, 'r') as jf:
+                job = json.load(jf) or {}
+        job['cam_mag_filename'] = file.filename
+        with open(CURRENT_JOB_FILE, 'w') as jf:
+            json.dump(job, jf, indent=2)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[VOP SERVER] WARN: Could not record cam_mag_filename: {e}")
     
     # Stash the loaded reel's filename in current_job.json so a page
     # refresh can show the user what's currently in the cam mag. The
@@ -815,7 +973,15 @@ def upload_cam_mag():
         # survive a page refresh. Log and continue.
         print(f"[VOP SERVER] WARN: Could not record cam_mag_filename: {e}")
     
-    return jsonify({"status": "ok", "filename": file.filename})
+    # Response surfaces the PAR recommendation alongside the
+    # filename. Frontend renders this as a clickable readout that
+    # copies into the par_x / par_y fields when tapped. Same
+    # pattern as the Noise Crusher's measured-value link.
+    return jsonify({
+        "status": "ok",
+        "filename": file.filename,
+        "recommended_par": recommended_par,  # may be None - frontend handles
+    })
 
 @app.route('/nuke_proj_mag', methods=['POST'])
 def nuke_proj_mag():
