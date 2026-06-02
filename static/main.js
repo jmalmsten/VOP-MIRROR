@@ -261,7 +261,7 @@ async function runTask(type) {
  * fast and works even while the engine is busy with a long Execute job.
  */
 async function runCamProbe() {
-    await fetch('/cam_probe', {
+    const resp = await fetch('/cam_probe', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(collectParams())
@@ -269,6 +269,21 @@ async function runCamProbe() {
     // Cache-bust the preview image so the browser fetches the freshly
     // written JPG instead of serving the stale one.
     document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+
+    // Update the per-gate readouts to the frame we just probed. The response
+    // carries where each gate's playhead lands for this frame; totals come
+    // through here too but the poll loop keeps those fresh regardless.
+    try {
+        const data = await resp.json();
+        if (data && data.gates) {
+            setGateTotals(data.gates);
+            setGateCurrents(data.gates);
+        }
+    } catch (e) {
+        // A probe with no JSON body (shouldn't happen) just leaves the
+        // readouts as-is rather than throwing in the click handler.
+        console.error("Cam Probe gate readout update failed:", e);
+    }
 }
 
 function panic() { 
@@ -915,6 +930,59 @@ function reindexSSS() {
 
 function updateHex(el, targetId) { document.getElementById(targetId).value = el.value; triggerSync(); }
 
+// ---------------------------------------------------------------------------
+// Per-gate frame readouts (####/#### current/total in each mag box title).
+//
+// Two independent halves, updated from different sources so an idle /status
+// poll never clobbers a number you just probed:
+//   - TOTAL ("/####"): just a file count, refreshed every /status tick.
+//   - CURRENT ("####/"): the playhead. Moves only on a render heartbeat (live,
+//     1Hz) or a Cam Probe (when you scrub). Idle polls leave it alone.
+// We keep both in _gateState and re-render from it, rather than reading the
+// DOM back, so the two halves can be set at different times cleanly.
+// ---------------------------------------------------------------------------
+const _gateState = {
+    cam: { cur: 1, total: 0 }, pm:  { cur: 1, total: 0 },
+    bp1: { cur: 1, total: 0 }, bp2: { cur: 1, total: 0 },
+};
+
+// total 0 -> ----/---- (empty gate). total 1 -> 0000/0000 (a lone still: the
+// 0000 sentinel means "no sequence here"). total >= 2 -> the live counts, so
+// any digit in 0001-9999 tells you a TIFF sequence is loaded.
+function formatGateCount(cur, total) {
+    const pad = n => String(Math.max(0, n | 0)).padStart(4, '0');
+    if (!total || total <= 0) return '----/----';
+    if (total === 1)          return '0000/0000';
+    return `${pad(cur)}/${pad(total)}`;
+}
+
+function renderGate(key) {
+    const el = document.getElementById('gate_' + key);
+    if (el) el.textContent = formatGateCount(_gateState[key].cur, _gateState[key].total);
+}
+
+// Totals only - safe to call on every poll, idle or rendering.
+function setGateTotals(gates) {
+    if (!gates) return;
+    ['cam', 'pm', 'bp1', 'bp2'].forEach(k => {
+        if (gates[k] && typeof gates[k].total === 'number') {
+            _gateState[k].total = gates[k].total;
+            renderGate(k);
+        }
+    });
+}
+
+// Currents - call only from a render heartbeat or a probe response.
+function setGateCurrents(gates) {
+    if (!gates) return;
+    ['cam', 'pm', 'bp1', 'bp2'].forEach(k => {
+        if (gates[k] && typeof gates[k].cur === 'number') {
+            _gateState[k].cur = gates[k].cur;
+            renderGate(k);
+        }
+    });
+}
+
 setInterval(async () => {
     try {
         const r = await fetch('/status');
@@ -1040,6 +1108,14 @@ setInterval(async () => {
         _layerVisibilityFrames.bp1 = st.bp1_frames || 0;
         _layerVisibilityFrames.bp2 = st.bp2_frames || 0;
         refreshLayerVisibility();
+
+        // Gate readouts: totals every tick; currents only mid-render (when the
+        // heartbeat is driving them). At idle the currents are owned by the
+        // last Cam Probe, so we deliberately don't apply st.gates currents here.
+        setGateTotals(st.gates);
+        if (st.status === 'rendering') {
+            setGateCurrents(st.gates);
+        }
     } catch(e) { console.error("Poll Error:", e); }
 }, 1000);
 

@@ -583,6 +583,23 @@ body {
     border-bottom:      1px solid var(--border-color); 
 }
 
+/* Per-gate frame readout (####/#### = current / total).
+ * Lives in the mag/bipack box titles, floated to the right edge of the
+ * title row so it sits in the empty space beside the label. Uses the same
+ * font as everything else - only the digit spacing is fixed (tabular-nums)
+ * so the numbers don't jitter as they tick, and it's dimmed so the title
+ * still reads as primary. The 7-segment styling pass comes later; this is
+ * deliberately plain. The three states (----/---- empty, 0000/0000 still,
+ * 0001-9999 sequence) are produced by formatGateCount() in main.js. */
+.gate-frames {
+    float:                  right;
+    font-weight:            normal;
+    letter-spacing:         0.08em;
+    font-variant-numeric:   tabular-nums;
+    color:                  var(--color-accent);
+    opacity:                0.8;
+}
+
 .constants-zone { 
     display:                    grid; 
     grid-template-columns:      repeat(4, 1fr); 
