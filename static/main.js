@@ -977,8 +977,14 @@ function formatGateCount(cur, total) {
 }
 
 function renderGate(key) {
+    // The readout span now holds two layers: a static .gf-ghost (the dim
+    // all-segments backdrop) and .gf-live (the lit value). Write only to the
+    // live layer - setting textContent on the span itself would delete the
+    // ghost child and break the LED look.
     const el = document.getElementById('gate_' + key);
-    if (el) el.textContent = formatGateCount(_gateState[key].cur, _gateState[key].total);
+    if (!el) return;
+    const live = el.querySelector('.gf-live');
+    if (live) live.textContent = formatGateCount(_gateState[key].cur, _gateState[key].total);
 }
 
 // Totals only - safe to call on every poll, idle or rendering.

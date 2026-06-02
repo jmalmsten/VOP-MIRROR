@@ -32,7 +32,7 @@
 <head>
     <meta charset="UTF-8">
     <title>VOP v0.13</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.16">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.17">
 </head>
 <body>
     VOP &copy; 2026 jmalmsten. 
@@ -92,7 +92,7 @@
                      message from /upload_cam_mag explains the limit if hit.
                 -->
                 <div class="group-box">
-                    <div class="group-title">Cam Mag<span class="gate-frames" id="gate_cam">----/----</span></div>
+                    <div class="group-title">Cam Mag<span class="gate-frames" id="gate_cam"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <!-- Plain .c-box rather than .c-box.layer-vis-box.
                              The .layer-vis-box modifier turns the container
@@ -137,7 +137,7 @@
                 </div>
 
                 <div class="group-box">
-                    <div class="group-title">Projection Mag<span class="gate-frames" id="gate_pm">----/----</span></div>
+                    <div class="group-title">Projection Mag<span class="gate-frames" id="gate_pm"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <div class="c-box layer-vis-box">
                             <label>Active Image</label>
@@ -161,7 +161,7 @@
                 </div>
 
                 <div class="group-box bipack bipack1">
-                    <div class="group-title">Projection BiPack 1<span class="gate-frames" id="gate_bp1">----/----</span></div>
+                    <div class="group-title">Projection BiPack 1<span class="gate-frames" id="gate_bp1"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <div class="c-box layer-vis-box">
                             <label>Active BiPack 1</label>
@@ -185,7 +185,7 @@
                 </div>
 
                 <div class="group-box bipack bipack2">
-                    <div class="group-title">Projection BiPack 2<span class="gate-frames" id="gate_bp2">----/----</span></div>
+                    <div class="group-title">Projection BiPack 2<span class="gate-frames" id="gate_bp2"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <div class="c-box layer-vis-box">
                             <label>Active BiPack 2</label>
@@ -413,7 +413,7 @@
         </div>
         {% include 'sections/cheat-sheet.html' %}
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=68"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=69"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling

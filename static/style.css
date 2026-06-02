@@ -2,6 +2,41 @@
 Description:        Stylings for the whole GUI
 */
 
+/* ===========================================================
+ * DSEG14 Classic - seven-fourteen-segment display font
+ *
+ * Used by the per-gate frame counters (.gate-frames) to give the
+ * "####/####" readouts a real LED-panel look. DSEG14 (not DSEG7)
+ * because it carries a true '/' and '-' glyph, so the whole string -
+ * digits, slash, and the empty-state dashes - renders in-segment
+ * with no monospace fallback for the separator.
+ *
+ * Font: DSEG by keshikan, SIL Open Font License 1.1. The license
+ * text ships alongside the woff2 files in static/fonts/. Self-hosted
+ * (no CDN) to keep VOP offline-capable and FOSS-clean. url() is
+ * relative to this stylesheet, so 'fonts/...' = static/fonts/...,
+ * which Flask's static route already serves.
+ *
+ * We use the italic face (the classic forward-leaning LED slant) but
+ * register the regular face too, so anything that renders the family
+ * upright still gets segments rather than a sans-serif fallback.
+ * =========================================================== */
+@font-face {
+    font-family: 'DSEG14';
+    src: url('fonts/DSEG14Classic-Regular.woff2') format('woff2');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'DSEG14';
+    src: url('fonts/DSEG14Classic-Italic.woff2') format('woff2');
+    font-weight: normal;
+    font-style: italic;
+    font-display: swap;
+}
+
+
 /*
 #
 ###########################################################################
@@ -42,6 +77,10 @@ Description:        Stylings for the whole GUI
     --color-danger:         #500;       /* Panic Buttons */
     --color-danger-text:    #f44;       /* Nuke Buttons */
     --color-warning:        #fa0;       /* Nuke confirmation */
+    --color-readout:        #fa0;       /* 7/14-seg gate frame counters (amber). Same hue as
+                                           warning today, but a distinct token: counters are an
+                                           instrument readout, not a warning. Kept separate so a
+                                           future palette tweak to one doesn't drag the other. */
     --color-sss-accent:     #f44;       /* SSS sheet highlights and add-row tagging */
     --color-success:        #080;       /* Execute Sequence button background */
     --color-panic:          #800;       /* Hardware Panic button */
@@ -591,13 +630,49 @@ body {
  * still reads as primary. The 7-segment styling pass comes later; this is
  * deliberately plain. The three states (----/---- empty, 0000/0000 still,
  * 0001-9999 sequence) are produced by formatGateCount() in main.js. */
+/* Per-gate frame readout - inset DSEG14 "LED window".
+ *
+ * Structure in the markup (each of the 4 mag-box titles):
+ *   <span class="gate-frames" id="gate_X">
+ *     <span class="gf-ghost">8888/8888</span>   <- all-segments-faint backdrop
+ *     <span class="gf-live">----/----</span>    <- the lit value (JS updates this)
+ *   </span>
+ *
+ * .gate-frames is the black recessed window (the "Doc Brown" inset). The ghost
+ * sits absolutely behind the live layer showing every segment dimly, so unlit
+ * segments are implied the way a real LED panel shows them. Only .gf-live is
+ * ever touched by JS (renderGate sets its text); the ghost is a static 8888/8888.
+ *
+ * Ghost alignment: the window has padding, .gf-live flows normally so it starts
+ * at the content origin (padding-left, padding-top in from the padding box). The
+ * absolutely-positioned ghost is offset by those same padding values so the two
+ * layers register exactly. If you change the padding below, change the ghost
+ * top/left to match. */
 .gate-frames {
     float:                  right;
-    font-weight:            normal;
-    letter-spacing:         0.08em;
-    font-variant-numeric:   tabular-nums;
-    color:                  var(--color-accent);
-    opacity:                0.8;
+    position:               relative;
+    display:                inline-block;
+    background:             var(--bg-input);
+    border:                 1px solid #222;
+    border-radius:          3px;
+    padding:                3px 8px;
+    font-family:            'DSEG14', monospace;
+    font-style:             italic;          /* the classic LED slant */
+    font-size:              0.92em;          /* a touch larger than the title text */
+    line-height:            1;
+    box-sizing:             content-box;     /* so the ghost padding-offset math holds */
+}
+.gate-frames .gf-live {
+    position:               relative;        /* sits above the ghost; defines the box size */
+    color:                  var(--color-readout);
+    text-shadow:            0 0 5px rgba(255, 170, 0, 0.45);   /* amber glow */
+}
+.gate-frames .gf-ghost {
+    position:               absolute;
+    top:                    3px;             /* == padding-top  */
+    left:                   8px;             /* == padding-left */
+    color:                  #1d1d1d;         /* unlit segments: barely above black */
+    pointer-events:         none;
 }
 
 .constants-zone { 
