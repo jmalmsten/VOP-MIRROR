@@ -8,6 +8,9 @@ This one has been missed for a while. The idle screen used to show the IP and Po
 ### Rearranged the sections of the GUI
 In order to limit the vertical space used by the sidebar I moved the mags up as a horizontal line of sections. This is also in anticipation of the big wood-grain redesign that's coming later on.
 
+### Moved Noise Crusher and Hot Pixel Mapper to the Calibration Page
+Simply because those are calibration steps. 
+
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.
 - #186 - unified naming so type is now task in the python code and json. 
