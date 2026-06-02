@@ -511,6 +511,34 @@ body {
     margin-bottom:      20px; 
 }
 
+/* ===========================================================
+ * Mag / BiPack row
+ *
+ * The four film-path boxes (Cam Mag, Projection Mag, Projection
+ * BiPack 1, Projection BiPack 2) were lifted out of the right-hand
+ * .controls-area sidebar into this full-width horizontal strip. It
+ * spans both columns of the page grid (same 1 / -1 contract as
+ * .control-deck) and lays its four .group-box children out in an
+ * equal 4-column grid. Pulling these boxes out of the sidebar lets
+ * .controls-area shrink to just Camera + Hardware Constants, which
+ * frees vertical room for the Exposure Sheet below.
+ * =========================================================== */
+.mags-row {
+    grid-column:            1 / -1;
+    display:                grid;
+    grid-template-columns:  repeat(4, 1fr);
+    gap:                    20px;
+    align-items:            stretch;   /* all four boxes match the tallest */
+}
+
+/* Inside the row, the per-box bottom margin (used when these boxes
+ * stacked vertically in the sidebar) is redundant - the grid gap
+ * handles spacing - and would otherwise add a stray strip under the
+ * row. Zero it here only; the sidebar instances keep their margin. */
+.mags-row > .group-box {
+    margin-bottom:          0;
+}
+
 .probe-input {
     width:              100%;
     background:         var(--bg-input);

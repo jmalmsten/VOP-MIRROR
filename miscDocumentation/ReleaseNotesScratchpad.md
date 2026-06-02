@@ -5,7 +5,8 @@ This one has been missed for a while. The idle screen used to show the IP and Po
 
 
 ## Changed:
-
+### Rearranged the sections of the GUI
+In order to limit the vertical space used by the sidebar I moved the mags up as a horizontal line of sections. This is also in anticipation of the big wood-grain redesign that's coming later on.
 
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.

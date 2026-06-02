@@ -32,7 +32,7 @@
 <head>
     <meta charset="UTF-8">
     <title>VOP v0.13</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.14">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.15">
 </head>
 <body>
     VOP &copy; 2026 jmalmsten. 
@@ -69,82 +69,24 @@
         <div id="page_main" class="page-section page-active">
             {% include 'sections/status.html' %}
 
-            <div class="preview-area">
-                <img id="probe_img" alt="Live Preview">
-            </div>
-
-            <div class="controls-area">
-                <div class="group-box">
-                    <div class="group-title">Camera</div>
-                    <div class="input-row">
-                        <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('saveJob()')"></div>
-                        <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('saveJob()')"></div>
-                        <!--
-                            To make it more easy to see what the DRE steps in DRE mode are doing
-                            we have here a little checkbox that enables the probe system to check
-                            what the DRE step does at a particular subframe and shows it like it
-                            would with normal smear jobs. The input logic stays the same. It's a
-                            float between 0.0 and 1.0 and it chooses the DRE step that's closest
-                            to the float value.
-
-                            Normally, this checkbox is hidden and only becomes visible when DRE
-                            mode is active. 
-                        -->
-                        <div class="c-box dre-probe-controls" id="dre_probe_controls"
-                                            title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
-                            <label>DRE</label>
-                            <input type="checkbox" id="probe_dre" onchange="runTask('saveJob()')">
-                        </div>
-                        <!--
-                            BRK probe toggle. Parallel to the DRE one above.
-                            When ON (in BRK mode), Proj Probe shows ONE
-                            bracket's slice-remap on the projection monitor -
-                            the Sub (0-1.0) field picks which bracket
-                            (0.0 = peak / brightest slice, 1.0 = deepest /
-                            darkest slice). When OFF, Proj Probe shows the raw
-                            composite with no slice remap.
-
-                            Hidden unless BRK mode is active. Visibility is
-                            driven by the body.brk-mode class via the
-                            .brk-probe-controls rule in static/style.css -
-                            no inline styles, matching the .brk-constants
-                            pattern used for the sheet-header settings.
-                        -->
-                        <div class="c-box brk-probe-controls" id="brk_probe_controls"
-                                            title="BRK Mode only. When ON, Proj Probe shows one bracket's slice on the projection monitor; the Sub (0-1.0) field picks which bracket (0.0 = peak, 1.0 = deepest). When OFF, shows the raw composite.">
-                            <label>BRK</label>
-                            <input type="checkbox" id="probe_brk" onchange="runTask('saveJob()')">
-                        </div>
-                    </div>
-                    <div class="probe-controls spaced">
-                        <!-- 2x2 grid of probe / preview buttons.
-                            Row 1: Proj Probe (HDMI screen) | Cam Probe (latent in CamMag)
-                            Row 2: Cam View   (smear only)  | Comp View (smear + composite)
-                            The wrapper div is needed because the surrounding .probe-controls
-                            also holds the <hr> and Execute button which must NOT be part of
-                            the grid. CSS for .probe-grid lives in static/style.css. -->
-                        <div class="probe-grid">
-                            <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
-                            <button class="action-btn cam_probe" onclick="runCamProbe()" title="Show the existing latent TIFF for this frame from the CamMag. Doesn't touch anything.">Cam Probe</button>
-                            <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
-                            <button class="action-btn comp_preview" onclick="runTask('comp_preview')" title="Like Cam View, but composited on top of the existing latent for this frame. Does not commit.">Comp View</button>
-                        </div>
-                        <hr class="section-divider">
-                        <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
-                        <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
-                    </div>
-                </div>
-
+            <!-- Mag / BiPack row.
+                 The four film-path boxes (Cam Mag, Projection Mag, and the
+                 two Projection BiPacks) used to stack vertically inside the
+                 right-hand .controls-area sidebar. They were lifted out into
+                 this full-width horizontal row so the sidebar shrinks to just
+                 Camera + Hardware Constants, freeing vertical space for the
+                 Exposure Sheet below. Layout is a 4-column grid (.mags-row);
+                 each child stays a plain .group-box. -->
+            <div class="mags-row">
                 <!-- Cam Mag block.
-                     Sits between the Camera section (probe/preview/execute
-                     controls above) and the Projection Mag section (active
-                     image and projection geometry below). The Cam Mag is the
+                     First box in the horizontal Mag / BiPack row, sitting
+                     left of Projection Mag and the two BiPacks. The Cam Mag is the
                      destination for both exposure runs (Execute Sequence
                      writes here frame by frame) and direct ingest (the
                      UPLOAD button below ffmpegs a ProRes/etc. reel into
                      latent_NNNN.tif sequence here, ready for further LIME
                      passes from the camera).
-                     
+                 
                      Frame range is capped server-side at 9999 frames because
                      the latent filename pattern is 4-digit %04d. The error
                      message from /upload_cam_mag explains the limit if hit.
@@ -263,6 +205,73 @@
                             <button class="mini-btn" onclick="calcFitScale('bipack2_coord_scale', 'bipack2_fit_z', 'bipack2', 'fit')" title="Scale image to fit entirely inside the projection frustum (letterbox/pillarbox)">FIT FOV</button>
                             <button class="mini-btn" onclick="calcFitScale('bipack2_coord_scale', 'bipack2_fit_z', 'bipack2', 'fill')" title="Scale image to fill the entire projection frustum (overflow on shorter axis)">FILL FOV</button>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="preview-area">
+                <img id="probe_img" alt="Live Preview">
+            </div>
+
+            <div class="controls-area">
+                <div class="group-box">
+                    <div class="group-title">Camera</div>
+                    <div class="input-row">
+                        <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('saveJob()')"></div>
+                        <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('saveJob()')"></div>
+                        <!--
+                            To make it more easy to see what the DRE steps in DRE mode are doing
+                            we have here a little checkbox that enables the probe system to check
+                            what the DRE step does at a particular subframe and shows it like it
+                            would with normal smear jobs. The input logic stays the same. It's a
+                            float between 0.0 and 1.0 and it chooses the DRE step that's closest
+                            to the float value.
+
+                            Normally, this checkbox is hidden and only becomes visible when DRE
+                            mode is active. 
+                        -->
+                        <div class="c-box dre-probe-controls" id="dre_probe_controls"
+                                            title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
+                            <label>DRE</label>
+                            <input type="checkbox" id="probe_dre" onchange="runTask('saveJob()')">
+                        </div>
+                        <!--
+                            BRK probe toggle. Parallel to the DRE one above.
+                            When ON (in BRK mode), Proj Probe shows ONE
+                            bracket's slice-remap on the projection monitor -
+                            the Sub (0-1.0) field picks which bracket
+                            (0.0 = peak / brightest slice, 1.0 = deepest /
+                            darkest slice). When OFF, Proj Probe shows the raw
+                            composite with no slice remap.
+
+                            Hidden unless BRK mode is active. Visibility is
+                            driven by the body.brk-mode class via the
+                            .brk-probe-controls rule in static/style.css -
+                            no inline styles, matching the .brk-constants
+                            pattern used for the sheet-header settings.
+                        -->
+                        <div class="c-box brk-probe-controls" id="brk_probe_controls"
+                                            title="BRK Mode only. When ON, Proj Probe shows one bracket's slice on the projection monitor; the Sub (0-1.0) field picks which bracket (0.0 = peak, 1.0 = deepest). When OFF, shows the raw composite.">
+                            <label>BRK</label>
+                            <input type="checkbox" id="probe_brk" onchange="runTask('saveJob()')">
+                        </div>
+                    </div>
+                    <div class="probe-controls spaced">
+                        <!-- 2x2 grid of probe / preview buttons.
+                            Row 1: Proj Probe (HDMI screen) | Cam Probe (latent in CamMag)
+                            Row 2: Cam View   (smear only)  | Comp View (smear + composite)
+                            The wrapper div is needed because the surrounding .probe-controls
+                            also holds the <hr> and Execute button which must NOT be part of
+                            the grid. CSS for .probe-grid lives in static/style.css. -->
+                        <div class="probe-grid">
+                            <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
+                            <button class="action-btn cam_probe" onclick="runCamProbe()" title="Show the existing latent TIFF for this frame from the CamMag. Doesn't touch anything.">Cam Probe</button>
+                            <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
+                            <button class="action-btn comp_preview" onclick="runTask('comp_preview')" title="Like Cam View, but composited on top of the existing latent for this frame. Does not commit.">Comp View</button>
+                        </div>
+                        <hr class="section-divider">
+                        <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
+                        <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
                     </div>
                 </div>
 
