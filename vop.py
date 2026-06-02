@@ -1370,6 +1370,32 @@ def cam_probe():
         print(f"[VOP SERVER] CAM PROBE error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/gate_readout', methods=['POST'])
+def gate_readout():
+    """
+    GATE READOUT - pure gate-frame resolver, no rendering.
+
+    Exists so the async preview actions (Proj Probe, Cam View, Comp View) can
+    update the per-mag "####/####" readouts. Those three dispatch the engine
+    and return immediately ({"status":"started"}); their image lands later via
+    probe_live.jpg and the heartbeat, so unlike Cam Probe they have no synchronous
+    response to hang gate data on. Rather than thread gate data through the engine's
+    async preview path (large blast radius for a readout), the frontend calls this
+    tiny synchronous route alongside the preview dispatch and applies the result.
+
+    Mirrors the gate-resolution half of /cam_probe exactly: same body shape
+    (collectParams()), same probe_frame default, same resolve_gate_playheads
+    helper - so Proj Probe / Cam View / Comp View land on identical numbers to
+    Cam Probe for the same frame. No camera, no disk writes, no engine dispatch.
+    """
+    data = request.json or {}
+    try:
+        frame_num = int(float(data.get('probe_frame', 1)))
+    except (TypeError, ValueError):
+        frame_num = 1
+    return jsonify({"status": "ok", "frame": frame_num,
+                    "gates": resolve_gate_playheads(data, frame_num)})
+
 @app.route('/execute', methods=['POST'])
 def execute_seq():
     # Dispatches the full frame sequence exposure task

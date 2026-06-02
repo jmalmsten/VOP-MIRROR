@@ -241,11 +241,31 @@ function collectParams() {
 }
 
 async function runTask(type) {
-    await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
+    const params = collectParams();
+    await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(params)});
     // comp_preview writes to the same /static/probe_live.jpg as the
     // other two preview types, so it gets the same image-reload treatment.
     if (type === 'preview' || type === 'cam_preview' || type === 'comp_preview') {
         document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+
+        // Update the per-gate readouts to the frame these actions previewed.
+        // Unlike Cam Probe, these dispatch the engine asynchronously and return
+        // {"status":"started"} with no gate data, so we resolve the gates via
+        // the dedicated /gate_readout route using the SAME params we just sent.
+        // Without this the readout falls back to the idle /status value (frame
+        // 1) on the next poll - the "snaps to 0001" bug. Fire-and-forget; a
+        // failure just leaves the last-known numbers rather than throwing.
+        try {
+            const gr = await fetch('/gate_readout', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(params)
+            });
+            const gd = await gr.json();
+            if (gd && gd.gates) { setGateTotals(gd.gates); setGateCurrents(gd.gates); }
+        } catch (e) {
+            console.error("Gate readout update failed for " + type + ":", e);
+        }
     }
 }
 
