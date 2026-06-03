@@ -1520,6 +1520,11 @@ const framing = {
         const stopBtn  = document.getElementById('cal_feed_stop_btn');
         if (startBtn) startBtn.addEventListener('click', () => this.startFeed());
         if (stopBtn)  stopBtn.addEventListener('click',  () => this.stopFeed());
+
+        // 1:1 focus zoom (Slice 4): the toggle button + the click-drag pan.
+        const zoomBtn = document.getElementById('cal_feed_zoom_btn');
+        if (zoomBtn) zoomBtn.addEventListener('click', () => this.toggleZoom());
+        this.initZoomPan();
     },
 
     setStatus(text) {
@@ -1561,7 +1566,15 @@ const framing = {
         const img = document.getElementById('cal_feed_img');
         if (img) img.src = '';
         const stack = document.getElementById('cal_preview_stack');
-        if (stack) stack.classList.remove('feed-active');
+        if (stack) {
+            stack.classList.remove('feed-active');
+            // Also drop 1:1 zoom: a stopped feed left in zoom mode would hide
+            // BOTH the feed (no feed-active) and the still (zoom-1x hides it),
+            // leaving a blank box. Returning to FIT keeps the next START clean.
+            stack.classList.remove('zoom-1x');
+        }
+        const zoomBtn = document.getElementById('cal_feed_zoom_btn');
+        if (zoomBtn) zoomBtn.innerText = '1:1 FOCUS';
         this.active = false;
         this.setStatus('Stopped');
         // Drop the on-screen targets too; the idle loop returns to the logo.
@@ -1666,6 +1679,63 @@ const framing = {
                 svg.appendChild(vLine);
             }
         }
+    },
+
+    // Toggle between FIT (whole sensor scaled to the box, for alignment) and
+    // 1:1 (native sensor pixels, for focus). The CSS class does all the
+    // layout switching; here we just flip it, update the label, and recentre.
+    toggleZoom() {
+        if (!this.active) return;   // nothing to zoom without a live feed
+        const stack = document.getElementById('cal_preview_stack');
+        const btn = document.getElementById('cal_feed_zoom_btn');
+        if (!stack) return;
+
+        const goingTo1x = !stack.classList.contains('zoom-1x');
+        stack.classList.toggle('zoom-1x', goingTo1x);
+        if (btn) btn.innerText = goingTo1x ? 'FIT VIEW' : '1:1 FOCUS';
+
+        // On entering 1:1, jump to the centre of the sensor where the moire
+        // focus target lives, so the operator starts looking at the right spot.
+        if (goingTo1x) this.centerZoom();
+    },
+
+    // Centre the scroll position on the middle of the oversized feed image.
+    // Reading scrollWidth/clientWidth right after the class flip forces a
+    // synchronous reflow, so these already reflect the native-size layout.
+    centerZoom() {
+        const stack = document.getElementById('cal_preview_stack');
+        if (!stack) return;
+        stack.scrollLeft = (stack.scrollWidth  - stack.clientWidth)  / 2;
+        stack.scrollTop  = (stack.scrollHeight - stack.clientHeight) / 2;
+    },
+
+    // Click-drag panning, active only in 1:1 mode. We move the crop opposite
+    // to the drag (grab-and-pull). Panning is pure scrollLeft/scrollTop, so
+    // nothing here writes an inline style. mousemove/up are on window so a
+    // drag keeps tracking even if the cursor leaves the box mid-pull.
+    initZoomPan() {
+        const stack = document.getElementById('cal_preview_stack');
+        if (!stack) return;
+        let dragging = false, startX = 0, startY = 0, startL = 0, startT = 0;
+
+        stack.addEventListener('mousedown', (e) => {
+            if (!stack.classList.contains('zoom-1x')) return;
+            dragging = true;
+            stack.classList.add('dragging');   // CSS swaps cursor to grabbing
+            startX = e.clientX; startY = e.clientY;
+            startL = stack.scrollLeft; startT = stack.scrollTop;
+            e.preventDefault();   // suppress the browser's native image drag-ghost
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            stack.scrollLeft = startL - (e.clientX - startX);
+            stack.scrollTop  = startT - (e.clientY - startY);
+        });
+        window.addEventListener('mouseup', () => {
+            if (!dragging) return;
+            dragging = false;
+            stack.classList.remove('dragging');
+        });
     },
 };
 

@@ -91,6 +91,14 @@ No JS event handlers here - those are wired up by slice 7 in main.js.
             <button type="button" class="action-btn danger" id="cal_feed_stop_btn"
                     title="Stop the live feed and release the camera.">STOP FEED</button>
         </div>
+
+        <!-- 1:1 focus zoom toggle (Slice 4). Label flips between 1:1 FOCUS
+             and FIT VIEW in main.js. Only does anything while the feed is
+             live (it needs an image to zoom into). -->
+        <div class="input-row spaced">
+            <button type="button" class="action-btn" id="cal_feed_zoom_btn"
+                    title="Toggle 1:1 native-pixel zoom for judging focus. Click and drag to pan around the sensor; click again to return to the full framing view.">1:1 FOCUS</button>
+        </div>
     </div>
 
     <!-- Peak White section. The main calibration routine: find the
