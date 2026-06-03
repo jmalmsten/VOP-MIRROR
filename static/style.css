@@ -400,12 +400,46 @@ body {
     vector-effect:      non-scaling-stroke;
 }
 
-/* Small centre cross inside each box for precise targeting. */
+/* Small centre tick inside each box for precise targeting. */
 .cal-target-tick {
     stroke:             var(--color-accent);
     stroke-width:       2;
     vector-effect:      non-scaling-stroke;
 }
+
+/* ---- 1:1 FOCUS ZOOM (issue #198, Slice 4) ----
+ * In zoom mode the feed renders at native sensor pixels and the stack
+ * becomes a fixed-size viewport the operator pans by click-dragging
+ * (main.js sets scrollLeft/scrollTop - DOM properties, never inline
+ * styles, per the no-inline-styles rule). The alignment overlay and the
+ * still are hidden: focus is a centre-of-frame, look-at-the-moire task,
+ * not an alignment one.
+ *
+ * overflow:hidden (not auto) clips without scrollbars; programmatic
+ * scrollLeft/scrollTop still pans it. If panning ever feels stuck on a
+ * given browser, switch this to overflow:auto. */
+.cal-preview-stack.zoom-1x {
+    overflow:           hidden;
+    cursor:             grab;
+}
+.cal-preview-stack.zoom-1x.dragging {
+    cursor:             grabbing;
+}
+.cal-preview-stack.zoom-1x #cal_feed_img {
+    /* Pull the feed out of the absolute object-fit:contain layout and let
+     * it size to its intrinsic 2028x1520, becoming the scroll content.
+     * These override the base ".cal-preview-stack img" rule (higher
+     * specificity: two classes + an id beats one class + a type). */
+    position:           static;
+    width:              auto;
+    height:             auto;
+    max-width:          none;
+    max-height:         none;
+    object-fit:         none;
+}
+/* Hide the alignment overlay and the still while focusing. */
+.cal-preview-stack.zoom-1x .cal-feed-overlay { display: none; }
+.cal-preview-stack.zoom-1x #cal_probe_img    { display: none; }
 
 /* Status row inside the Peak White group box.
  * "Status: Ready" / "Status: Measuring" indicator. */
