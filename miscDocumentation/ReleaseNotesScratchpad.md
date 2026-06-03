@@ -30,6 +30,11 @@ https://www.keshikan.net/fonts-e.html
 I claim no ownership of the font. I just find it neat. :)
 
 
+## Camera Feed for Focus and alignment
+Issue #198 - Added a way to get a camera feed into the GUI in order to make it easier to both line up the camera, monitor and set focus.. Find it in the calibration page. And when using it. You should see a focus chart on the screen with some crosshairs in the corners and boxes in the corners of the camera feed. You should be able to use these to line up the camera to the monitor and set focus and zoom. 
+
+A focus peaking mode is coming once this is nailed down.
+
 ## Changed:
 ### Rearranged the sections of the GUI
 In order to limit the vertical space used by the sidebar I moved the mags up as a horizontal line of sections. This is also in anticipation of the big wood-grain redesign that's coming later on.

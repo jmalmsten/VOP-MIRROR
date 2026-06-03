@@ -175,7 +175,13 @@ def _reader_loop(proc):
     stream into complete JPEGs on SOI/EOI boundaries, and publishes each
     finished frame, notifying waiting clients.
     """
-    global _latest_frame, _frame_seq
+    # _proc must be declared global here too: the finally block below
+    # assigns `_proc = None`, and a single assignment anywhere in the
+    # function makes Python treat _proc as local THROUGHOUT - which is
+    # what made the earlier `if _proc is not proc:` read raise
+    # UnboundLocalError. Listing it here keeps both the reads and that
+    # assignment pointing at the module global.
+    global _proc, _latest_frame, _frame_seq
     buf = bytearray()
     try:
         while True:
