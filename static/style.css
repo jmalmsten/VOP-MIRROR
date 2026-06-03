@@ -332,6 +332,38 @@ body {
     grid-column:        2;
 }
 
+/* Framing/focus preview stack (issue #198). The wrapper fills the
+ * preview box and positions its two <img> children on top of each
+ * other so the live feed and the still capture share the same space.
+ * A future alignment overlay (Slice 3) becomes a third absolutely-
+ * positioned child here. */
+.cal-preview-stack {
+    position:           relative;
+    width:              100%;
+    height:             100%;
+}
+
+/* Both images fill the stack and letterbox via object-fit:contain,
+ * matching #probe_img's behaviour on the Main page. */
+.cal-preview-stack img {
+    position:           absolute;
+    top:                0;
+    left:               0;
+    width:              100%;
+    height:             100%;
+    object-fit:         contain;
+}
+
+/* Default: still capture visible, live feed hidden. */
+#cal_feed_img {
+    display:            none;
+}
+
+/* When framing is active, the stack gets .feed-active: show the live
+ * feed, hide the still. Toggled by main.js's framing controller. */
+.cal-preview-stack.feed-active #cal_feed_img  { display: block; }
+.cal-preview-stack.feed-active #cal_probe_img { display: none;  }
+
 /* Status row inside the Peak White group box.
  * "Status: Ready" / "Status: Measuring" indicator. */
 .cal-status-row {

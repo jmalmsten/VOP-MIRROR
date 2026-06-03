@@ -413,13 +413,18 @@
         </div>
         {% include 'sections/cheat-sheet.html' %}
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=69"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=70"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling
              navigation to the larger Calibration controller. -->
         <script>
             function showPage(name) {
+                // Leaving the Calibration page must release the framing feed
+                // so the camera is free and no broken <img> stream lingers.
+                if (name !== 'calibration' && typeof framing !== 'undefined') {
+                    framing.stopFeed();
+                }
                 // Toggle the .page-active class between the two
                 // top-level page divs. CSS handles the actual
                 // hiding via display: none.

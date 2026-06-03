@@ -40,7 +40,7 @@ import math
 import socket
 import time
 import numpy as np  # for 16-bit → 8-bit reduction in /cam_probe
-from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
+from flask import Flask, jsonify, request, render_template, send_from_directory, send_file, Response
 
 # Append the modules directory to the system path for local imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
@@ -50,6 +50,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 # current state to the frontend.
 import calibration_store as cstore
 import interpolator  # for resolving per-gate JK playheads in /status and /cam_probe
+
+# Live MJPEG framing/focus feed for the Calibration page (issue #198).
+# Owns its own rpicam-vid process; see the single-owner camera note in
+# dispatch_engine where we stop it before any capture.
+import camera_feed
 
 # Suppress default Flask HTTP request logging to keep the terminal output clean for audit logs
 log = logging.getLogger('werkzeug')
@@ -568,6 +573,15 @@ def dispatch_engine(task, payload):
 
     # Guarantee background daemon is active before dispatching
     ensure_engine_running()
+
+    # SINGLE-OWNER CAMERA GUARD (issue #198).
+    # The Calibration framing feed holds the sensor via rpicam-vid. Every
+    # engine task that touches the camera does so via rpicam-still, which
+    # would fail with "device busy" if the feed were still up. Stopping it
+    # here - the one path all tasks funnel through - guarantees the sensor
+    # is free before the engine reaches for it. No-op (and cheap) if the
+    # feed isn't running.
+    camera_feed.stop_feed()
 
     payload['task'] = task
     payload['vop_version'] = VOP_VERSION 
@@ -1150,6 +1164,34 @@ def comp_preview():
     # viewfinder for lining up multi-pass exposures.
     dispatch_engine('comp_preview', request.json)
     return jsonify({"status": "started"})
+
+@app.route('/calibration_feed')
+def calibration_feed():
+    # The live MJPEG stream itself. The browser consumes this directly via
+    # <img src="/calibration_feed">; each part is a full JPEG frame. We do
+    # NOT auto-start here - the frontend calls /calibration_feed/start
+    # first - so that a stray <img> can't grab the camera unexpectedly.
+    return Response(
+        camera_feed.frames(),
+        mimetype='multipart/x-mixed-replace; boundary=vopframe'
+    )
+
+@app.route('/calibration_feed/start', methods=['POST'])
+def calibration_feed_start():
+    # Refuse to start while the engine is mid-task: COMMAND_FILE existing
+    # means a capture/render is in flight and owns (or is about to own)
+    # the sensor. Starting rpicam-vid then would collide.
+    if os.path.exists(COMMAND_FILE):
+        return jsonify({"status": "busy"}), 409
+    camera_feed.start_feed()
+    return jsonify({"status": "started"})
+
+@app.route('/calibration_feed/stop', methods=['POST'])
+def calibration_feed_stop():
+    # Explicit stop from the frontend (Stop button, or navigating away
+    # from the Calibration page). Releases the camera immediately.
+    camera_feed.stop_feed()
+    return jsonify({"status": "stopped"})
 
 @app.route('/cam_probe', methods=['POST'])
 def cam_probe():

@@ -1497,6 +1497,68 @@ async function importJob(input) {
 // of JS coupling and slice 6 part 2 can be re-styled or restructured
 // without breaking the JS bindings here.
 
+// ====================================================================
+// FRAMING & FOCUS controller (issue #198)
+//
+// Drives the live camera feed on the Calibration page. Starting the
+// feed POSTs /calibration_feed/start (which refuses if the engine is
+// busy), then points the feed <img> at the streaming route. Stopping
+// clears the <img> src (so the browser closes the MJPEG connection)
+// and POSTs /calibration_feed/stop to release the camera.
+//
+// The feed and any camera capture are mutually exclusive on the sensor,
+// so we stop the feed whenever the user leaves the page or starts a
+// calibration measurement. The backend also stops it defensively in
+// dispatch_engine, but stopping here too keeps the UI honest (no broken
+// <img> left pointing at a dead stream).
+// ====================================================================
+const framing = {
+    active: false,
+
+    init() {
+        const startBtn = document.getElementById('cal_feed_start_btn');
+        const stopBtn  = document.getElementById('cal_feed_stop_btn');
+        if (startBtn) startBtn.addEventListener('click', () => this.startFeed());
+        if (stopBtn)  stopBtn.addEventListener('click',  () => this.stopFeed());
+    },
+
+    setStatus(text) {
+        const el = document.getElementById('cal_feed_status');
+        if (el) el.innerText = text;
+    },
+
+    async startFeed() {
+        // Ask the backend to claim the camera first. 409 = engine busy.
+        const resp = await fetch('/calibration_feed/start', { method: 'POST' });
+        if (!resp.ok) {
+            this.setStatus('Busy (engine running)');
+            return;
+        }
+        // Point the <img> at the stream. The cache-buster guarantees a
+        // fresh connection even if the feed was started before in this
+        // session (browsers will otherwise reuse a closed stream URL).
+        const img = document.getElementById('cal_feed_img');
+        if (img) img.src = '/calibration_feed?t=' + Date.now();
+        const stack = document.getElementById('cal_preview_stack');
+        if (stack) stack.classList.add('feed-active');
+        this.active = true;
+        this.setStatus('Live');
+    },
+
+    async stopFeed() {
+        if (!this.active) return;   // nothing to do; keeps page-leave cheap
+        // Drop the <img> src FIRST so the browser tears down the MJPEG
+        // connection, then tell the backend to kill rpicam-vid.
+        const img = document.getElementById('cal_feed_img');
+        if (img) img.src = '';
+        const stack = document.getElementById('cal_preview_stack');
+        if (stack) stack.classList.remove('feed-active');
+        this.active = false;
+        this.setStatus('Stopped');
+        await fetch('/calibration_feed/stop', { method: 'POST' });
+    },
+};
+
 const calibration = {
     // Tracks whether *this* page's UI has initiated a task.
     // Different from the global isEngineRunning (which fires for ANY
@@ -1546,6 +1608,9 @@ const calibration = {
 
     // Gate all calibration buttons (including WB) while anytask runs.
     setButtonsEnabled(enabled) {
+        // A measurement is starting whenever we disable the buttons. It uses
+        // the camera, so release the framing feed first (single-owner sensor).
+        if (!enabled && typeof framing !== 'undefined') framing.stopFeed();
         ['cal_single_btn', 'cal_acb_btn', 'cal_wb_btn'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.disabled = !enabled;
@@ -1914,7 +1979,8 @@ const calibration = {
 // near the bottom of the body, so DOMContentLoaded has typically
 // already fired by the time main.js executes - we handle both cases.
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => calibration.init());
+document.addEventListener('DOMContentLoaded', () => { calibration.init(); framing.init(); });
 } else {
     calibration.init();
+    framing.init();
 }
