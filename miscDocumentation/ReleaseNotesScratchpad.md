@@ -1,7 +1,33 @@
 # V0.13.0 (YYYYMMDD)
 ## Added: 
 ### Restored the IP output for the idle screen
-This one has been missed for a while. The idle screen used to show the IP and Port for the WebGUI. Now it's back. 
+This one has been missed for a while. The idle screen used to show the IP and Port for the WebGUI. Now it's back.
+
+### Rearranged the placement of the mags in the GUI
+To make the sidebar on the main page less greedy in vertical space. I moved the sections for the mags up abobe the preview. As a bonus, this also sets things up for the big wood grain makeover I have planned where I make the whole VOP look and feel more like an Optical Printer visually. 
+
+### Frame counters for all the mags.
+Added a neat little frame counter so that both when probing and when executing a job. I can see which frame is loaded at which gate. Mostly as a fun visual touch, but also as a way to decode if the step-printing is out of wack.  
+
+It's formatted like: ``####/####`` where ``####/`` is the current frame in the gate and ``/####`` is the total number of frames in the gate.
+
+The number is four digits. 0001-9999 because, right now, the step printer logic is limited to 9999 frames. in 24 fps playback speed, that's 6 minutes, 56 seconds and 15 frames. Should be enough for most shots. Please let me know if this is too limiting. But remember that upping thte limit to 5 digits means ten times the storage space requirements... per mag. and ten times the job length in time. 
+
+#### Stages for frame counters:
+The step printers have three stages depending on what is loaded. 
+
+- ``----/----`` - means the mag is empty and nothing is loaded
+- ``0000/0000`` - means that a lone image is loaded and is treated as a still image. No step printing available.
+- ``0001-9999/0001-9999`` - this means a video has been ingested and transcoded to a tiff sequence that can be used with step printing.
+
+### Font choice
+To make the counters stand out and look plain cool I decided to use a segmented display font found here:
+https://github.com/keshikan/DSEG
+
+Read more about the font here:
+https://www.keshikan.net/fonts-e.html
+
+I claim no ownership of the font. I just find it neat. :)
 
 
 ## Changed:
@@ -18,3 +44,4 @@ Simply because those are calibration steps.
 - Cleaned up a little inline css codes. 
 - #140 - not actionable here either. 
 - #141 - the whole standalone idle_screen.py is no more already. Nothing to do here.
+- When frame counter was added. Its using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.
