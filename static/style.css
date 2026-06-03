@@ -364,6 +364,49 @@ body {
 .cal-preview-stack.feed-active #cal_feed_img  { display: block; }
 .cal-preview-stack.feed-active #cal_probe_img { display: none;  }
 
+/* Framing overlay (issue #198, Slice 3). Fills the stack; its SVG content
+ * auto-letterboxes to coincide with the feed image. Hidden until framing
+ * is active. pointer-events:none so the overlay never swallows clicks -
+ * right-click -> "open feed in new tab" keeps working through it. */
+.cal-feed-overlay {
+    position:           absolute;
+    top:                0;
+    left:               0;
+    width:              100%;
+    height:             100%;
+    pointer-events:     none;
+    display:            none;
+}
+.cal-preview-stack.feed-active .cal-feed-overlay { display: block; }
+
+/* Faint dashed outline of where the projection monitor SHOULD sit in the
+ * sensor frame (full sensor width, centred band per the framing
+ * convention). Helps eyeball the panel edges as well as the corners. */
+.cal-content-outline {
+    fill:               none;
+    stroke:             rgba(255, 255, 255, 0.35);
+    stroke-width:       1;
+    stroke-dasharray:   6 6;
+    vector-effect:      non-scaling-stroke;
+}
+
+/* The four corner target boxes the operator aligns the on-screen
+ * crosshairs into. Uses the UI accent (#0ad) - swap the colour here if it
+ * doesn't pop enough against your panel content. */
+.cal-target-box {
+    fill:               none;
+    stroke:             var(--color-accent);
+    stroke-width:       2;
+    vector-effect:      non-scaling-stroke;
+}
+
+/* Small centre cross inside each box for precise targeting. */
+.cal-target-tick {
+    stroke:             var(--color-accent);
+    stroke-width:       2;
+    vector-effect:      non-scaling-stroke;
+}
+
 /* Status row inside the Peak White group box.
  * "Status: Ready" / "Status: Measuring" indicator. */
 .cal-status-row {

@@ -1541,6 +1541,10 @@ const framing = {
         if (img) img.src = '/calibration_feed?t=' + Date.now();
         const stack = document.getElementById('cal_preview_stack');
         if (stack) stack.classList.add('feed-active');
+        // Draw/refresh the aspect-aware corner boxes for the current panel.
+        // Fire-and-forget: the overlay appears a beat after the feed, which
+        // is fine - the feed is what the operator looks at first anyway.
+        this.refreshOverlay();
         this.active = true;
         this.setStatus('Live');
         // Turn on the on-screen alignment/focus targets so they appear on
@@ -1563,6 +1567,105 @@ const framing = {
         // Drop the on-screen targets too; the idle loop returns to the logo.
         fetch('/calibration_targets/off', { method: 'POST' });
         await fetch('/calibration_feed/stop', { method: 'POST' });
+    },
+
+    // Draw the aspect-aware corner boxes onto the SVG overlay. Fetches the
+    // panel + sensor dimensions, works out where the projection monitor sits
+    // inside the 4:3 sensor frame (the "content rect" - same geometry vop.py
+    // uses for Cam Mag ingest), and places a target box at each 10%-inset
+    // corner: exactly where the on-screen crosshairs land when the camera is
+    // squared up. We only ever work in sensor-pixel units; the SVG's
+    // preserveAspectRatio handles every bit of letterbox scaling for us.
+    async refreshOverlay() {
+        const svg = document.getElementById('cal_feed_overlay');
+        if (!svg) return;
+
+        let info;
+        try {
+            const r = await fetch('/display_info');
+            info = await r.json();
+        } catch (e) {
+            return;   // show no overlay rather than a wrong one
+        }
+
+        const camW = info.cam_w, camH = info.cam_h;
+        const monW = info.monitor_w, monH = info.monitor_h;
+        const camAspect = camW / camH;     // ~1.333 (the sensor / the feed)
+        const monAspect = monW / monH;     // e.g. 1.5 for the 3:2 panel
+
+        // viewBox = the actual sensor, so our pixel-unit geometry below maps
+        // 1:1 onto the feed image.
+        svg.setAttribute('viewBox', `0 0 ${camW} ${camH}`);
+
+        // Content rect = largest monitor-aspect rectangle that fits the
+        // sensor, matched to sensor WIDTH and centred (the framing
+        // convention). fw/fh = its size as fractions of the sensor; cx0/cy0
+        // = its top-left, also fractional.
+        let fw, fh, cx0, cy0;
+        if (monAspect >= camAspect) {
+            // Panel wider than the sensor (16:9, 3:2): spans full width,
+            // centred vertical band with black bars top/bottom.
+            fw = 1.0;
+            fh = camAspect / monAspect;
+            cx0 = 0.0;
+            cy0 = (1.0 - fh) / 2.0;
+        } else {
+            // Panel narrower than the sensor: spans full height, pillarboxed.
+            fh = 1.0;
+            fw = monAspect / camAspect;
+            cy0 = 0.0;
+            cx0 = (1.0 - fw) / 2.0;
+        }
+
+        const inset = 0.10;   // must match the 10% inset baked into the shader
+        const xs = [cx0 + inset * fw, cx0 + (1.0 - inset) * fw];
+        const ys = [cy0 + inset * fh, cy0 + (1.0 - inset) * fh];
+
+        const box  = 0.05 * camW;   // box side: 5% of sensor width (square, px)
+        const half = box / 2.0;
+        const tick = box * 0.25;    // centre-cross arm length
+
+        // Rebuild from scratch each call (idempotent). createElementNS is
+        // mandatory for SVG - createElement makes inert HTML nodes that never
+        // render inside an <svg>.
+        const NS = 'http://www.w3.org/2000/svg';
+        svg.replaceChildren();
+
+        // Faint outline of the whole content rect (expected panel edges).
+        const outline = document.createElementNS(NS, 'rect');
+        outline.setAttribute('class', 'cal-content-outline');
+        outline.setAttribute('x', cx0 * camW);
+        outline.setAttribute('y', cy0 * camH);
+        outline.setAttribute('width', fw * camW);
+        outline.setAttribute('height', fh * camH);
+        svg.appendChild(outline);
+
+        // Four corner boxes, each with a small centre cross.
+        for (const nx of xs) {
+            for (const ny of ys) {
+                const px = nx * camW, py = ny * camH;
+
+                const rect = document.createElementNS(NS, 'rect');
+                rect.setAttribute('class', 'cal-target-box');
+                rect.setAttribute('x', px - half);
+                rect.setAttribute('y', py - half);
+                rect.setAttribute('width', box);
+                rect.setAttribute('height', box);
+                svg.appendChild(rect);
+
+                const hLine = document.createElementNS(NS, 'line');
+                hLine.setAttribute('class', 'cal-target-tick');
+                hLine.setAttribute('x1', px - tick); hLine.setAttribute('y1', py);
+                hLine.setAttribute('x2', px + tick); hLine.setAttribute('y2', py);
+                svg.appendChild(hLine);
+
+                const vLine = document.createElementNS(NS, 'line');
+                vLine.setAttribute('class', 'cal-target-tick');
+                vLine.setAttribute('x1', px); vLine.setAttribute('y1', py - tick);
+                vLine.setAttribute('x2', px); vLine.setAttribute('y2', py + tick);
+                svg.appendChild(vLine);
+            }
+        }
     },
 };
 

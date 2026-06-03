@@ -55,6 +55,16 @@ No JS event handlers here - those are wired up by slice 7 in main.js.
     <div class="cal-preview-stack" id="cal_preview_stack">
         <img id="cal_probe_img" alt="Calibration Capture Preview">
         <img id="cal_feed_img" alt="Live Framing Feed">
+        <!-- Aspect-aware framing overlay (issue #198, Slice 3).
+             preserveAspectRatio="xMidYMid meet" letterboxes the viewBox the
+             SAME way the feed <img>'s object-fit:contain does, so boxes drawn
+             in viewBox units (sensor pixels) line up with the camera image at
+             any window size - no JS resize math. main.js sets the real viewBox
+             (from the sensor dims) and positions the corner boxes from the
+             panel aspect. Placed last in the stack so it layers on top. -->
+        <svg id="cal_feed_overlay" class="cal-feed-overlay"
+             viewBox="0 0 2028 1520" preserveAspectRatio="xMidYMid meet"
+             aria-hidden="true"></svg>
     </div>
 </div>
 

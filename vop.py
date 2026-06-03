@@ -1219,6 +1219,23 @@ def calibration_targets_off():
         pass
     return jsonify({"status": "off"})
 
+@app.route('/display_info', methods=['GET'])
+def display_info():
+    # Panel + sensor dimensions for the framing overlay (issue #198, Slice 3).
+    # The frontend uses the PANEL aspect to place the corner target boxes
+    # where the on-screen crosshairs land in the sensor frame, and the SENSOR
+    # dims to size the SVG viewBox 1:1 with the feed. get_display_size() reads
+    # the engine's EDID-published resolution (cached after first call); cam_w/
+    # cam_h come from the feed module so the viewBox always tracks the actual
+    # stream resolution even if we retune it later.
+    w, h = get_display_size()
+    return jsonify({
+        "monitor_w": w,
+        "monitor_h": h,
+        "cam_w": camera_feed.FEED_WIDTH,
+        "cam_h": camera_feed.FEED_HEIGHT,
+    })
+
 @app.route('/cam_probe', methods=['POST'])
 def cam_probe():
     """
