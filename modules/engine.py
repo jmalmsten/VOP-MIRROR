@@ -62,6 +62,12 @@ os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 # The IPC command file written by vop.py
 COMMAND_FILE = "/tmp/vop_cmd.json"
 
+# Sentinel polled by the idle loop (issue #198). While this file exists,
+# the projection monitor shows the framing/focus targets instead of the
+# bouncing logo. Same /tmp on-disk-IPC paradigm as COMMAND_FILE. vop.py
+# defines the identical path on its side - keep the two in sync.
+CAL_TARGETS_FILE = "/tmp/vop_cal_targets"
+
 def handle_sigterm(signum, frame):
     """
     Catches the Kill signal (sent when the VOP service restarts or stops).
@@ -261,6 +267,11 @@ def run_persistent_engine():
         screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
     
     ctx, prog, vao = gfx.init_render_pipeline()
+
+    # Calibration framing/focus targets (issue #198): its own program +
+    # fullscreen quad, drawn in the idle branch while CAL_TARGETS_FILE
+    # exists. Separate from prog/vao so it can't disturb the main pipeline.
+    cal_prog, cal_vao = gfx.init_calibration_targets(ctx)
 
     # Pre-allocate off-screen Framebuffer Objects (FBOs) for the BiPack masks.
     # One FBO per bipack layer so they render independently before being
@@ -2606,6 +2617,32 @@ def run_persistent_engine():
             # same branch and rely on this clear too.
             ctx.screen.use()
             ctx.clear(0.0, 0.0, 0.0, 1.0)
+
+            # --- CALIBRATION TARGETS MODE (issue #198) ---
+            # While the framing tool is active, vop.py drops CAL_TARGETS_FILE.
+            # As long as it exists we draw the alignment/focus targets instead
+            # of the bouncing logo, so the operator - watching the live feed -
+            # can square the camera to the panel and dial in focus.
+            #
+            # This is a DISPLAY mode only; it never touches the camera, so the
+            # rpicam-vid feed keeps running right alongside it (the whole point
+            # is that you see these targets THROUGH the feed).
+            #
+            # We render, flip, throttle, then `continue` so the logo/IP block
+            # below is skipped entirely while targets are showing.
+            if os.path.exists(CAL_TARGETS_FILE):
+                # Opaque procedural geometry on a freshly-cleared black frame,
+                # so no alpha compositing is wanted. The exposure path can
+                # leave BLEND enabled on a multiplicative func; disabling it
+                # here guarantees the crosshairs/moire draw at full strength.
+                ctx.disable(moderngl.BLEND)
+                # Panel aspect -> circular centre target on 3:2 / 16:9 panels.
+                # float() guards against any chance of integer division.
+                cal_prog['u_aspect'].value = WIDTH / float(HEIGHT)
+                cal_vao.render(moderngl.TRIANGLE_STRIP)
+                pygame.display.flip()
+                time.sleep(1 / 60)   # same 60fps throttle as the logo path
+                continue
 
             # --- IDLE-SCREEN ALPHA BLENDING ---
             # The logo and IP textures are straight-alpha RGBA surfaces

@@ -1543,6 +1543,11 @@ const framing = {
         if (stack) stack.classList.add('feed-active');
         this.active = true;
         this.setStatus('Live');
+        // Turn on the on-screen alignment/focus targets so they appear on
+        // the projection monitor - visible through the feed you just
+        // started. Independent of the camera (display-only), so this rides
+        // alongside the live feed rather than competing for the sensor.
+        fetch('/calibration_targets/on', { method: 'POST' });
     },
 
     async stopFeed() {
@@ -1555,6 +1560,8 @@ const framing = {
         if (stack) stack.classList.remove('feed-active');
         this.active = false;
         this.setStatus('Stopped');
+        // Drop the on-screen targets too; the idle loop returns to the logo.
+        fetch('/calibration_targets/off', { method: 'POST' });
         await fetch('/calibration_feed/stop', { method: 'POST' });
     },
 };

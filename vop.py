@@ -74,6 +74,11 @@ CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 # The Flask server writes JSON payloads here; engine.py polls this file to execute commands
 COMMAND_FILE = "/tmp/vop_cmd.json" 
 
+# Sentinel the engine's idle loop polls to show the framing/focus targets
+# (issue #198). The two routes below create/remove it. MUST match the path
+# CAL_TARGETS_FILE in modules/engine.py.
+CAL_TARGETS_FILE = "/tmp/vop_cal_targets"
+
 VOP_VERSION ="0.10.0"
 
 # Initialize required directory structure on boot if missing
@@ -1192,6 +1197,27 @@ def calibration_feed_stop():
     # from the Calibration page). Releases the camera immediately.
     camera_feed.stop_feed()
     return jsonify({"status": "stopped"})
+
+@app.route('/calibration_targets/on', methods=['POST'])
+def calibration_targets_on():
+    # Drop the sentinel the engine's idle loop polls. While it exists the
+    # projection monitor shows the framing/focus targets instead of the
+    # idle logo. Deliberately NOT routed through dispatch_engine: that stops
+    # the camera, but targets are display-only and must run alongside the
+    # live feed. open()/close() just touches the file into existence.
+    open(CAL_TARGETS_FILE, 'w').close()
+    return jsonify({"status": "on"})
+
+@app.route('/calibration_targets/off', methods=['POST'])
+def calibration_targets_off():
+    # Remove the sentinel; the idle loop falls back to the bouncing logo on
+    # its next frame. FileNotFoundError is fine - "off" is the goal state,
+    # so a double-off (or off before any on) is a harmless no-op.
+    try:
+        os.remove(CAL_TARGETS_FILE)
+    except FileNotFoundError:
+        pass
+    return jsonify({"status": "off"})
 
 @app.route('/cam_probe', methods=['POST'])
 def cam_probe():
