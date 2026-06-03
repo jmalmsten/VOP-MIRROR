@@ -2591,8 +2591,20 @@ def run_persistent_engine():
             if idle_x <= -0.8 or idle_x >= 0.8: idle_dx *= -1
             if idle_y <= -0.6 or idle_y >= 0.6: idle_dy *= -1
 
-            ctx.screen.use()
-            ctx.clear(0.0, 0.0, 0.0, 1.0)
+            # --- IDLE-SCREEN ALPHA BLENDING ---
+            # The logo and IP textures are straight-alpha RGBA surfaces
+            # (pygame's tostring("RGBA") gives non-premultiplied alpha).
+            # Without blending, the GPU writes RGB and discards alpha, so a
+            # texture whose transparent pixels carry white RGB (which is
+            # exactly what font.render produces) paints as a solid white box.
+            # Enabling SRC_ALPHA / ONE_MINUS_SRC_ALPHA makes alpha=0 pixels
+            # contribute nothing, so only the glyphs (and logo marks) show.
+            ctx.enable(moderngl.BLEND)
+            # blend_func MUST be set explicitly here: the exposure path leaves
+            # it at (DST_COLOR, ZERO) for its multiplicative pass and never
+            # resets it, so we'd otherwise inherit that multiply and the text
+            # would vanish against the black screen after the first job runs.
+            ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
 
             mvp = np.eye(4, dtype='f4')
             # The trailing divisor is the SCREEN aspect, used to counter the
