@@ -124,6 +124,56 @@ def validate_black_clip(raw_clip):
     
     return val
 
+def build_ip_texture(ctx, base_font=None):
+    """
+    Builds a GPU texture containing the 'IP:port' string for the idle
+    screen, read from the JSON vop.py publishes at /tmp/vop_ip.json.
+
+    Returns (texture, aspect_ratio). On any failure - file missing,
+    font error, malformed JSON - returns (None, 1.0) so the caller can
+    simply skip rendering the IP quad this round and retry later. This
+    matters at boot: the engine may come up before vop.py has written
+    the file, so a missing file is an expected transient, not an error.
+
+    The surface is vertically flipped before upload for the same reason
+    the logo is (see branding.png load) - pygame's surface origin is
+    top-left, OpenGL's texture origin is bottom-left.
+    """
+    try:
+        with open("/tmp/vop_ip.json", 'r') as f:
+            info = json.load(f)
+        # Compose the address the user types into their browser.
+        text = f"http://{info['ip']}:{info['port']}"
+    except (OSError, ValueError, KeyError):
+        # File not there yet (engine booted first) or malformed.
+        # Caller will retry on the next refresh tick.
+        return (None, 1.0)
+
+    try:
+        # font.init() is cheap and idempotent. We call it here rather
+        # than assuming pygame.init() brought the font submodule up,
+        # because that isn't guaranteed on every pygame build.
+        if not pygame.font.get_init():
+            pygame.font.init()
+
+        # SysFont(None, ...) picks pygame's built-in default font, so we
+        # don't depend on any specific TTF being installed on the Pi.
+        # Size is in points; 48 renders crisply when scaled down to the
+        # small idle-screen quad. White text on a transparent ground so
+        # only the glyphs show against the black idle screen.
+        font = base_font or pygame.font.SysFont(None, 48)
+        surf = font.render(text, True, (255, 255, 255), None)
+        surf = pygame.transform.flip(surf, False, True)
+
+        w, h = surf.get_size()
+        data = pygame.image.tostring(surf, "RGBA", False)
+        tex = ctx.texture((w, h), 4, data)
+        return (tex, w / h)
+    except Exception:
+        # Any rendering/upload failure - skip the IP quad, don't crash
+        # the idle screen over a cosmetic element.
+        return (None, 1.0)
+
 def run_persistent_engine():
     """
     Main loop for the persistent GPU engine. It acquires the hardware lock once 
@@ -246,6 +296,15 @@ def run_persistent_engine():
     idle_x, idle_y = 0.0, 0.37
     idle_dx, idle_dy = 0.00225, 0.00215
 
+    # Idle-screen IP display (see build_ip_texture). Built once here;
+    # refreshed every IP_REFRESH_FRAMES in the idle loop so a DHCP
+    # address change is picked up without re-rendering text every frame.
+    # tex_ip may be None if vop.py hasn't published the IP yet - the
+    # render path handles that by simply not drawing the IP quad.
+    tex_ip, asp_ip = build_ip_texture(ctx)
+    ip_refresh_counter = 0
+    IP_REFRESH_FRAMES = 300   # ~5s at 60fps; cheap, catches DHCP changes
+
     # ---------------------------------------------------------
     # MAIN IPC LOOP
     # ---------------------------------------------------------
@@ -263,7 +322,7 @@ def run_persistent_engine():
                 time.sleep(0.016)
                 continue
 
-            task = job_data.get('type')
+            task = job_data.get('task')
 
             if task == 'panic':
                 log_audit("Panic received. Flushing command and returning to idle.")
@@ -1713,7 +1772,24 @@ def run_persistent_engine():
                     pygame.display.flip()
 
                     buf_f = "/tmp/vop_noise_buf.dng"
-                    cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0),
+                    # Capture the dark frame.
+                    #
+                    # The shutter argument must be plain total_ms - do NOT
+                    # add PRIME_WAIT_MS here. trigger_capture already bakes
+                    # the prime delay into rpicam-still's `-t` flag, and the
+                    # wait_for_sensor_prime() call below mirrors that same
+                    # delay on the Python side. The shutter we actually want
+                    # is total_ms (frame exposure + the 1000ms header/tail
+                    # pad) - the IDENTICAL integration time a real exposure
+                    # of this frame uses (the normal exposure path also
+                    # passes plain total_ms).
+                    #
+                    # The old code added PRIME_WAIT_MS, stretching the
+                    # shutter by 1.5s. Since sensor dark current grows
+                    # roughly linearly with integration time, that made the
+                    # reported noise floor correspond to a longer-than-
+                    # claimed exposure - i.e. overstated. (issue #187)
+                    cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0),
                                                   job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
                                                   job_data.get('cam_res', '2028x1520'))
                     hw.wait_for_sensor_prime()
@@ -1757,12 +1833,12 @@ def run_persistent_engine():
                     ctx.clear(1.0, 1.0, 1.0, 1.0)
                     pygame.display.flip()
 
-                    # Capture using the same trigger pattern as
-                    # measure_noise. PRIME_WAIT_MS is added by
-                    # trigger_capture's caller convention (the
-                    # measure_noise task adds it the same way) - this
-                    # accounts for libcamera's startup window before
-                    # the sensor is actually integrating photons.
+                    # Capture using the same trigger pattern as every
+                    # other calibration task: plain total_ms as the
+                    # shutter argument, with the sensor prime handled
+                    # separately by trigger_capture's `-t` flag and the
+                    # wait_for_sensor_prime() call below. Do NOT add
+                    # PRIME_WAIT_MS to the shutter (see issue #187).
                     buf_f = "/tmp/vop_peak_buf.dng"
                     cam_proc = hw.trigger_capture(
                         buf_f,
@@ -2385,7 +2461,26 @@ def run_persistent_engine():
                     pygame.display.flip()
 
                     buf_f = "/tmp/vop_hp_buf.dng"
-                    cam_proc = hw.trigger_capture(buf_f, total_ms + hw.PRIME_WAIT_MS, job_data.get('gain', 1.0),
+                    # Capture the dark frame for hot-pixel detection.
+                    #
+                    # Shutter argument is plain total_ms - do NOT add
+                    # PRIME_WAIT_MS. trigger_capture already bakes the prime
+                    # delay into rpicam-still's `-t` flag, and the
+                    # wait_for_sensor_prime() call below mirrors it on the
+                    # Python side. The integration time we want is total_ms
+                    # (frame exposure + the 1000ms header/tail pad) - the
+                    # same time a real exposure of this frame uses.
+                    #
+                    # The old code added PRIME_WAIT_MS, stretching the
+                    # shutter by 1.5s. For hot-pixel mapping that's not
+                    # merely a logged-vs-actual mismatch (as in #187's
+                    # noise floor): a longer dark frame lets MORE pixels
+                    # drift past the hot threshold, so we were mapping
+                    # pixels that only misbehave at exposures we never
+                    # actually shoot. Matching the real integration time
+                    # maps the pixels that are genuinely hot at the
+                    # exposures our jobs use. (sibling of issue #187)
+                    cam_proc = hw.trigger_capture(buf_f, total_ms, job_data.get('gain', 1.0),
                                                   job_data.get('awb_r', 1.0), job_data.get('awb_b', 1.0),
                                                   job_data.get('cam_res', '2028x1520'))
                     hw.wait_for_sensor_prime()
@@ -2494,10 +2589,22 @@ def run_persistent_engine():
             idle_y += idle_dy
             
             if idle_x <= -0.8 or idle_x >= 0.8: idle_dx *= -1
-            if idle_y <= -0.8 or idle_y >= 0.8: idle_dy *= -1
+            if idle_y <= -0.6 or idle_y >= 0.6: idle_dy *= -1
 
-            ctx.screen.use()
-            ctx.clear(0.0, 0.0, 0.0, 1.0)
+            # --- IDLE-SCREEN ALPHA BLENDING ---
+            # The logo and IP textures are straight-alpha RGBA surfaces
+            # (pygame's tostring("RGBA") gives non-premultiplied alpha).
+            # Without blending, the GPU writes RGB and discards alpha, so a
+            # texture whose transparent pixels carry white RGB (which is
+            # exactly what font.render produces) paints as a solid white box.
+            # Enabling SRC_ALPHA / ONE_MINUS_SRC_ALPHA makes alpha=0 pixels
+            # contribute nothing, so only the glyphs (and logo marks) show.
+            ctx.enable(moderngl.BLEND)
+            # blend_func MUST be set explicitly here: the exposure path leaves
+            # it at (DST_COLOR, ZERO) for its multiplicative pass and never
+            # resets it, so we'd otherwise inherit that multiply and the text
+            # would vanish against the black screen after the first job runs.
+            ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
 
             mvp = np.eye(4, dtype='f4')
             # The trailing divisor is the SCREEN aspect, used to counter the
@@ -2517,6 +2624,48 @@ def run_persistent_engine():
 
             tex_logo.use(0)
             vao.render(moderngl.TRIANGLE_STRIP)
+
+            # --- IDLE SCREEN IP DISPLAY ---
+            # Periodically rebuild the IP texture so a DHCP address
+            # change is eventually reflected. Cheap: only every
+            # IP_REFRESH_FRAMES, and build_ip_texture returns fast.
+            ip_refresh_counter += 1
+            if ip_refresh_counter >= IP_REFRESH_FRAMES:
+                ip_refresh_counter = 0
+                new_tex, new_asp = build_ip_texture(ctx)
+                # Only swap in a successful build. If the rebuild failed
+                # (e.g. file briefly unreadable) we keep showing the last
+                # good texture rather than blanking the address.
+                if new_tex is not None:
+                    if tex_ip is not None:
+                        tex_ip.release()   # free the old GPU texture
+                    tex_ip, asp_ip = new_tex, new_asp
+
+            # Render the IP quad below the logo, only if we have one.
+            if tex_ip is not None:
+                ip_mvp = np.eye(4, dtype='f4')
+                # Scale: smaller than the logo. 0.18 height vs the logo's
+                # 0.4. Width follows the text aspect, screen-aspect
+                # corrected exactly like the logo so it isn't stretched
+                # on non-square panels.
+                ip_h = 0.18
+                ip_mvp[0, 0] = ip_h * asp_ip / (WIDTH / HEIGHT)
+                ip_mvp[1, 1] = ip_h
+                # Position: locked to the logo's X, and offset below it
+                # in Y so it tracks the bounce rigidly. The 0.30 offset
+                # clears the logo (half its 0.4 height) plus a small gap.
+                ip_mvp[3, 0] = idle_x
+                ip_mvp[3, 1] = idle_y - 0.30
+
+                prog['mvp'].write(ip_mvp.tobytes())
+                # White, never monochrome-filtered - same treatment as
+                # the logo so a job's mono setting can't tint the address.
+                prog['filter_color'].write(np.array([1.0, 1.0, 1.0], dtype='f4'))
+                prog['mono_mode'].value = False
+
+                tex_ip.use(0)
+                vao.render(moderngl.TRIANGLE_STRIP)
+            # --- END IP DISPLAY ---
 
             pygame.display.flip()
             time.sleep(1 / 60) # Hardware throttle to prevent locking up the Pi 4

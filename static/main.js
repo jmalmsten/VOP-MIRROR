@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modeSelect.addEventListener('change', function(e) {
             currentMode = this.value;
             toggleSheetVisibility();
-            triggerSync();
+            saveJob();
         });
     }
 });
@@ -177,7 +177,7 @@ async function uploadFile(inputId, textId, endpoint) {
             }
         }
         
-        await triggerSync();
+        await saveJob();
     } catch(e) {
         console.error("Upload failed", e);
         textEl.value = 'UPLOAD FAILED';
@@ -185,10 +185,42 @@ async function uploadFile(inputId, textId, endpoint) {
 }    
     
 
-async function triggerSync() {
+/* Silent state save. POSTs the current DOM state to /save_job, which
+ * writes current_job.json to disk WITHOUT dispatching the engine.
+ *
+ * This is what every "input changed" handler now calls. Previously
+ * those handlers called triggerSync(), which fired /preview - the
+ * engine then queued a Proj Probe render every time the user typed
+ * a number, picked a dropdown, etc. That was the source of the
+ * "I pressed CAM VIEW but it ran a probe first" behavior: the probe
+ * was already queued from the input change a moment earlier.
+ *
+ * Auto-save of UI state is still preserved (it's how a phone/laptop/
+ * desktop can pick up where the other left off), but the visible
+ * preview only refreshes when the user explicitly asks for it via
+ * the PROJ PROBE / CAM VIEW / COMP VIEW buttons.
+ */
+async function saveJob() {
     local_sync_ts = Date.now();
-    await fetch('/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
-    document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+    await fetch('/save_job', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectParams())
+    });
+}
+
+/* Back-compat alias for triggerSync(). The codebase used to wire every
+ * input's onchange to this name, and some dynamically-added inputs
+ * (BRK / MDS keyframe rows, eventually anything still referencing it)
+ * may still call it. Rather than chase every call site at once, we
+ * point it at saveJob so anything we missed silently does the safe
+ * thing - save state, don't dispatch the engine.
+ *
+ * Marked for removal in a future cleanup pass once every reference
+ * in the tree is verifiably gone.
+ */
+async function triggerSync() {
+    return saveJob();
 }
 
 function collectParams() {
@@ -209,11 +241,31 @@ function collectParams() {
 }
 
 async function runTask(type) {
-    await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(collectParams())});
+    const params = collectParams();
+    await fetch(`/${type}`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(params)});
     // comp_preview writes to the same /static/probe_live.jpg as the
     // other two preview types, so it gets the same image-reload treatment.
     if (type === 'preview' || type === 'cam_preview' || type === 'comp_preview') {
         document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+
+        // Update the per-gate readouts to the frame these actions previewed.
+        // Unlike Cam Probe, these dispatch the engine asynchronously and return
+        // {"status":"started"} with no gate data, so we resolve the gates via
+        // the dedicated /gate_readout route using the SAME params we just sent.
+        // Without this the readout falls back to the idle /status value (frame
+        // 1) on the next poll - the "snaps to 0001" bug. Fire-and-forget; a
+        // failure just leaves the last-known numbers rather than throwing.
+        try {
+            const gr = await fetch('/gate_readout', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(params)
+            });
+            const gd = await gr.json();
+            if (gd && gd.gates) { setGateTotals(gd.gates); setGateCurrents(gd.gates); }
+        } catch (e) {
+            console.error("Gate readout update failed for " + type + ":", e);
+        }
     }
 }
 
@@ -229,7 +281,7 @@ async function runTask(type) {
  * fast and works even while the engine is busy with a long Execute job.
  */
 async function runCamProbe() {
-    await fetch('/cam_probe', {
+    const resp = await fetch('/cam_probe', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(collectParams())
@@ -237,6 +289,21 @@ async function runCamProbe() {
     // Cache-bust the preview image so the browser fetches the freshly
     // written JPG instead of serving the stale one.
     document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
+
+    // Update the per-gate readouts to the frame we just probed. The response
+    // carries where each gate's playhead lands for this frame; totals come
+    // through here too but the poll loop keeps those fresh regardless.
+    try {
+        const data = await resp.json();
+        if (data && data.gates) {
+            setGateTotals(data.gates);
+            setGateCurrents(data.gates);
+        }
+    } catch (e) {
+        // A probe with no JSON body (shouldn't happen) just leaves the
+        // readouts as-is rather than throwing in the click handler.
+        console.error("Cam Probe gate readout update failed:", e);
+    }
 }
 
 function panic() { 
@@ -265,7 +332,7 @@ function nukeProjMag() {
     if (confirm("This deletes whatever is in the Projector Magazine. Are you sure? This cannot be undone.")) {
         fetch('/nuke_proj_mag', {method: 'POST'});
         document.getElementById('image').value = '';
-        triggerSync();
+        saveJob();
     }
 }
 
@@ -273,7 +340,7 @@ function nukeProjBiPack1() {
     if (confirm("This deletes whatever is in Projector BiPack 1. Are you sure? This cannot be undone.")) {
         fetch('/nuke_proj_bipack1', {method: 'POST'});
         document.getElementById('bipack1_image').value = '';
-        triggerSync();
+        saveJob();
     }
 }
 
@@ -281,7 +348,7 @@ function nukeProjBiPack2() {
     if (confirm("This deletes whatever is in Projector BiPack 2. Are you sure? This cannot be undone.")) {
         fetch('/nuke_proj_bipack2', {method: 'POST'});
         document.getElementById('bipack2_image').value = '';
-        triggerSync();
+        saveJob();
     }
 }
 
@@ -347,7 +414,7 @@ async function calcFitScale(scaleId, fitZId, magType, mode = "fit") {
         if (fitData.status === 'ok') {
             document.getElementById(scaleId).value = fitData.scale.toFixed(4);
             console.log(`[VOP UI] ${magType.toUpperCase()} Scale ${mode.toUpperCase()} to: ${fitData.scale.toFixed(4)} (PAR ${parX}:${parY})`);
-            await triggerSync();
+            await saveJob();
         } else {
             console.error("Fit Calc Error:", fitData.message);
         }
@@ -636,7 +703,7 @@ function addBRKKeyframe() {
         <div><input type="color" id="brk_c${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
         <div><input type="color" id="brk_cg${idx}_hex" value="#ffffff" class="sheet-color-input"></div>
 
-        <div><button onclick="this.closest('.brk-keyframe-row').remove(); triggerSync();">×</button></div>
+        <div><button onclick="this.closest('.brk-keyframe-row').remove(); saveJob();">×</button></div>
     `;
 
     // Wire every input/select in the new row to triggerSync on change,
@@ -883,6 +950,65 @@ function reindexSSS() {
 
 function updateHex(el, targetId) { document.getElementById(targetId).value = el.value; triggerSync(); }
 
+// ---------------------------------------------------------------------------
+// Per-gate frame readouts (####/#### current/total in each mag box title).
+//
+// Two independent halves, updated from different sources so an idle /status
+// poll never clobbers a number you just probed:
+//   - TOTAL ("/####"): just a file count, refreshed every /status tick.
+//   - CURRENT ("####/"): the playhead. Moves only on a render heartbeat (live,
+//     1Hz) or a Cam Probe (when you scrub). Idle polls leave it alone.
+// We keep both in _gateState and re-render from it, rather than reading the
+// DOM back, so the two halves can be set at different times cleanly.
+// ---------------------------------------------------------------------------
+const _gateState = {
+    cam: { cur: 1, total: 0 }, pm:  { cur: 1, total: 0 },
+    bp1: { cur: 1, total: 0 }, bp2: { cur: 1, total: 0 },
+};
+
+// total 0 -> ----/---- (empty gate). total 1 -> 0000/0000 (a lone still: the
+// 0000 sentinel means "no sequence here"). total >= 2 -> the live counts, so
+// any digit in 0001-9999 tells you a TIFF sequence is loaded.
+function formatGateCount(cur, total) {
+    const pad = n => String(Math.max(0, n | 0)).padStart(4, '0');
+    if (!total || total <= 0) return '----/----';
+    if (total === 1)          return '0000/0000';
+    return `${pad(cur)}/${pad(total)}`;
+}
+
+function renderGate(key) {
+    // The readout span now holds two layers: a static .gf-ghost (the dim
+    // all-segments backdrop) and .gf-live (the lit value). Write only to the
+    // live layer - setting textContent on the span itself would delete the
+    // ghost child and break the LED look.
+    const el = document.getElementById('gate_' + key);
+    if (!el) return;
+    const live = el.querySelector('.gf-live');
+    if (live) live.textContent = formatGateCount(_gateState[key].cur, _gateState[key].total);
+}
+
+// Totals only - safe to call on every poll, idle or rendering.
+function setGateTotals(gates) {
+    if (!gates) return;
+    ['cam', 'pm', 'bp1', 'bp2'].forEach(k => {
+        if (gates[k] && typeof gates[k].total === 'number') {
+            _gateState[k].total = gates[k].total;
+            renderGate(k);
+        }
+    });
+}
+
+// Currents - call only from a render heartbeat or a probe response.
+function setGateCurrents(gates) {
+    if (!gates) return;
+    ['cam', 'pm', 'bp1', 'bp2'].forEach(k => {
+        if (gates[k] && typeof gates[k].cur === 'number') {
+            _gateState[k].cur = gates[k].cur;
+            renderGate(k);
+        }
+    });
+}
+
 setInterval(async () => {
     try {
         const r = await fetch('/status');
@@ -1008,6 +1134,14 @@ setInterval(async () => {
         _layerVisibilityFrames.bp1 = st.bp1_frames || 0;
         _layerVisibilityFrames.bp2 = st.bp2_frames || 0;
         refreshLayerVisibility();
+
+        // Gate readouts: totals every tick; currents only mid-render (when the
+        // heartbeat is driving them). At idle the currents are owned by the
+        // last Cam Probe, so we deliberately don't apply st.gates currents here.
+        setGateTotals(st.gates);
+        if (st.status === 'rendering') {
+            setGateCurrents(st.gates);
+        }
     } catch(e) { console.error("Poll Error:", e); }
 }, 1000);
 
@@ -1019,16 +1153,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropZone.style.border = "2px dashed #0cf";
+            // Add the drag-hover class instead of writing style.border
+            // inline - keeps styling in style.css (zero-inline-styles rule).
+            dropZone.classList.add('drag-hover');
         });
 
         dropZone.addEventListener('dragleave', (e) => {
             e.preventDefault();
-            dropZone.style.border = "";
+            dropZone.classList.remove('drag-hover');
         });
 
         dropZone.addEventListener('drop', async (e) => {
             e.preventDefault();
+            dropZone.classList.remove('drag-hover');
             dropZone.style.border = "";
             
             if (e.dataTransfer.files.length > 0) {

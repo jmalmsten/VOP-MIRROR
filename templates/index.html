@@ -31,8 +31,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>VOP v0.12</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.14">
+    <title>VOP v0.13</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.18">
 </head>
 <body>
     VOP &copy; 2026 jmalmsten. 
@@ -43,7 +43,7 @@
         
         <div class="vop-header">
             <!-- Page title -->
-            <h2>VOP v0.12.0</h2>
+            <h2>VOP v0.13.0</h2>
 
             <!-- Page navigation. Click to switch between Main
                  (job editor + status + xsheet) and Calibration
@@ -69,88 +69,30 @@
         <div id="page_main" class="page-section page-active">
             {% include 'sections/status.html' %}
 
-            <div class="preview-area">
-                <img id="probe_img" alt="Live Preview">
-            </div>
-
-            <div class="controls-area">
-                <div class="group-box">
-                    <div class="group-title">Camera</div>
-                    <div class="input-row">
-                        <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('preview')"></div>
-                        <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('preview')"></div>
-                        <!--
-                            To make it more easy to see what the DRE steps in DRE mode are doing
-                            we have here a little checkbox that enables the probe system to check
-                            what the DRE step does at a particular subframe and shows it like it
-                            would with normal smear jobs. The input logic stays the same. It's a
-                            float between 0.0 and 1.0 and it chooses the DRE step that's closest
-                            to the float value.
-
-                            Normally, this checkbox is hidden and only becomes visible when DRE
-                            mode is active. 
-                        -->
-                        <div class="c-box dre-probe-controls" id="dre_probe_controls"
-                                            title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
-                            <label>DRE</label>
-                            <input type="checkbox" id="probe_dre" onchange="runTask('preview')">
-                        </div>
-                        <!--
-                            BRK probe toggle. Parallel to the DRE one above.
-                            When ON (in BRK mode), Proj Probe shows ONE
-                            bracket's slice-remap on the projection monitor -
-                            the Sub (0-1.0) field picks which bracket
-                            (0.0 = peak / brightest slice, 1.0 = deepest /
-                            darkest slice). When OFF, Proj Probe shows the raw
-                            composite with no slice remap.
-
-                            Hidden unless BRK mode is active. Visibility is
-                            driven by the body.brk-mode class via the
-                            .brk-probe-controls rule in static/style.css -
-                            no inline styles, matching the .brk-constants
-                            pattern used for the sheet-header settings.
-                        -->
-                        <div class="c-box brk-probe-controls" id="brk_probe_controls"
-                                            title="BRK Mode only. When ON, Proj Probe shows one bracket's slice on the projection monitor; the Sub (0-1.0) field picks which bracket (0.0 = peak, 1.0 = deepest). When OFF, shows the raw composite.">
-                            <label>BRK</label>
-                            <input type="checkbox" id="probe_brk" onchange="runTask('preview')">
-                        </div>
-                    </div>
-                    <div class="probe-controls spaced">
-                        <!-- 2x2 grid of probe / preview buttons.
-                            Row 1: Proj Probe (HDMI screen) | Cam Probe (latent in CamMag)
-                            Row 2: Cam View   (smear only)  | Comp View (smear + composite)
-                            The wrapper div is needed because the surrounding .probe-controls
-                            also holds the <hr> and Execute button which must NOT be part of
-                            the grid. CSS for .probe-grid lives in static/style.css. -->
-                        <div class="probe-grid">
-                            <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
-                            <button class="action-btn cam_probe" onclick="runCamProbe()" title="Show the existing latent TIFF for this frame from the CamMag. Doesn't touch anything.">Cam Probe</button>
-                            <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
-                            <button class="action-btn comp_preview" onclick="runTask('comp_preview')" title="Like Cam View, but composited on top of the existing latent for this frame. Does not commit.">Comp View</button>
-                        </div>
-                        <hr class="section-divider">
-                        <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
-                        <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
-                    </div>
-                </div>
-
+            <!-- Mag / BiPack row.
+                 The four film-path boxes (Cam Mag, Projection Mag, and the
+                 two Projection BiPacks) used to stack vertically inside the
+                 right-hand .controls-area sidebar. They were lifted out into
+                 this full-width horizontal row so the sidebar shrinks to just
+                 Camera + Hardware Constants, freeing vertical space for the
+                 Exposure Sheet below. Layout is a 4-column grid (.mags-row);
+                 each child stays a plain .group-box. -->
+            <div class="mags-row">
                 <!-- Cam Mag block.
-                     Sits between the Camera section (probe/preview/execute
-                     controls above) and the Projection Mag section (active
-                     image and projection geometry below). The Cam Mag is the
+                     First box in the horizontal Mag / BiPack row, sitting
+                     left of Projection Mag and the two BiPacks. The Cam Mag is the
                      destination for both exposure runs (Execute Sequence
                      writes here frame by frame) and direct ingest (the
                      UPLOAD button below ffmpegs a ProRes/etc. reel into
                      latent_NNNN.tif sequence here, ready for further LIME
                      passes from the camera).
-                     
+                 
                      Frame range is capped server-side at 9999 frames because
                      the latent filename pattern is 4-digit %04d. The error
                      message from /upload_cam_mag explains the limit if hit.
                 -->
                 <div class="group-box">
-                    <div class="group-title">Cam Mag</div>
+                    <div class="group-title">Cam Mag<span class="gate-frames" id="gate_cam"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <!-- Plain .c-box rather than .c-box.layer-vis-box.
                              The .layer-vis-box modifier turns the container
@@ -195,7 +137,7 @@
                 </div>
 
                 <div class="group-box">
-                    <div class="group-title">Projection Mag</div>
+                    <div class="group-title">Projection Mag<span class="gate-frames" id="gate_pm"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <div class="c-box layer-vis-box">
                             <label>Active Image</label>
@@ -219,7 +161,7 @@
                 </div>
 
                 <div class="group-box bipack bipack1">
-                    <div class="group-title">Projection BiPack 1</div>
+                    <div class="group-title">Projection BiPack 1<span class="gate-frames" id="gate_bp1"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <div class="c-box layer-vis-box">
                             <label>Active BiPack 1</label>
@@ -243,7 +185,7 @@
                 </div>
 
                 <div class="group-box bipack bipack2">
-                    <div class="group-title">Projection BiPack 2</div>
+                    <div class="group-title">Projection BiPack 2<span class="gate-frames" id="gate_bp2"><span class="gf-ghost">8888/8888</span><span class="gf-live">----/----</span></span></div>
                     <div class="upload-cluster">
                         <div class="c-box layer-vis-box">
                             <label>Active BiPack 2</label>
@@ -265,6 +207,73 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div class="preview-area">
+                <img id="probe_img" alt="Live Preview">
+            </div>
+
+            <div class="controls-area">
+                <div class="group-box">
+                    <div class="group-title">Camera</div>
+                    <div class="input-row">
+                        <div class="c-box"><label>Frame</label><input type="number" id="probe_frame" value="1" onchange="runTask('saveJob()')"></div>
+                        <div class="c-box"><label>Sub (0-1.0)</label><input type="number" step="0.01" id="probe_sub" value="0.5" onchange="runTask('saveJob()')"></div>
+                        <!--
+                            To make it more easy to see what the DRE steps in DRE mode are doing
+                            we have here a little checkbox that enables the probe system to check
+                            what the DRE step does at a particular subframe and shows it like it
+                            would with normal smear jobs. The input logic stays the same. It's a
+                            float between 0.0 and 1.0 and it chooses the DRE step that's closest
+                            to the float value.
+
+                            Normally, this checkbox is hidden and only becomes visible when DRE
+                            mode is active. 
+                        -->
+                        <div class="c-box dre-probe-controls" id="dre_probe_controls"
+                                            title="DRE Mode only. When ON, Proj Probe shows DRE step number int(Sub * dre_steps) of the sequencer for the current frame. When OFF, shows the raw PM source.">
+                            <label>DRE</label>
+                            <input type="checkbox" id="probe_dre" onchange="runTask('saveJob()')">
+                        </div>
+                        <!--
+                            BRK probe toggle. Parallel to the DRE one above.
+                            When ON (in BRK mode), Proj Probe shows ONE
+                            bracket's slice-remap on the projection monitor -
+                            the Sub (0-1.0) field picks which bracket
+                            (0.0 = peak / brightest slice, 1.0 = deepest /
+                            darkest slice). When OFF, Proj Probe shows the raw
+                            composite with no slice remap.
+
+                            Hidden unless BRK mode is active. Visibility is
+                            driven by the body.brk-mode class via the
+                            .brk-probe-controls rule in static/style.css -
+                            no inline styles, matching the .brk-constants
+                            pattern used for the sheet-header settings.
+                        -->
+                        <div class="c-box brk-probe-controls" id="brk_probe_controls"
+                                            title="BRK Mode only. When ON, Proj Probe shows one bracket's slice on the projection monitor; the Sub (0-1.0) field picks which bracket (0.0 = peak, 1.0 = deepest). When OFF, shows the raw composite.">
+                            <label>BRK</label>
+                            <input type="checkbox" id="probe_brk" onchange="runTask('saveJob()')">
+                        </div>
+                    </div>
+                    <div class="probe-controls spaced">
+                        <!-- 2x2 grid of probe / preview buttons.
+                            Row 1: Proj Probe (HDMI screen) | Cam Probe (latent in CamMag)
+                            Row 2: Cam View   (smear only)  | Comp View (smear + composite)
+                            The wrapper div is needed because the surrounding .probe-controls
+                            also holds the <hr> and Execute button which must NOT be part of
+                            the grid. CSS for .probe-grid lives in static/style.css. -->
+                        <div class="probe-grid">
+                            <button class="action-btn" onclick="runTask('preview')" title="Peak at what will be shown on the projection screen">Proj Probe</button>
+                            <button class="action-btn cam_probe" onclick="runCamProbe()" title="Show the existing latent TIFF for this frame from the CamMag. Doesn't touch anything.">Cam Probe</button>
+                            <button class="action-btn cam_preview" onclick="runTask('cam_preview')" title="Peak at what will be sent to the LIME system">Cam View</button>
+                            <button class="action-btn comp_preview" onclick="runTask('comp_preview')" title="Like Cam View, but composited on top of the existing latent for this frame. Does not commit.">Comp View</button>
+                        </div>
+                        <hr class="section-divider">
+                        <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
+                        <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
+                    </div>
+                </div>
 
                 <div class="group-box">
                     <div class="group-title">Hardware Constants</div>
@@ -276,8 +285,8 @@
                         <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>
                         <div class="const-group"><label>AWB B</label><input id="awb_b" value="1.0"></div>
                         <div class="const-group"><label>Comp</label><select id="tiff_compression"><option value="zip">ZIP</option><option value="none">None</option></select></div>
-                        <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="triggerSync()"><option value="false">Color</option><option value="true">Mono</option></select></div>
-                        <div class="const-group"><label>Rotation Order</label><select id="rot_order" onchange="triggerSync()" title="Order in which the three Euler axes are applied. Read left-to-right: leftmost axis is applied first (innermost / local-axis spin), rightmost is applied last (outermost / dominant sweep). XYZ is the conventional default and matches the previous hardcoded behavior.">
+                        <div class="const-group"><label>Sensor Color</label><select id="mono_mode" onchange="saveJob()"><option value="false">Color</option><option value="true">Mono</option></select></div>
+                        <div class="const-group"><label>Rotation Order</label><select id="rot_order" onchange="saveJob()" title="Order in which the three Euler axes are applied. Read left-to-right: leftmost axis is applied first (innermost / local-axis spin), rightmost is applied last (outermost / dominant sweep). XYZ is the conventional default and matches the previous hardcoded behavior.">
                             <option value="XYZ" selected>XYZ (Pitch → Roll → Yaw)</option>
                             <option value="XZY">XZY (Pitch → Yaw → Roll)</option>
                             <option value="YXZ">YXZ (Roll → Pitch → Yaw)</option>
@@ -299,31 +308,14 @@
                             squeezed. -->
                         <div class="const-group crush-group par-group">
                             <label>PAR (anamorphics)</label>
-                            <input type="number" step="0.0001" id="par_x" value="1.0" onchange="triggerSync()" title="Pixel width component of PAR. PAR > 1 (e.g. 4:3 = 1.333) squeezes X. PAR < 1 squeezes Y.">
+                            <input type="number" step="0.0001" id="par_x" value="1.0" onchange="saveJob()" title="Pixel width component of PAR. PAR > 1 (e.g. 4:3 = 1.333) squeezes X. PAR < 1 squeezes Y.">
                             <span class="par-colon">:</span>
-                            <input type="number" step="0.0001" id="par_y" value="1.0" onchange="triggerSync()" title="Pixel height component of PAR.">
+                            <input type="number" step="0.0001" id="par_y" value="1.0" onchange="saveJob()" title="Pixel height component of PAR.">
                             <label class="par-preview-toggle" title="Show the unsqueezed image in the preview window only. The HDMI render and the captured latent TIFFs remain squeezed.">
-                                <input type="checkbox" id="preview_unsqueeze" onchange="triggerSync()">
+                                <input type="checkbox" id="preview_unsqueeze" onchange="saveJob()">
                                 Preview unsqueeze
                             </label>
                         </div>
-                        <hr class="section-divider">
-
-                        <div class="const-group crush-group">
-                            <label>Noise Crusher</label>
-                            <input type="number" step="0.0001" id="black_clip" value="0.0">
-                            <button class="mini-btn measure_noise" onclick="triggerMeasurement()">MEASURE</button>
-                            <span id="noise_result_txt"></span>
-                            <span id="black_clip_warning" class="validation-warning"></span>
-                        </div>
-                        <hr class="section-divider">
-                        <div class="const-group crush-group">
-                            <label>Defect Mapping</label>
-                            <button class="mini-btn" onclick="triggerHotPixelMap()">MAP PIXELS</button>
-                            <button class="mini-btn danger" onclick="nukeHotPixels()">NUKE MAP</button>
-                            <span id="hp_result_txt"></span>
-                        </div>
-                        <div></div>
                     </div>
                 </div>
             </div>
@@ -350,7 +342,7 @@
                     <div class="brk-sheet-settings brk-constants">
                         <div class="brk-setting">
                             <label>Bracket Count</label>
-                            <select id="bracket_count" onchange="triggerSync()" title="Number of bracketed captures per frame. Peak bracket maps source top to screen white; each shadow bracket maps a slice bracket_stops further down the source range.">
+                            <select id="bracket_count" onchange="saveJob()" title="Number of bracketed captures per frame. Peak bracket maps source top to screen white; each shadow bracket maps a slice bracket_stops further down the source range.">
                                 <option value="1">1 (Peak only)</option>
                                 <option value="2">2</option>
                                 <option value="3" selected>3 (default)</option>
@@ -362,7 +354,7 @@
                         </div>
                         <div class="brk-setting">
                             <label>Bracket Stops</label>
-                            <input type="number" id="bracket_stops" value="1.0" min="0.25" max="4.0" step="0.25" onchange="triggerSync()" title="Distance between brackets in photographic stops. 1 stop = factor of 2 in source space.">
+                            <input type="number" id="bracket_stops" value="1.0" min="0.25" max="4.0" step="0.25" onchange="saveJob()" title="Distance between brackets in photographic stops. 1 stop = factor of 2 in source space.">
                         </div>
                     </div>
                     <div class="mode-control">
@@ -421,7 +413,7 @@
         </div>
         {% include 'sections/cheat-sheet.html' %}
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=66"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=69"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling

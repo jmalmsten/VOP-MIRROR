@@ -1,33 +1,47 @@
-# V0.12.1 (YYYYMMDD)
-## Notes: 
+# V0.13.0 (YYYYMMDD)
 ## Added: 
-###  fixed ratio mismatch for Cam Mag ingest
-In order to get the camera's ingestion to match the PAR of the projection monitor, A change was done so that the ingested video matches the aspect ratio of the monitor while still fitting inside the camera resolution with a letterbox. And when the upload is done, the gui suggests the PAR that's needed to bring the final image back. This can then be applied by the user by simply clicking the suggestion. 
+### Restored the IP output for the idle screen
+This one has been missed for a while. The idle screen used to show the IP and Port for the WebGUI. Now it's back.
 
-### Other stuff
-The other stuff that has been added in the previous prereleases survived so check out those release notes. Wait. I never did releases for them. Well. here they are: 
+### Rearranged the placement of the mags in the GUI
+To make the sidebar on the main page less greedy in vertical space. I moved the sections for the mags up abobe the preview. As a bonus, this also sets things up for the big wood grain makeover I have planned where I make the whole VOP look and feel more like an Optical Printer visually. 
 
-### V0.12.0 Video ingestion for the Cam Mag
-In order to fascilitate an initial pass with full color fidelity, a function has been added to be able to feed the cam mag with a video file directly. Upon uploading, the VOP will generate a tiff sequence that matches the camera resolution. And then it will be there for regular LIME compositions. 
+### Frame counters for all the mags.
+Added a neat little frame counter so that both when probing and when executing a job. I can see which frame is loaded at which gate. Mostly as a fun visual touch, but also as a way to decode if the step-printing is out of wack.  
 
-#### V0.11.0 - Auto Whitebalance Measure.
-Now we finally have a tool in the VOP that does the white-balance more automatically (though the AWB-R and AWB-B will remain accessible in the GUI as a way to tweak outside of the "accountants truth"). How it works is simple. It first tries to find an exposure where middle grey is not in the noise floor and not having a channel clipped. Then it takes the middle section of the screen and does a measurement to see how far off from neutral middle grey it is. It applies what it thinks should be applied to the channel gains to get there. It fires off another exposure. Does a new measurement and loops through that until it reaches a satisfactorally amount of neutral grey. It then presents you with the results, the image of the latest VOP approved exposure and applies the values to the AWB-R and AWB-B in the main section.
+It's formatted like: ``####/####`` where ``####/`` is the current frame in the gate and ``/####`` is the total number of frames in the gate.
 
-#### V0.9.0 & V0.10.0 - HDR
-This update introduces the third mode alongside the SSS and MDS. The new one is HDR. It is here to be used with images and video footage exposures that don't need smears but do need higher degree of tonal detail. The SSS and MDS are limited to 8bpc and this HDR mode tries to extend this to the cameras full 12bpc range by not moving the image, instead, it animates the brightness values of the pixels so that over time, darker pixels go black and lighter pixels stay on to burn in more tonal detail. Until the end of the exposure sweep where the whole image goes dark. 
+The number is four digits. 0001-9999 because, right now, the step printer logic is limited to 9999 frames. in 24 fps playback speed, that's 6 minutes, 56 seconds and 15 frames. Should be enough for most shots. Please let me know if this is too limiting. But remember that upping thte limit to 5 digits means ten times the storage space requirements... per mag. and ten times the job length in time. 
 
-#### Calibration Page
-Added a second page that can be used for the calibration tools. For now, we only have added some initial measurement tools for the bracket mode.
+#### Stages for frame counters:
+The step printers have three stages depending on what is loaded. 
+
+- ``----/----`` - means the mag is empty and nothing is loaded
+- ``0000/0000`` - means that a lone image is loaded and is treated as a still image. No step printing available.
+- ``0001-9999/0001-9999`` - this means a video has been ingested and transcoded to a tiff sequence that can be used with step printing.
+
+### Font choice
+To make the counters stand out and look plain cool I decided to use a segmented display font found here:
+https://github.com/keshikan/DSEG
+
+Read more about the font here:
+https://www.keshikan.net/fonts-e.html
+
+I claim no ownership of the font. I just find it neat. :)
+
 
 ## Changed:
+### Rearranged the sections of the GUI
+In order to limit the vertical space used by the sidebar I moved the mags up as a horizontal line of sections. This is also in anticipation of the big wood-grain redesign that's coming later on.
 
-
-### Sheet survivability
-During debugging while adding bracket mode, it became apparent that we don't have to throw out the exposure sheet when switching modes. 
-
-### Made it clearer what's what in preview
-Until now, the preview was a bit ambiguous about where the image starts and ends when doing probes. This is made more clear now.
+### Moved Noise Crusher and Hot Pixel Mapper to the Calibration Page
+Simply because those are calibration steps. 
 
 ## Fixed: 
-### Incorrect fit and fill scale functions when non square PAR is used.
-At some point when we added the Anamorphic functionality, the fit and fill to FOV broke when the non square PAR is used (for anamorphic results). This should now be fixed.
+- #187 - corrected exposure time for noise measure and hot pixel mapping.
+- #186 - unified naming so type is now task in the python code and json. 
+- #142 - nothing left here to fix. so closed it.
+- Cleaned up a little inline css codes. 
+- #140 - not actionable here either. 
+- #141 - the whole standalone idle_screen.py is no more already. Nothing to do here.
+- When frame counter was added. Its using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.

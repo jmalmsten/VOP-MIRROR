@@ -47,13 +47,15 @@ PRIME_WAIT_MS = 1500
 # PRIME_WAIT_MS to this argument or you will get an exposure that is
 # 1.5 seconds longer than intended.
 #
-# Several pre-existing callers (measure_noise, the old engine code,
-# possibly others) do add PRIME_WAIT_MS here. That's a pre-existing
-# bug pattern: their captures are 1.5s longer than the audit log
-# claims. For measure_noise this is benign-ish (it just gives a
-# slightly higher noise-floor reading, which is conservative).
-# For ACB / single-peak-measurement and any future calibration
-# routine where exposure precision matters, do NOT add PRIME_WAIT_MS.
+# Historical note (issue #187): two callers - measure_noise and
+# map_hot_pixels - used to add PRIME_WAIT_MS to this argument,
+# stretching their dark frames by 1.5s. measure_noise's noise floor
+# was therefore measured at a longer-than-claimed integration time
+# and read overstated; map_hot_pixels surfaced extra pixels that only
+# go hot at exposures we never actually shoot. Both are fixed - every
+# current caller passes plain total_ms. The rule above (never add
+# PRIME_WAIT_MS to the shutter) is the standing convention; if you
+# add a new capture caller, follow it.
 
 def trigger_capture(output_path, total_ms, gain, awb_r, awb_b, resolution="2028x1520"):
     """

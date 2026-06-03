@@ -71,7 +71,12 @@ class Timeline:
         #   *_stp  : Signed integer. Number of gate frames to ADVANCE after each hold.
         #            Can be negative (reverse) or 0 (pause). The "y" in CAM:STP.
         self.tracks = {
-            'm': [], 'pos': [], 'rot': [], 
+            # 'm'   = per-keyframe interp mode: 'S' (smooth) or 'L' (linear).
+            # 'crn' = per-keyframe corner override (bool). When True, the
+            #         spline tangent at this keyframe is forced to zero on
+            #         both sides, producing a hard settle-and-pivot (sharp V)
+            #         instead of a rounded pass-through (smooth U). (issue #155)
+            'm': [], 'crn': [], 'pos': [], 'rot': [],
             # Per-bipack-layer spatial tracks. bp1_* replaces the old single-bipack 
             # 'bp_*' set; bp2_* is added for the new third optical layer.
             'bp1_pos': [], 'bp1_rot': [], 
@@ -246,6 +251,14 @@ class Timeline:
             
             # Extract Interpolation Mode (S = Smooth, L = Linear)
             self.tracks['m'].append({'f': f_val, 'val': job_data.get(f"{prefix}m{idx}", "S")})
+
+            # Corner override (issue #155). The frontend sends this as a
+            # boolean checkbox under {prefix}crn{idx}. We test membership
+            # rather than calling bool() directly because bool("false") is
+            # True in Python - a non-empty string is always truthy - which
+            # would silently invert the flag for any string-typed payload.
+            _crn_raw = job_data.get(f"{prefix}crn{idx}", False)
+            self.tracks['crn'].append({'f': f_val, 'val': _crn_raw in (True, 'true', 'True', 1, '1')})      
             
             self.tracks['pos'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}p{idx}", "0,0,-1.0"), -1.0)})
             self.tracks['rot'].append({'f': f_val, 'val': ensure_vec3(job_data.get(f"{prefix}r{idx}", "0,0,0"), 0.0)})
@@ -331,31 +344,108 @@ class Timeline:
                 return m_track[i]['val']
         return m_track[-1]['val']
 
+    def _is_corner(self, f_val):
+        """True if the keyframe at frame f_val carries the corner override.
+        Looked up by FRAME VALUE, not list index, so we never depend on the
+        'crn' track being index-aligned with the value tracks - the final
+        per-track sort in __init__ can reorder them independently. (issue #155)"""
+        for kf in self.tracks.get('crn', []):
+            if kf['f'] == f_val:
+                return bool(kf['val'])
+        return False
+
+    def _tangent(self, track, j, oklab=False):
+        """Centered finite-difference velocity (value-per-frame) at keyframe
+        index j of `track`. This is the tangent the Hermite blend uses to
+        carry momentum smoothly through an interior keyframe.
+
+        Returns a ZERO tangent (= ease to / from rest) when:
+          - j is the global first or last keyframe, or
+          - the keyframe is flagged as a corner.
+        Otherwise the centered difference (P[j+1]-P[j-1]) / (f[j+1]-f[j-1]),
+        which is correct for NON-UNIFORM frame spacing - textbook uniform
+        Catmull-Rom would overshoot when the gaps either side differ.
+
+        zero is shape-matched (vec3 vs scalar) via zeros_like so the same
+        code path serves pos/rot arrays and exp/sd/ph scalars alike. The
+        oklab flag converts neighbour colours into oklab first so colour
+        tangents are computed in the same space the colour blend happens in."""
+        n = len(track)
+        sample = track[j]['val']
+        zero = np.zeros_like(np.asarray(sample, dtype='f4')) if (oklab or np.ndim(sample)) else 0.0
+        if j == 0 or j == n - 1:
+            return zero
+        if self._is_corner(track[j]['f']):
+            return zero
+        p_prev = track[j-1]['val']
+        p_next = track[j+1]['val']
+        if oklab:
+            p_prev = linear_to_oklab(p_prev)
+            p_next = linear_to_oklab(p_next)
+        df = track[j+1]['f'] - track[j-1]['f']
+        if df == 0:
+            return zero   # coincident neighbours - avoid div-by-zero
+        return (p_next - p_prev) / df
+
     def _get_val(self, key, t, is_color=False):
         track = self.tracks.get(key, [])
         if not track: return None
         if t <= track[0]['f']: return track[0]['val']
         if t >= track[-1]['f']: return track[-1]['val']
-        
+
+        # Find the bracketing segment [k1, k2] and remember its index so we
+        # can reach the neighbour keyframes the Hermite tangents need.
+        idx = None
         for i in range(len(track) - 1):
             if track[i]['f'] <= t <= track[i+1]['f']:
+                idx = i
                 k1, k2 = track[i], track[i+1]
                 break
-                
-        # Base Linear Alpha (0.0 to 1.0 representing percentage traversed between k1 and k2)
-        alpha = (t - k1['f']) / (k2['f'] - k1['f'])
-        
-        # SSS Core Interpolation Logic:
-        # If the origin keyframe is 'S' (Smooth), apply Cosine Easing.
-        # This transforms the linear ramp into an S-curve, ensuring zero velocity 
-        # at the exact moment of the keyframe, producing fluid motion without mechanical stops.
-        if self.mode == 'sss':
-            if self._get_interp_mode(k1['f']) == 'S':
-                alpha = (1.0 - np.cos(alpha * np.pi)) / 2.0
-                
+        if idx is None:
+            return track[-1]['val']
+
+        f1, f2 = k1['f'], k2['f']
+        h = f2 - f1                  # real frame width of this segment
+        alpha = (t - f1) / h         # linear 0..1 progress across it
+
+        # Smooth (Hermite) only in SSS when the segment's ORIGIN keyframe is
+        # 'S'. Linear ('L') segments and every non-SSS mode keep the original
+        # straight-line blend - constant speed, no tangents. This preserves
+        # DRE/other behaviour exactly and keeps 'L' meaning "constant-speed
+        # straight line" distinct from the corner override.
+        smooth = (self.mode == 'sss' and self._get_interp_mode(f1) == 'S')
+
+        if not smooth:
+            # Original behaviour, unchanged.
+            if is_color:
+                return oklab_to_linear(linear_to_oklab(k1['val']) +
+                    (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
+            return k1['val'] + (k2['val'] - k1['val']) * alpha
+
+        # Cubic Hermite basis functions on the local parameter alpha.
+        a2 = alpha * alpha
+        a3 = a2 * alpha
+        h00 =  2*a3 - 3*a2 + 1       # weight on P1
+        h10 =    a3 - 2*a2 + alpha   # weight on tangent V1
+        h01 = -2*a3 + 3*a2           # weight on P2
+        h11 =    a3 -   a2           # weight on tangent V2
+
+        # Tangents are multiplied by the segment width h so that dP/dt (the
+        # velocity in TIME) stays continuous across segment boundaries even
+        # when neighbouring segments have different frame widths. Without the
+        # h factor, non-uniform spacing would reintroduce velocity jumps.
         if is_color:
-            return oklab_to_linear(linear_to_oklab(k1['val']) + (linear_to_oklab(k2['val']) - linear_to_oklab(k1['val'])) * alpha)
-        return k1['val'] + (k2['val'] - k1['val']) * alpha
+            p1 = linear_to_oklab(k1['val'])
+            p2 = linear_to_oklab(k2['val'])
+            v1 = self._tangent(track, idx,     oklab=True)
+            v2 = self._tangent(track, idx + 1, oklab=True)
+            return oklab_to_linear(h00*p1 + h01*p2 + h*(h10*v1 + h11*v2))
+
+        p1 = k1['val']
+        p2 = k2['val']
+        v1 = self._tangent(track, idx)
+        v2 = self._tangent(track, idx + 1)
+        return h00*p1 + h01*p2 + h*(h10*v1 + h11*v2)
 
     def get_state(self, t):
         """

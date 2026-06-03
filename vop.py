@@ -49,6 +49,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 # values. Used by the /calibration_state GET route to expose the
 # current state to the frontend.
 import calibration_store as cstore
+import interpolator  # for resolving per-gate JK playheads in /status and /cam_probe
 
 # Suppress default Flask HTTP request logging to keep the terminal output clean for audit logs
 log = logging.getLogger('werkzeug')
@@ -396,6 +397,62 @@ def count_source_frames(directory):
     valid_exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
     return len([f for f in os.listdir(directory) if f.lower().endswith(valid_exts)])
 
+
+def resolve_gate_playheads(params, cam_frame):
+    """
+    Resolve the current frame sitting in every gate at a given CamMag frame,
+    plus each gate's total frame count. Feeds the per-mag "####/####" readouts
+    in the web UI (Cam Mag, Projection Mag, BiPack 1, BiPack 2).
+
+    Two callers, same function:
+      - /status (during a render): cam_frame is the frame being exposed, read
+        from the engine heartbeat. Gives the live 1Hz readout.
+      - /cam_probe (while scrubbing): cam_frame is the probed frame. Gives the
+        at-rest "which frame is in each gate" readout.
+
+    The source gates (pm / bp1 / bp2) don't move 1:1 with the CamMag frame -
+    the JK Optical Printer CAM:STP timing means a gate can hold or step. So we
+    ask interpolator.Timeline (a pure, side-effect-free parse of the job's
+    keyframe tracks) where each layer's playhead lands. Cam Mag is the
+    destination, not a source, so its current frame IS cam_frame - no walk.
+
+    Returns: { 'cam': {'cur', 'total'}, 'pm': {...}, 'bp1': {...}, 'bp2': {...} }
+    'cur' is a 1-based human frame number, clamped into [1, total] when a
+    sequence is present and 0 when the gate is empty. The display formatting
+    (leading zeros, the 0000 still-sentinel, ----/---- for empty) lives in the
+    frontend so the look can evolve without touching this contract.
+    """
+    counts = {
+        'cam': count_source_frames(CAM_MAG_DIR),
+        'pm':  count_source_frames(PROJ_MAG_DIR),
+        'bp1': count_source_frames(PROJ_BIPACK1_DIR),
+        'bp2': count_source_frames(PROJ_BIPACK2_DIR),
+    }
+
+    def pack(cur, total):
+        # Clamp the 1-based current into the real range when there's footage;
+        # 0 for an empty gate (the frontend renders that as ----/----).
+        cur = max(1, min(total, int(cur))) if total >= 1 else 0
+        return {'cur': cur, 'total': total}
+
+    gates = {'cam': pack(int(cam_frame), counts['cam'])}
+
+    try:
+        tl = interpolator.Timeline(params or {})
+        for layer in ('pm', 'bp1', 'bp2'):
+            # calculate_playhead_at returns a 0-based gate index; +1 to present
+            # the first frame of a sequence as 0001 rather than 0000.
+            gate0 = int(tl.calculate_playhead_at(int(cam_frame), layer=layer))
+            gates[layer] = pack(gate0 + 1, counts[layer])
+    except Exception as e:
+        # A malformed job shouldn't take down /status or /cam_probe - fall back
+        # to the head of each gate and let the totals still surface.
+        print(f"[VOP SERVER] gate playhead resolve failed: {e}")
+        for layer in ('pm', 'bp1', 'bp2'):
+            gates[layer] = pack(1, counts[layer])
+
+    return gates
+
 # ---------------------------------------------------------
 # DISPLAY RESOLUTION ACCESSOR
 # ---------------------------------------------------------
@@ -501,18 +558,18 @@ def calculate_static_fit_scale(fov, ref_z, img_aspect, mode="fit",
         return max(scale_for_width, scale_for_height)
     return min(scale_for_width, scale_for_height)
 
-def dispatch_engine(task_type, payload):
+def dispatch_engine(task, payload):
     """
     Writes the task command to the IPC JSON file.
     Emulates synchronous blocking for preview tasks to ensure frontend UI sync.
     """
     global engine_process
-    print(f"\n[VOP SERVER] ACTION: {task_type.upper()}")
+    print(f"\n[VOP SERVER] ACTION: {task.upper()}")
 
     # Guarantee background daemon is active before dispatching
     ensure_engine_running()
 
-    payload['type'] = task_type
+    payload['task'] = task
     payload['vop_version'] = VOP_VERSION 
     
     # Serialize UI state payload to disk for persistence
@@ -529,7 +586,7 @@ def dispatch_engine(task_type, payload):
     # comp_preview is included here for the same reason cam_preview is:
     # the front end reloads probe_live.jpg right after the POST returns,
     # so we must not return until the engine has actually written the JPG.
-    if task_type in ['preview', 'cam_preview', 'comp_preview']:
+    if task in ['preview', 'cam_preview', 'comp_preview']:
         timeout = 45.0
         start_t = time.time()
         while os.path.exists(COMMAND_FILE):
@@ -602,6 +659,9 @@ def status():
                     "pm_frames": count_source_frames(PROJ_MAG_DIR),
                     "bp1_frames": count_source_frames(PROJ_BIPACK1_DIR),
                     "bp2_frames": count_source_frames(PROJ_BIPACK2_DIR),
+                    # Per-gate current/total frame readouts. Resolved against the
+                    # frame the engine is exposing right now (hb["current"]).
+                    "gates": resolve_gate_playheads(params, hb.get("current", 1)),
                 })
         except:
             pass
@@ -615,6 +675,10 @@ def status():
         "pm_frames": count_source_frames(PROJ_MAG_DIR),
         "bp1_frames": count_source_frames(PROJ_BIPACK1_DIR),
         "bp2_frames": count_source_frames(PROJ_BIPACK2_DIR),
+        # Per-gate totals (always fresh) plus head-of-gate currents. At idle the
+        # frontend takes only the totals from here and keeps the currents from
+        # the last probe, so an idle poll never snaps a probed number back.
+        "gates": resolve_gate_playheads(params, 1),
     })
 
 @app.route('/render_prores', methods=['POST'])
@@ -1133,6 +1197,13 @@ def cam_probe():
         par_x, par_y = 1.0, 1.0
     preview_unsqueeze = bool(data.get('preview_unsqueeze', False))
 
+    # Resolve the per-gate readouts for the frame being probed. The posted body
+    # is the live job (collectParams), so Timeline sees the current exposure
+    # sheet. Returned on the OK paths below; the frontend uses it to update the
+    # Cam Mag / Projection Mag / BiPack readouts to match what's in each gate
+    # at this probed frame.
+    gate_data = resolve_gate_playheads(data, frame_num)
+
     # ANAMORPHIC PREVIEW UNSQUEEZE - inline helper.
     # Mirrors the unsqueeze logic in color_utils.generate_sensor_preview and
     # generate_comp_preview verbatim, so Cam Probe produces the same JPG
@@ -1262,7 +1333,7 @@ def cam_probe():
             # Return 200 + a placeholder marker. The marker isn't used
             # by the current frontend (it just reloads the JPG either
             # way) but is here as a hook for future features.
-            return jsonify({"status": "ok", "frame": frame_num, "placeholder": True})
+            return jsonify({"status": "ok", "frame": frame_num, "placeholder": True, "gates": gate_data})
 
         except Exception as e:
             print(f"[VOP SERVER] CAM PROBE placeholder error: {e}")
@@ -1293,11 +1364,37 @@ def cam_probe():
         img8 = _maybe_unsqueeze(img8)
         cv2.imwrite(out_jpg, img8)
 
-        return jsonify({"status": "ok", "frame": frame_num})
+        return jsonify({"status": "ok", "frame": frame_num, "gates": gate_data})
 
     except Exception as e:
         print(f"[VOP SERVER] CAM PROBE error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/gate_readout', methods=['POST'])
+def gate_readout():
+    """
+    GATE READOUT - pure gate-frame resolver, no rendering.
+
+    Exists so the async preview actions (Proj Probe, Cam View, Comp View) can
+    update the per-mag "####/####" readouts. Those three dispatch the engine
+    and return immediately ({"status":"started"}); their image lands later via
+    probe_live.jpg and the heartbeat, so unlike Cam Probe they have no synchronous
+    response to hang gate data on. Rather than thread gate data through the engine's
+    async preview path (large blast radius for a readout), the frontend calls this
+    tiny synchronous route alongside the preview dispatch and applies the result.
+
+    Mirrors the gate-resolution half of /cam_probe exactly: same body shape
+    (collectParams()), same probe_frame default, same resolve_gate_playheads
+    helper - so Proj Probe / Cam View / Comp View land on identical numbers to
+    Cam Probe for the same frame. No camera, no disk writes, no engine dispatch.
+    """
+    data = request.json or {}
+    try:
+        frame_num = int(float(data.get('probe_frame', 1)))
+    except (TypeError, ValueError):
+        frame_num = 1
+    return jsonify({"status": "ok", "frame": frame_num,
+                    "gates": resolve_gate_playheads(data, frame_num)})
 
 @app.route('/execute', methods=['POST'])
 def execute_seq():
@@ -1542,6 +1639,20 @@ def save_job():
 if __name__ == '__main__':
     port = 5000
     ip_addr = get_ip()
+
+    # Publish the WebGUI address for the engine's idle screen.
+    # engine.py runs as a separate process (it holds the KMSDRM lock)
+    # so it cannot call get_ip() directly. We drop the IP+port to a
+    # small JSON file - the same on-disk-IPC pattern the engine uses
+    # to publish display info back to us (see /tmp/vop_display.json).
+    # The engine reads this when rendering the idle screen so the user
+    # can see where to point their browser. Non-fatal if it fails:
+    # the engine falls back to a placeholder string.
+    try:
+        with open("/tmp/vop_ip.json", 'w') as f:
+            json.dump({'ip': ip_addr, 'port': port}, f)
+    except OSError as e:
+        print(f"[VOP SERVER] Could not publish IP info: {e}")
 
     print("\n" + "="*50)
     print(f" VOP Server is online.")
