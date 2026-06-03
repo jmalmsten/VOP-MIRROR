@@ -2591,6 +2591,22 @@ def run_persistent_engine():
             if idle_x <= -0.8 or idle_x >= 0.8: idle_dx *= -1
             if idle_y <= -0.6 or idle_y >= 0.6: idle_dy *= -1
 
+            # --- CLEAR BEFORE DRAW (idle frame) ---
+            # The idle branch never cleared, so with DOUBLEBUF every flip()
+            # swapped to a back buffer still holding an OLDER idle frame and
+            # we drew the logo on top of it. Because the logo uses an "over"
+            # blend (SRC_ALPHA / ONE_MINUS_SRC_ALPHA below), only its opaque
+            # pixels overwrite - transparent areas keep whatever was already
+            # there - so the logo's swept path accumulated into the white
+            # smear-blocks now visible through the live feed.
+            #
+            # Bind the default framebuffer first (a prior task may have left
+            # a BiPack FBO bound) and clear to opaque black so each idle
+            # frame starts clean. Slice 2's alignment targets render in this
+            # same branch and rely on this clear too.
+            ctx.screen.use()
+            ctx.clear(0.0, 0.0, 0.0, 1.0)
+
             # --- IDLE-SCREEN ALPHA BLENDING ---
             # The logo and IP textures are straight-alpha RGBA surfaces
             # (pygame's tostring("RGBA") gives non-premultiplied alpha).
