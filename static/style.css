@@ -535,10 +535,6 @@ body {
     cursor:             pointer; 
 }
 
-.nuke-btn[onclick="nukeJob()"] { 
-    color:              var(--color-warning); 
-}
-
 /* ################ PROBE / PREVIEW / EXECUTE ################### */
 
 .control-deck { 
