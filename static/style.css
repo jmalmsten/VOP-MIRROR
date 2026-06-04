@@ -321,46 +321,50 @@ body {
     
 }
 
-/* ---- WOOD FRAME — left/right cheeks ---------------------------------
-   Decorative placeholders for the wood-grain makeover. Rendered as
-   pseudo-elements on the active page so no markup changes are needed.
-   When your tileable mahogany image is ready, delete the gradient line
-   below and uncomment the background-image block — nothing else moves. */
+/* ---- WOOD FRAME — left/right cheeks (colorized texture) ------------- */
 .page-section.page-active::before,
 .page-section.page-active::after {
     content: "";
-    position: absolute;          /* out of the grid — won't shift the columns */
-    top: 0;                      /* top of the status bar (#page_main's first child) */
-    bottom: 0;                   /* down to the bottom of the Exposure Sheet         */
+    position: absolute;
+    top: 0;
+    bottom: 0;
     width: var(--wood-width);
 
-    /* Placeholder mahogany. The gradient only fakes a little depth while
-       blocking in; it is NOT the texture. Replace with the image later. */
-    background: linear-gradient(180deg,
-                    var(--wood-color)      0%,
-                    var(--wood-color-dark) 100%);
+    /* Colorize the monochrome grain. Two background layers:
+     *   layer 1 (TOP)    a solid fill of --wood-color  (the tint)
+     *   layer 2 (BOTTOM) the greyscale cheeks.jpg       (the grain)
+     * Blended with "color": keep the grain's LUMINANCE, take the red's
+     * HUE + SATURATION. Black stays black, white stays white, mids tint.
+     * Retune the mahogany shade entirely from --wood-color. */
+    background-image:
+        linear-gradient(var(--wood-color), var(--wood-color)),
+        url("/static/cheeks.jpg");
+    background-blend-mode: color;
 
-    /* TILEABLE WOOD TEXTURE GOES HERE LATER:
-    background-image:  url("/static/img/wood_mahogany.png");
-    background-repeat: repeat;       (tiles both directions)
-    background-size:   256px auto;   (controls tile scale)
-    */
+    /* The tint covers everything. The texture is scaled to TWICE the cheek
+     * width, so the 256px-wide source maps to two cheek-widths: the left
+     * half feeds one cheek, the right half the other (chosen per side
+     * below). Height is auto so the scale stays uniform / undistorted, and
+     * it tiles vertically since the source is vertically tileable. */
+    background-repeat: no-repeat, repeat-y;
+    background-size:   cover, calc(var(--wood-width) * 2) auto;
 
-    /* Makes the flat strip read as a solid raised panel. */
     box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.45);
 }
 
-/* Left cheek, pinned to the left gutter. The dark border is its inner
-   face, giving a crisp wood-to-board seam. */
+/* Left cheek: pinned left, shows the LEFT vertical strip of the texture. */
 .page-section.page-active::before {
     left: 0;
     border-right: 1px solid var(--wood-color-dark);
+    background-position: center, left top;   /* gradient, then texture-left */
 }
 
-/* Right cheek — mirror of the left. */
+/* Right cheek: pinned right, shows the RIGHT vertical strip — a different
+   slice of grain, so the two sides aren't mirror-identical. */
 .page-section.page-active::after {
     right: 0;
     border-left: 1px solid var(--wood-color-dark);
+    background-position: center, right top;  /* gradient, then texture-right */
 }
 
 
