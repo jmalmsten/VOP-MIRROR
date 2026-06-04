@@ -87,12 +87,14 @@ Description:        Stylings for the whole GUI
 
     /* >>> Background & Panels <<< */
 
-    --bg-body:              #070707;    /* Background for the whole thing */
-    --bg-panel:             #1a1a1a;    /* Control deck, preview area, status panels */
-    --bg-group:             #151515;    /* Group Boxes */
-    --bg-input:             #000;       /* Inputs, progress bar track */
-    --bg-button-muted:      #222;       /* Nuke buttons, upload-btn, cam_preview */
-    --bg-input-field:       #0d0d0d;    /* Input field background - slightly darker */
+    --bg-body:              #070707;                /* Background for the whole thing */
+    --bg-panel:             #1a1a1a;                /* Control deck, preview area, status panels */
+    --bg-group:             #151515;                /* Group Boxes */
+    --bg-group-glass:       rgba(21, 21, 21, 0.60); /* translucent group-box fill (#151515 @ 60%) */
+    --group-blur:           6px;                      /* how much the board texture frosts behind a box */
+    --bg-input:             #000;                   /* Inputs, progress bar track */
+    --bg-button-muted:      #222;                   /* Nuke buttons, upload-btn, cam_preview */
+    --bg-input-field:       #0d0d0d;                /* Input field background - slightly darker */
 
     /* Inset bevel shared by both cheeks (lit from top-left). Stored as a
        token so each cheek can append its own outer shadow below. */
@@ -771,12 +773,22 @@ body {
     box-sizing:         border-box;
 }
 
-.group-box { 
-    background:         var(--bg-group); 
-    border:             1px solid var(--border-color); 
-    border-radius:      var(--radius-standard); 
-    padding:            12px; 
-    margin-bottom:      10px; 
+.group-box {
+    /* Translucent fill so the board texture reads through, then frost what
+       shows through with backdrop-filter — a subtle glass panel sitting on
+       the textured board. Alpha (in --bg-group-glass) trades panel solidity
+       for how much texture bleeds through; --group-blur is the frost amount. */
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+
+    border:                   1px solid var(--border-color);
+    border-radius:            var(--radius-standard);
+    padding:                  12px;
+    margin-bottom:            10px;
+
+    /* Slight inner shadow so the panel reads as gently recessed. */
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
 .group-box.bipack {
