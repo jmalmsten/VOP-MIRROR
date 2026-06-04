@@ -47,3 +47,7 @@ vop_dump*.txt
 # Un-ignore all files within those directories, overriding the global *.jpg/png ignores
 !readme_graphics/*
 !graphics/*
+
+# Un-ignore in /static folder
+!/static/
+!/static/*
