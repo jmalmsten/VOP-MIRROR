@@ -1433,6 +1433,81 @@ async function renderProRes() {
     }
 }
 
+/**
+ * Kicks off a background ffmpeg H.264 workprint (.mp4) render from the
+ * current CamMag, polls until complete, then opens the proof in a new
+ * tab for viewing. Mirrors renderProRes() with two differences:
+ *   - it forwards the Preview-unsqueeze checkbox as 'unsqueeze', so the
+ *     proof is rendered with PAR applied (or left squeezed) to match;
+ *   - on completion it OPENS the mp4 for viewing rather than forcing a
+ *     download, since a workprint is a proof, not a final deliverable.
+ */
+async function renderWorkprint() {
+    const btn = document.querySelector('.workprint-btn');
+    if (btn) { btn.innerText = 'RENDERING...'; btn.disabled = true; }
+
+    try {
+        // Pull current GUI state. par_x / par_y are the anamorphic fields;
+        // preview_unsqueeze is the checkbox that, when ticked, tells the
+        // backend to stamp the SAR so the proof plays back unsqueezed.
+        // collectParams() returns the checkbox as a real boolean and the
+        // number fields as strings - the backend floats the latter, so we
+        // forward them verbatim exactly like renderProRes() does.
+        const cp = collectParams();
+        const startResp = await fetch('/render_workprint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fps: cp.fps || 24,
+                par_x: cp.par_x || 1.0,
+                par_y: cp.par_y || 1.0,
+                unsqueeze: cp.preview_unsqueeze === true
+            })
+        });
+        const startData = await startResp.json();
+
+        if (!startResp.ok) {
+            // e.g. 404 "No frames found in CamMag", or 409 already_running.
+            alert(`Workprint render failed to start: ${startData.error || startData.status}`);
+            if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+            return;
+        }
+
+        // Poll /workprint_status until ffmpeg finishes.
+        const pollInterval = setInterval(async () => {
+            try {
+                const r = await fetch('/workprint_status');
+                const st = await r.json();
+
+                if (st.status === 'done') {
+                    clearInterval(pollInterval);
+                    if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+                    // Open the freshly-muxed proof for viewing. serve_workprint
+                    // sends it inline, so it plays straight in the browser tab.
+                    // The idle /status poll also refreshes the "VIEW WORKPRINT"
+                    // link to this same file, so it stays reachable afterwards.
+                    if (st.filename) {
+                        window.open(`/workprints/${st.filename}`, '_blank');
+                    }
+
+                } else if (st.status === 'error') {
+                    clearInterval(pollInterval);
+                    if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+                    alert(`Workprint render failed (ffmpeg exit code: ${st.code})`);
+                }
+                // 'rendering' -> keep polling
+            } catch (e) {
+                console.error("Workprint poll error:", e);
+            }
+        }, 2000); // Match the ProRes poll cadence - 2s is plenty.
+
+    } catch (e) {
+        console.error("Workprint render error:", e);
+        if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+        alert("A network error occurred starting the workprint render.");
+    }
+}
+
 /* Job Management: Import
 Uploads a JSON file, replaces current_job.json, and handles version warnings.
 */
