@@ -48,6 +48,8 @@ Simply because those are calibration steps.
 ### Renamed mode names
 Mostly to clean it up and make them less width hungry.
 
+### Display branding when job is nuked
+When the NUKE JOB button is pressed and confirmed. The job is nuked and now a placeholder image is put into the preview. That placeholder is the branding image that's also used for the screensaver on the monitor.
 
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.

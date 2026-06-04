@@ -1644,12 +1644,97 @@ def nuke_mag():
     
     return jsonify({"status": "mag_cleared"})
 
+def write_branding_preview():
+    """
+    Render the branding logo centered on a black background and write it to
+    static/probe_live.jpg, replacing whatever preview was last shown.
+
+    This is the "standby" preview - used when there is nothing meaningful to
+    show, e.g. right after Nuke Job, where the previous job's preview would
+    otherwise linger and falsely imply state that no longer exists.
+
+    The output is an ordinary preview JPG, so the next Proj Probe / Cam View /
+    Cam Probe just overwrites it like any other preview - no special-casing
+    needed anywhere else in the pipeline.
+
+    branding.png is a 512x512 square today, but a user may swap in a logo of
+    any aspect ratio. We scale-to-fit (contain) while preserving aspect, then
+    center it and let the black canvas pad the rest - so any AR lands cleanly
+    with black bars rather than being distorted.
+    """
+    # Match the projection monitor resolution so the standby card has the same
+    # dimensions as a real preview. probe_img uses object-fit:contain so exact
+    # size isn't critical, but matching avoids the panel visibly resizing when
+    # switching between this and a live probe.
+    disp_w, disp_h = get_display_size()
+    out_jpg = os.path.join(BASE_DIR, "static", "probe_live.jpg")
+
+    # Pure-black canvas (BGR, cv2's channel order). Shape is (H, W, 3). This is
+    # the "blank black background" the logo sits on.
+    canvas = np.zeros((disp_h, disp_w, 3), dtype=np.uint8)
+
+    logo_path = os.path.join(BASE_DIR, "graphics", "branding.png")
+
+    # Fraction of each axis the logo may occupy. The logo is fit INSIDE this
+    # centered box, so 0.6 leaves a comfortable black margin all around instead
+    # of the logo touching the edges. Tune to taste (1.0 = edge-to-edge on the
+    # limiting axis).
+    LOGO_FILL = 0.6
+
+    try:
+        # IMREAD_COLOR forces a 3-channel BGR image (and drops any alpha), so
+        # the paste below always matches the canvas channel count even if a
+        # user supplies an RGBA PNG.
+        logo = cv2.imread(logo_path, cv2.IMREAD_COLOR)
+        if logo is None:
+            raise FileNotFoundError(logo_path)
+
+        logo_h, logo_w = logo.shape[:2]
+
+        # Centered target box the logo must fit within.
+        box_w = disp_w * LOGO_FILL
+        box_h = disp_h * LOGO_FILL
+
+        # "Contain" scale: the SMALLER ratio, so the whole logo fits inside the
+        # box on both axes with its aspect ratio preserved.
+        scale = min(box_w / logo_w, box_h / logo_h)
+        new_w = max(1, int(round(logo_w * scale)))
+        new_h = max(1, int(round(logo_h * scale)))
+
+        # Pick interpolation by direction: INTER_AREA is best when shrinking,
+        # INTER_CUBIC when enlarging (a small logo on a big monitor upscales).
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+        resized = cv2.resize(logo, (new_w, new_h), interpolation=interp)
+
+        # Integer top-left offset so the logo sits dead-center and the black
+        # canvas pads the remainder symmetrically.
+        x0 = (disp_w - new_w) // 2
+        y0 = (disp_h - new_h) // 2
+
+        # Paste by overwriting the pixel block - the logo is opaque BGR on a
+        # black background, so no alpha blending is required.
+        canvas[y0:y0 + new_h, x0:x0 + new_w] = resized
+
+    except Exception as e:
+        # Missing/unreadable logo: fall back to a plain black standby card.
+        # Still better than a stale preview, and never blocks the nuke.
+        print(f"[VOP SERVER] Branding preview: logo unavailable, writing black ({e})")
+
+    # cv2.imwrite expects BGR, which is exactly what we built.
+    cv2.imwrite(out_jpg, canvas)
+
 @app.route('/nuke_job', methods=['POST'])
 def nuke_job():
     # Deletes the active session configuration file
     print("[VOP SERVER] ACTION: NUKE CURRENT JOB")
     if os.path.exists(CURRENT_JOB_FILE):
         os.remove(CURRENT_JOB_FILE)
+    # Replace the lingering preview with the branding standby card. Without
+    # this, the previous job's last preview stays up after the reload and
+    # falsely implies there's still something to preview. Written here during
+    # the POST so the frontend's post-reload first-load fetch of
+    # probe_live.jpg (already cache-busted) picks it up.
+    write_branding_preview()
     return jsonify({"status": "job_nuked"})
 
 @app.route('/workprints/<filename>')
