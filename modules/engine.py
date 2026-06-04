@@ -2691,6 +2691,11 @@ def run_persistent_engine():
                 # good texture rather than blanking the address.
                 if new_tex is not None:
                     if tex_ip is not None:
+                        tex_ip.release()   # free the old GPU texture
+                    tex_ip, asp_ip = new_tex, new_asp
+
+            # Render the IP quad below the logo, only if we have one.
+            if tex_ip is not None:
                 ip_mvp = np.eye(4, dtype='f4')
 
                 # ---- SIZE: width-driven, not height-driven ----
@@ -2726,23 +2731,6 @@ def run_persistent_engine():
                 logo_half_h = 0.4          # MUST match the logo's mvp[1,1] above
                 gap = 0.06                 # blank space between logo and address
                 ip_mvp[3, 1] = idle_y - logo_half_h - gap - ip_mvp[1, 1]
-                    tex_ip, asp_ip = new_tex, new_asp
-
-            # Render the IP quad below the logo, only if we have one.
-            if tex_ip is not None:
-                ip_mvp = np.eye(4, dtype='f4')
-                # Scale: smaller than the logo. 0.18 height vs the logo's
-                # 0.4. Width follows the text aspect, screen-aspect
-                # corrected exactly like the logo so it isn't stretched
-                # on non-square panels.
-                ip_h = 0.18
-                ip_mvp[0, 0] = ip_h * asp_ip / (WIDTH / HEIGHT)
-                ip_mvp[1, 1] = ip_h
-                # Position: locked to the logo's X, and offset below it
-                # in Y so it tracks the bounce rigidly. The 0.30 offset
-                # clears the logo (half its 0.4 height) plus a small gap.
-                ip_mvp[3, 0] = idle_x
-                ip_mvp[3, 1] = idle_y - 0.30
 
                 prog['mvp'].write(ip_mvp.tobytes())
                 # White, never monochrome-filtered - same treatment as
