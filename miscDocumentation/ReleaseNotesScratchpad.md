@@ -1,4 +1,4 @@
-# V0.13.0 (YYYYMMDD)
+# V0.13.1 (YYYYMMDD)
 ## Added: 
 ### Restored the IP output for the idle screen
 This one has been missed for a while. The idle screen used to show the IP and Port for the WebGUI. Now it's back.
@@ -49,4 +49,4 @@ Simply because those are calibration steps.
 - Cleaned up a little inline css codes. 
 - #140 - not actionable here either. 
 - #141 - the whole standalone idle_screen.py is no more already. Nothing to do here.
-- When frame counter was added. Its using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.
+- When frame counter was added. It's using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.
