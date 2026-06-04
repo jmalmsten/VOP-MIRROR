@@ -966,7 +966,7 @@ const _gateState = {
     bp1: { cur: 1, total: 0 }, bp2: { cur: 1, total: 0 },
 };
 
-// total 0 -> ----/---- (empty gate). total 1 -> 0000/0000 (a lone still: the
+// total 0 -> ----/---- (empty gate). total 1 -> SINGLE_FR (a lone still: the
 // 0000 sentinel means "no sequence here"). total >= 2 -> the live counts, so
 // any digit in 0001-9999 tells you a TIFF sequence is loaded.
 function formatGateCount(cur, total) {

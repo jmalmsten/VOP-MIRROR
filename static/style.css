@@ -797,7 +797,7 @@ body {
  * font as everything else - only the digit spacing is fixed (tabular-nums)
  * so the numbers don't jitter as they tick, and it's dimmed so the title
  * still reads as primary. The 7-segment styling pass comes later; this is
- * deliberately plain. The three states (----/---- empty, 0000/0000 still,
+ * deliberately plain. The three states (----/---- empty, SINGLE_FR still,
  * 0001-9999 sequence) are produced by formatGateCount() in main.js. */
 /* Per-gate frame readout - inset DSEG14 "LED window".
  *

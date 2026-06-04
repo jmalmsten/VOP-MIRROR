@@ -17,7 +17,7 @@ The number is four digits. 0001-9999 because, right now, the step printer logic 
 The step printers have three stages depending on what is loaded. 
 
 - ``----/----`` - means the mag is empty and nothing is loaded
-- ``0000/0000`` - means that a lone image is loaded and is treated as a still image. No step printing available.
+- ``SINGLE_FR`` - means that a lone image is loaded and is treated as a still image. No step printing available.
 - ``0001-9999/0001-9999`` - this means a video has been ingested and transcoded to a tiff sequence that can be used with step printing.
 
 ### Font choice
