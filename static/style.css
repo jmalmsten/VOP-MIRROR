@@ -93,6 +93,12 @@ Description:        Stylings for the whole GUI
     --bg-input:             #000;       /* Inputs, progress bar track */
     --bg-button-muted:      #222;       /* Nuke buttons, upload-btn, cam_preview */
     --bg-input-field:       #0d0d0d;    /* Input field background - slightly darker */
+
+    /* Inset bevel shared by both cheeks (lit from top-left). Stored as a
+       token so each cheek can append its own outer shadow below. */
+    --cheek-bevel:
+        inset  2px  2px 3px rgba(255, 235, 220, 0.22),
+        inset -3px -3px 4px rgba(0, 0, 0, 0.55);
     
     /* >>> Text Colors <<< */
 
@@ -306,24 +312,25 @@ body {
     box-sizing: border-box;
     padding-left:  calc(var(--wood-width) + var(--wood-gap));
     padding-right: calc(var(--wood-width) + var(--wood-gap));
+    /* Texture margin top & bottom so the first/last elements don't sit
+       right on the board edge now that there's a visible backplate. */
+    padding-top:    var(--wood-gap);
+    padding-bottom: var(--wood-gap);
 
     /* --- board backplate (inside the cheeks only) ---
-     * This element IS the cheek-enclosed board, so the texture can't leak
-     * outside it. Two background layers:
-     *   layer 1 (TOP)    a faint blue-cyan diagonal sheen
-     *   layer 2 (BOTTOM) the tiled monochrome grain (mainbg.jpg)
-     * The grain stays at native 100% scale and tiles in both axes. The
-     * gradient fades to fully TRANSPARENT, so its "off" end contributes
-     * nothing no matter which blend mode is set below (handy for tuning). */
-    background-color: #000;                       /* board base where grain is darkest */
+     * Faint blue-cyan diagonal sheen over the tiled grain. The grain is
+     * dimmed by MULTIPLYING it against background-color: 50% grey halves
+     * its brightness. That grey IS the brightness dial — lower it to go
+     * darker (#666 ~= 40%, #4d4d4d ~= 30%, #000 = black). */
+    background-color: #808080;
     background-image:
         linear-gradient(135deg,
-            rgba(60, 160, 210, 0.12) 0%,          /* faint blue-cyan corner */
-            rgba(60, 160, 210, 0.00) 55%),        /* fades out diagonally   */
-        url("/static/mainbg.jpg");
+            rgba(60, 160, 210, 0.12) 0%,
+            rgba(60, 160, 210, 0.00) 55%),     /* faint blue-cyan diagonal sheen */
+        url("/static/mainbg.jpg");             /* tiled board grain              */
     background-repeat: no-repeat, repeat;
-    background-size:   cover, auto;               /* sheen spans board; grain at 100% */
-    background-blend-mode: screen;                /* additive-style lift (see note) */
+    background-size:   cover, auto;
+    background-blend-mode: screen, multiply;   /* cyan screens on; grain x grey dims it */
 }
 
 /* ---- WOOD FRAME — left/right cheeks ------------------------------- */
@@ -335,9 +342,6 @@ body {
     bottom: 0;
     width: var(--wood-width);
 
-    /* Solid --wood-color tint over the greyscale grain, MULTIPLY-blended:
-     * tint * grain => --wood-color now controls depth (its darkness) AND
-     * saturation (its saturation), modulated by the wood grain. */
     background-image:
         linear-gradient(var(--wood-color), var(--wood-color)),
         url("/static/cheeks.jpg");
@@ -346,31 +350,29 @@ body {
     background-repeat: no-repeat, repeat-y;
     background-size:   cover, calc(var(--wood-width) * 2) auto;
 
-    /* Slightly rounded so each cheek reads as a physical panel. */
     border-radius: 6px;
-
-    /* Bevel, lit from the top-left. With INSET shadows, positive offsets
-     * push the colour onto the TOP + LEFT edges and negative offsets onto
-     * the RIGHT + BOTTOM edges - so a warm light inset gives the highlight
-     * up/left, a dark inset gives the shadow down/right. Together they
-     * extrude the panel off the board. */
-    box-shadow:
-        inset  2px  2px 3px rgba(255, 235, 220, 0.22),   /* highlight: upper + left   */
-        inset -3px -3px 4px rgba(0,   0,   0,   0.55);    /* shadow:    right + bottom */
+    /* Bevel + per-side outer shadow are set on each cheek below, so the
+       outer shadow can be thrown inward toward the board. */
 }
 
-/* Left cheek: pinned left, shows the LEFT vertical strip of the texture. */
 .page-section.page-active::before {
     left: 0;
     background-position: center, left top;
+    /* Inset bevel, then an outer shadow thrown RIGHT onto the board so the
+       cheek reads as standing proud of a recessed main section. */
+    box-shadow:
+        var(--cheek-bevel),
+        8px 0 14px -3px rgba(0, 0, 0, 0.55);
 }
 
-/* Right cheek: pinned right, shows the RIGHT vertical strip. */
 .page-section.page-active::after {
     right: 0;
     background-position: center, right top;
+    /* Same, thrown LEFT onto the board. */
+    box-shadow:
+        var(--cheek-bevel),
+        -8px 0 14px -3px rgba(0, 0, 0, 0.55);
 }
-
 
 /* ===========================================================
  * Calibration page styling 
