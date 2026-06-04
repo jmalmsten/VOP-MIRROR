@@ -287,6 +287,72 @@ else
     echo "script, or by manually executing CaliTools/FullRGBFix/deploy_rgb_fix.sh"
 fi
 
+# 7. Optional Onboard LED Blanking
+# The Pi's onboard LEDs (red PWR, green ACT) sit right beside the camera
+# inside the light-tight cabinet. The red is a steady stray source; the green
+# strobes on every TIFF write during a job - both fog long exposures. This
+# installs a small systemd oneshot that, at each boot, puts both LEDs under
+# manual control and hands their brightness write-access to the VOP user, so
+# the engine can blank them while exposing. Opt-in, like the RGB fix above.
+echo
+echo "----------------------------------------"
+echo " Optional: Onboard LED Blanking"
+echo "----------------------------------------"
+echo " The Pi's red PWR and green ACT LEDs sit next to the camera inside the"
+echo " cabinet. During long exposures they leak light onto the latent image —"
+echo " the red steadily, the green strobing on every disk write. This sets up"
+echo " a small systemd oneshot service that, at each boot, puts both LEDs under"
+echo " manual control and lets the VOP blank them during exposures."
+echo
+echo " Recommended for the sealed-cabinet setup. Skip it if your Pi is out in"
+echo " the open and you'd rather keep the LEDs as normal status indicators."
+echo "----------------------------------------"
+read -r -p "Set up onboard LED blanking now? (y/N): " LED_PROMPT
+if [[ "$LED_PROMPT" =~ ^[Yy]$ ]]; then
+    LED_SETUP_SCRIPT="$SCRIPT_DIR/CaliTools/LedControl/setup_led_control.sh"
+    LED_SERVICE_FILE="vop-led.service"
+
+    if [ ! -f "$LED_SETUP_SCRIPT" ]; then
+        echo "WARNING: $LED_SETUP_SCRIPT not found. Skipping LED blanking setup."
+        echo "         (Did the git clone include the CaliTools/ subdirectory?)"
+    else
+        echo "Setting up onboard LED blanking..."
+        chmod +x "$LED_SETUP_SCRIPT"
+
+        # The runtime brightness writes happen as the VOP user (User=$USER in
+        # vop.service), NOT root, so that user must belong to the 'gpio' group
+        # that setup_led_control.sh grants write-access to. Add them now; the
+        # membership change takes effect after the reboot at the end of this
+        # script. Harmless / idempotent if they're already a member.
+        sudo usermod -aG gpio "$USER"
+
+        # Generate the service file. As with the RGB fix we use
+        # 'Before=vop.service' so the LEDs are configured before the engine
+        # starts, and we deliberately OMIT 'After=multi-user.target' to avoid
+        # the ordering cycle that would silently drop vop.service from boot.
+        cat <<EOF > "$LED_SERVICE_FILE"
+[Unit]
+Description=VOP Onboard LED Control Setup
+Before=vop.service
+
+[Service]
+Type=oneshot
+ExecStart=$LED_SETUP_SCRIPT
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        sudo mv "$LED_SERVICE_FILE" /etc/systemd/system/
+        sudo systemctl daemon-reload
+        sudo systemctl enable vop-led.service
+        echo "Onboard LED blanking installed and enabled (active after reboot)."
+    fi
+else
+    echo "Skipping onboard LED blanking. You can set it up later by re-running"
+    echo "this script and answering yes."
+fi
+
 echo
 echo "========================================"
 echo "Deployment Complete."
@@ -299,7 +365,7 @@ echo " To view live terminal logs at any time, run:"
 echo " sudo journalctl -u vop.service -f"
 echo "========================================"
 
-# 7. Reboot Prompt
+# 8. Reboot Prompt
 read -r -p "Reboot the system now? (y/N): " REBOOT_PROMPT
 if [[ "$REBOOT_PROMPT" =~ ^[Yy]$ ]]; then
     echo "Rebooting..."
