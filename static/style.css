@@ -96,6 +96,9 @@ Description:        Stylings for the whole GUI
     --bg-button-muted:      #222;                   /* Nuke buttons, upload-btn, cam_preview */
     --bg-input-field:       #0d0d0d;                /* Input field background - slightly darker */
 
+    --graphic-w: 256px;   /* schematic display size = 50% of the 512x256 source */
+    --graphic-h: 128px;
+
     /* Inset bevel shared by both cheeks (lit from top-left). Stored as a
        token so each cheek can append its own outer shadow below. */
     --cheek-bevel:
@@ -328,21 +331,37 @@ body {
     background-image:
         linear-gradient(135deg,
             rgba(60, 160, 210, 0.12) 0%,
-            rgba(60, 160, 210, 0.00) 55%),       /* cyan diagonal sheen */
-        url("/static/VOP-Graphic.png"),          /* printed schematic   */
-        url("/static/mainbg.jpg");               /* board grain         */
-    background-repeat:   no-repeat, no-repeat, repeat;
-    /* Layer 2 (the graphic) is the only one you'll move: x then y from the
-       board's top-left. 72px clears the left cheek; 88px drops it just below
-       the status bar. Slide these to taste. */
-    background-position: 0 0, 72px 88px, 0 0;
-    background-size:     cover, 256px 128px, auto;   /* graphic at 50% (512x256 -> 256x128) */
-    background-blend-mode: screen, screen, multiply; /* graphic screens onto the dimmed grain */
+            rgba(60, 160, 210, 0.00) 55%),     /* cyan diagonal sheen */
+        url("/static/mainbg.jpg");             /* board grain         */
+    background-repeat: no-repeat, repeat;
+    background-size:   cover, auto;
+    background-blend-mode: screen, multiply;
     /* Soft highlight hugging the TOP edge of the board, matching the
        cheeks' top-left lighting. Inset + a small positive Y offset lays a
        light band along the top; it shows in the top texture margin and
        reads as the upper edge of the recessed section. */
     box-shadow: inset 0 2px 3px rgba(255, 235, 220, 0.18);
+}
+
+/* Decorative VOP schematic, "printed" onto the board texture in the top-left.
+   Absolute, so it sits outside the grid and shifts no panels. mix-blend-mode
+   screen drops the PNG's black onto the texture (only the white linework
+   shows); opacity is the print-strength dial. The control-deck indent and
+   mags-row drop below open a clear patch of texture for it to land on. */
+.vop-graphic {
+    position:           absolute;
+    top:                var(--wood-gap);                        /* aligns with content top   */
+    left:               calc(var(--wood-width) + var(--wood-gap)); /* just right of left cheek */
+    width:              var(--graphic-w);
+    height:             var(--graphic-h);
+
+    background-image:   url("/static/VOP-Graphic.png");
+    background-size:    contain;
+    background-repeat:  no-repeat;
+
+    mix-blend-mode:     screen;   /* black vanishes onto the texture, white prints */
+    opacity:            0.75;     /* your 75% print strength */
+    pointer-events:     none;     /* purely decorative — never intercept clicks */
 }
 
 /* ---- WOOD FRAME — left/right cheeks ------------------------------- */
@@ -734,16 +753,20 @@ body {
 
 .control-deck {
     grid-column:              1 / -1;
-    /* Unified with the group boxes: translucent glass + frosted board + inner shadow. */
     background:               var(--bg-group-glass);
     -webkit-backdrop-filter:  blur(var(--group-blur));
     backdrop-filter:          blur(var(--group-blur));
     box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
 
+    /* Indent the left end past the schematic so the bar starts to its right... */
+    margin-left:              calc(var(--graphic-w) + 16px);
+    /* ...and drop the bottom margin so the schematic's lower half lands on open
+       texture above the CAM MAG box (≈ schematic height minus the bar's own). */
+    margin-bottom:            calc(var(--graphic-h) - 50px);
+
     padding:                  12px 15px;
     border-radius:            var(--radius-standard);
     border:                   1px solid var(--border-color);
-    margin-bottom:            20px;
 }
 
 /* ===========================================================
