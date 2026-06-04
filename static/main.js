@@ -972,7 +972,7 @@ const _gateState = {
 function formatGateCount(cur, total) {
     const pad = n => String(Math.max(0, n | 0)).padStart(4, '0');
     if (!total || total <= 0) return '----/----';
-    if (total === 1)          return '0000/0000';
+    if (total === 1)          return '__STILL__';
     return `${pad(cur)}/${pad(total)}`;
 }
 
