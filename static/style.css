@@ -87,7 +87,7 @@ Description:        Stylings for the whole GUI
 
     /* >>> Background & Panels <<< */
 
-    --bg-body:              #0b0b0b;    /* Background for the whole thing */
+    --bg-body:              #070707;    /* Background for the whole thing */
     --bg-panel:             #1a1a1a;    /* Control deck, preview area, status panels */
     --bg-group:             #151515;    /* Group Boxes */
     --bg-input:             #000;       /* Inputs, progress bar track */
@@ -322,7 +322,7 @@ body {
      * dimmed by MULTIPLYING it against background-color: 50% grey halves
      * its brightness. That grey IS the brightness dial — lower it to go
      * darker (#666 ~= 40%, #4d4d4d ~= 30%, #000 = black). */
-    background-color: #808080;
+    background-color: #666;
     background-image:
         linear-gradient(135deg,
             rgba(60, 160, 210, 0.12) 0%,
