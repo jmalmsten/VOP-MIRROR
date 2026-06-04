@@ -35,12 +35,16 @@ Issue #198 - Added a way to get a camera feed into the GUI in order to make it e
 
 A focus peaking mode is coming once this is nailed down.
 
+## Wood grain makeover
+Mostly a GUI niceity. I want to see the VOP using a wood style. 
+
 ## Changed:
 ### Rearranged the sections of the GUI
 In order to limit the vertical space used by the sidebar I moved the mags up as a horizontal line of sections. This is also in anticipation of the big wood-grain redesign that's coming later on.
 
 ### Moved Noise Crusher and Hot Pixel Mapper to the Calibration Page
 Simply because those are calibration steps. 
+
 
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.

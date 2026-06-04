@@ -124,6 +124,16 @@ Description:        Stylings for the whole GUI
     --color-bipack2:        #0a8;
     --tag-bipack2-border:   #075;
     --bg-sss-tag:           #331122;    /* Background for the SSS add-row button */
+
+    /* >>> Wood frame (makeover placeholder) <<< */
+    /* Solid "wood block" cheeks that flank the active page, evoking old
+       electronics: a central black board (the dark UI) framed by solid
+       wood end-pieces. These are placeholders only — real tileable wood
+       and board textures replace the fills later. */
+    --wood-color:       #4a1d14;   /* dark red mahogany placeholder fill   */
+    --wood-color-dark:  #371410;   /* shadow edge / inner face of the block */
+    --wood-width:       90px;      /* width of each side cheek             */
+    --wood-gap:         20px;      /* breathing space between wood + board  */
 }
 
 /* ############### Custom Instant Tooltips ############### */
@@ -297,6 +307,55 @@ body {
     display: grid;
     grid-template-columns: 1fr 420px;
     gap: 20px;
+
+    /* --- wood frame additions --- */
+    position: relative;                                  /* containing block for the cheeks */
+    box-sizing: border-box;                              /* padding eats inward, no overflow */
+    padding-left:  calc(var(--wood-width) + var(--wood-gap));
+    padding-right: calc(var(--wood-width) + var(--wood-gap));
+    
+}
+
+/* ---- WOOD FRAME — left/right cheeks ---------------------------------
+   Decorative placeholders for the wood-grain makeover. Rendered as
+   pseudo-elements on the active page so no markup changes are needed.
+   When your tileable mahogany image is ready, delete the gradient line
+   below and uncomment the background-image block — nothing else moves. */
+.page-section.page-active::before,
+.page-section.page-active::after {
+    content: "";
+    position: absolute;          /* out of the grid — won't shift the columns */
+    top: 0;                      /* top of the status bar (#page_main's first child) */
+    bottom: 0;                   /* down to the bottom of the Exposure Sheet         */
+    width: var(--wood-width);
+
+    /* Placeholder mahogany. The gradient only fakes a little depth while
+       blocking in; it is NOT the texture. Replace with the image later. */
+    background: linear-gradient(180deg,
+                    var(--wood-color)      0%,
+                    var(--wood-color-dark) 100%);
+
+    /* TILEABLE WOOD TEXTURE GOES HERE LATER:
+    background-image:  url("/static/img/wood_mahogany.png");
+    background-repeat: repeat;       (tiles both directions)
+    background-size:   256px auto;   (controls tile scale)
+    */
+
+    /* Makes the flat strip read as a solid raised panel. */
+    box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.45);
+}
+
+/* Left cheek, pinned to the left gutter. The dark border is its inner
+   face, giving a crisp wood-to-board seam. */
+.page-section.page-active::before {
+    left: 0;
+    border-right: 1px solid var(--wood-color-dark);
+}
+
+/* Right cheek — mirror of the left. */
+.page-section.page-active::after {
+    right: 0;
+    border-left: 1px solid var(--wood-color-dark);
 }
 
 
