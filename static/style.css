@@ -296,28 +296,34 @@ body {
  * means the layout inside the active page is byte-identical to
  * pre-page-nav behaviour. */
 .page-section.page-active {
-    /* Span both columns of the outer .container grid, same as
-     * .vop-header does at the top of the container. Without this,
-     * the page wrapper auto-places into a single column and any
-     * sibling element (notably the cheat-sheet) drops into the
-     * adjacent column instead of onto a new row below. */
-    grid-column:            1 / -1;
-
-    /* Inside, this page wrapper is itself a grid that recreates
-     * the column layout .container was providing directly before
-     * page-nav. .preview-area / .controls-area / .sheets-area
-     * declare grid-column and grid-row, so their direct parent
-     * has to be a grid with the matching template. */
+    grid-column: 1 / -1;
     display: grid;
-    grid-template-columns:  1fr 420px;
-    gap:                    20px;
+    grid-template-columns: 1fr 420px;
+    gap: 20px;
 
-    /* --- wood frame additions --- */
-    position:               relative;                                /* containing block for the cheeks */
-    box-sizing:             border-box;                              /* padding eats inward, no overflow */
-    padding-left:           calc(var(--wood-width) + var(--wood-gap));
-    padding-right:          calc(var(--wood-width) + var(--wood-gap));
-    
+    /* --- wood frame --- */
+    position: relative;
+    box-sizing: border-box;
+    padding-left:  calc(var(--wood-width) + var(--wood-gap));
+    padding-right: calc(var(--wood-width) + var(--wood-gap));
+
+    /* --- board backplate (inside the cheeks only) ---
+     * This element IS the cheek-enclosed board, so the texture can't leak
+     * outside it. Two background layers:
+     *   layer 1 (TOP)    a faint blue-cyan diagonal sheen
+     *   layer 2 (BOTTOM) the tiled monochrome grain (mainbg.jpg)
+     * The grain stays at native 100% scale and tiles in both axes. The
+     * gradient fades to fully TRANSPARENT, so its "off" end contributes
+     * nothing no matter which blend mode is set below (handy for tuning). */
+    background-color: #000;                       /* board base where grain is darkest */
+    background-image:
+        linear-gradient(135deg,
+            rgba(60, 160, 210, 0.12) 0%,          /* faint blue-cyan corner */
+            rgba(60, 160, 210, 0.00) 55%),        /* fades out diagonally   */
+        url("/static/mainbg.jpg");
+    background-repeat: no-repeat, repeat;
+    background-size:   cover, auto;               /* sheen spans board; grain at 100% */
+    background-blend-mode: screen;                /* additive-style lift (see note) */
 }
 
 /* ---- WOOD FRAME — left/right cheeks ------------------------------- */
