@@ -2599,8 +2599,8 @@ def run_persistent_engine():
             idle_x += idle_dx
             idle_y += idle_dy
             
-            if idle_x <= -0.8 or idle_x >= 0.8: idle_dx *= -1
-            if idle_y <= -0.6 or idle_y >= 0.6: idle_dy *= -1
+            if idle_x <= -0.7 or idle_x >= 0.7: idle_dx *= -1
+            if idle_y <= -0.5 or idle_y >= 0.5: idle_dy *= -1
 
             # --- CLEAR BEFORE DRAW (idle frame) ---
             # The idle branch never cleared, so with DOUBLEBUF every flip()
@@ -2691,7 +2691,41 @@ def run_persistent_engine():
                 # good texture rather than blanking the address.
                 if new_tex is not None:
                     if tex_ip is not None:
-                        tex_ip.release()   # free the old GPU texture
+                ip_mvp = np.eye(4, dtype='f4')
+
+                # ---- SIZE: width-driven, not height-driven ----
+                # The old code fixed the text HEIGHT and let WIDTH follow the
+                # text aspect ratio. Because the address string is long, its
+                # aspect ratio is large, so a fixed height produced a quad
+                # wider than the entire screen.
+                #
+                # Instead we fix the WIDTH to a small fraction of the screen
+                # and derive the height from the aspect ratio. Now any address,
+                # long or short, occupies the same modest width and just gets a
+                # proportionally small height.
+                #
+                # ip_half_w is the quad's NDC half-width (base quad spans
+                # -1..1), so 0.30 => 0.60 NDC wide => ~30% of screen width.
+                # This is the main knob for "how big is the address"; shrink it
+                # to make the text smaller.
+                ip_half_w = 0.30
+                ip_mvp[0, 0] = ip_half_w
+                # Height = width * screen_aspect / text_aspect. This is the old
+                # width formula solved for height instead, so glyphs stay
+                # undistorted on any panel (16:9, 3:2, UHD...).
+                ip_mvp[1, 1] = ip_half_w * (WIDTH / HEIGHT) / asp_ip
+
+                # ---- POSITION: fully below the logo, never overlapping ----
+                # X tracks the logo so the address bounces along with it.
+                ip_mvp[3, 0] = idle_x
+                # Y: drop from the logo CENTER (idle_y) by the logo's real NDC
+                # half-height, then a small gap, then a further half of THIS
+                # quad's height so the text's TOP edge clears the logo's BOTTOM.
+                # The old 0.30 assumed the logo was half as tall as it is, which
+                # is why the address sat over the logo's lower edge.
+                logo_half_h = 0.4          # MUST match the logo's mvp[1,1] above
+                gap = 0.06                 # blank space between logo and address
+                ip_mvp[3, 1] = idle_y - logo_half_h - gap - ip_mvp[1, 1]
                     tex_ip, asp_ip = new_tex, new_asp
 
             # Render the IP quad below the logo, only if we have one.
