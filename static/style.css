@@ -331,6 +331,11 @@ body {
     background-repeat: no-repeat, repeat;
     background-size:   cover, auto;
     background-blend-mode: screen, multiply;   /* cyan screens on; grain x grey dims it */
+    /* Soft highlight hugging the TOP edge of the board, matching the
+       cheeks' top-left lighting. Inset + a small positive Y offset lays a
+       light band along the top; it shows in the top texture margin and
+       reads as the upper edge of the recessed section. */
+    box-shadow: inset 0 2px 3px rgba(255, 235, 220, 0.18);
 }
 
 /* ---- WOOD FRAME — left/right cheeks ------------------------------- */
