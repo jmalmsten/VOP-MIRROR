@@ -130,8 +130,7 @@ Description:        Stylings for the whole GUI
        electronics: a central black board (the dark UI) framed by solid
        wood end-pieces. These are placeholders only — real tileable wood
        and board textures replace the fills later. */
-    --wood-color:       #4a1d14;   /* dark red mahogany placeholder fill   */
-    --wood-color-dark:  #371410;   /* shadow edge / inner face of the block */
+    --wood-color:       #8a1c0a;   /* dark red mahogany placeholder fill   */
     --wood-width:       60px;      /* width of each side cheek             */
     --wood-gap:         20px;      /* breathing space between wood + board  */
 
@@ -321,7 +320,7 @@ body {
     
 }
 
-/* ---- WOOD FRAME — left/right cheeks (colorized texture) ------------- */
+/* ---- WOOD FRAME — left/right cheeks ------------------------------- */
 .page-section.page-active::before,
 .page-section.page-active::after {
     content: "";
@@ -330,41 +329,40 @@ body {
     bottom: 0;
     width: var(--wood-width);
 
-    /* Colorize the monochrome grain. Two background layers:
-     *   layer 1 (TOP)    a solid fill of --wood-color  (the tint)
-     *   layer 2 (BOTTOM) the greyscale cheeks.jpg       (the grain)
-     * Blended with "color": keep the grain's LUMINANCE, take the red's
-     * HUE + SATURATION. Black stays black, white stays white, mids tint.
-     * Retune the mahogany shade entirely from --wood-color. */
+    /* Solid --wood-color tint over the greyscale grain, MULTIPLY-blended:
+     * tint * grain => --wood-color now controls depth (its darkness) AND
+     * saturation (its saturation), modulated by the wood grain. */
     background-image:
         linear-gradient(var(--wood-color), var(--wood-color)),
         url("/static/cheeks.jpg");
-    background-blend-mode: color;
+    background-blend-mode: multiply;
 
-    /* The tint covers everything. The texture is scaled to TWICE the cheek
-     * width, so the 256px-wide source maps to two cheek-widths: the left
-     * half feeds one cheek, the right half the other (chosen per side
-     * below). Height is auto so the scale stays uniform / undistorted, and
-     * it tiles vertically since the source is vertically tileable. */
     background-repeat: no-repeat, repeat-y;
     background-size:   cover, calc(var(--wood-width) * 2) auto;
 
-    box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.45);
+    /* Slightly rounded so each cheek reads as a physical panel. */
+    border-radius: 6px;
+
+    /* Bevel, lit from the top-left. With INSET shadows, positive offsets
+     * push the colour onto the TOP + LEFT edges and negative offsets onto
+     * the RIGHT + BOTTOM edges - so a warm light inset gives the highlight
+     * up/left, a dark inset gives the shadow down/right. Together they
+     * extrude the panel off the board. */
+    box-shadow:
+        inset  2px  2px 3px rgba(255, 235, 220, 0.22),   /* highlight: upper + left   */
+        inset -3px -3px 4px rgba(0,   0,   0,   0.55);    /* shadow:    right + bottom */
 }
 
 /* Left cheek: pinned left, shows the LEFT vertical strip of the texture. */
 .page-section.page-active::before {
     left: 0;
-    border-right: 1px solid var(--wood-color-dark);
-    background-position: center, left top;   /* gradient, then texture-left */
+    background-position: center, left top;
 }
 
-/* Right cheek: pinned right, shows the RIGHT vertical strip — a different
-   slice of grain, so the two sides aren't mirror-identical. */
+/* Right cheek: pinned right, shows the RIGHT vertical strip. */
 .page-section.page-active::after {
     right: 0;
-    border-left: 1px solid var(--wood-color-dark);
-    background-position: center, right top;  /* gradient, then texture-right */
+    background-position: center, right top;
 }
 
 
