@@ -45,6 +45,9 @@ In order to limit the vertical space used by the sidebar I moved the mags up as 
 ### Moved Noise Crusher and Hot Pixel Mapper to the Calibration Page
 Simply because those are calibration steps. 
 
+### Renamed mode names
+Mostly to clean it up and make them less width hungry.
+
 
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.
