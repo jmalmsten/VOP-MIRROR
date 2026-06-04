@@ -132,8 +132,13 @@ Description:        Stylings for the whole GUI
        and board textures replace the fills later. */
     --wood-color:       #4a1d14;   /* dark red mahogany placeholder fill   */
     --wood-color-dark:  #371410;   /* shadow edge / inner face of the block */
-    --wood-width:       90px;      /* width of each side cheek             */
+    --wood-width:       60px;      /* width of each side cheek             */
     --wood-gap:         20px;      /* breathing space between wood + board  */
+
+    /* Total horizontal space the frame removes (both cheeks + both gaps).
+       Anything that was sized off 100vw must subtract this so it stays
+       inside the cheeks instead of running under them. */
+    --wood-frame-total: calc(2 * (var(--wood-width) + var(--wood-gap)));
 }
 
 /* ############### Custom Instant Tooltips ############### */
@@ -1334,8 +1339,8 @@ body {
      * column, minus the 20px container gap. The sheet now starts at its 
      * natural grid position on the left and ends just before the controls 
      * column on the right. */
-    width:              max(830px, calc(100vw - 480px));
-    max-width:          max(830px, calc(100vw - 480px));
+    width:              max(830px, calc(100vw - 480px - var(--wood-frame-total)));
+    max-width:          max(830px, calc(100vw - 480px - var(--wood-frame-total)));
     box-sizing:         border-box;
 }
 
