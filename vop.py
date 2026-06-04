@@ -91,6 +91,11 @@ for d in [PROJ_MAG_DIR, PROJ_BIPACK1_DIR, PROJ_BIPACK2_DIR, CAM_MAG_DIR, os.path
 engine_process = None
 prores_process = None
 
+# Background handle for the on-demand workprint render, mirroring
+# prores_process above. /workprint_status polls this to report the
+# in-flight ffmpeg mux back to the button.
+workprint_process = None
+
 def ensure_engine_running():
     """
     Checks the execution state of the persistent engine daemon. 
@@ -800,6 +805,90 @@ def check_validation_warning():
 def serve_prores(filename):
     """ Serves the rendered ProRes file for browser download. """
     return send_from_directory(PRORES_DIR, filename, as_attachment=True)
+
+@app.route('/render_workprint', methods=['POST'])
+def render_workprint():
+    """
+    On-demand H.264 workprint (.mp4) render from the current CamMag TIFFs,
+    written into the WorkPrints dir exactly like the auto end-of-job
+    workprint. Lets the user re-mux a proof at will - e.g. after toggling
+    PAR unsqueeze, or after a LAB/INVERT - without running a whole job.
+    Returns immediately; poll /workprint_status for completion.
+    """
+    global workprint_process
+
+    # Refuse to start a second render while one is still in flight. Same
+    # guard the ProRes route uses - prevents two ffmpegs fighting over the
+    # CamMag and the output dir.
+    if workprint_process and workprint_process.poll() is None:
+        return jsonify({"status": "already_running"}), 409
+
+    # Nothing to mux if the CamMag is empty.
+    tiffs = sorted(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif")))
+    if not tiffs:
+        return jsonify({"error": "No frames found in CamMag"}), 404
+
+    try:
+        fps = request.json.get('fps', 24) if request.json else 24
+
+        # UNSQUEEZE (PAR) - driven by the Preview-unsqueeze checkbox in the
+        # GUI, forwarded as the 'unsqueeze' flag. When True we stamp the
+        # stream's sample aspect ratio (SAR = par_x/par_y) so the mp4 plays
+        # back unsqueezed: display_width = coded_width * (par_x/par_y). This
+        # is the same idea as the ProRes 'pasp' atom and is a clean no-op at
+        # PAR 1:1. When False, no SAR filter is added and the proof stays
+        # squeezed exactly as it sits on disk.
+        unsqueeze = bool(request.json.get('unsqueeze', False)) if request.json else False
+        par_x = float(request.json.get('par_x', 1.0) or 1.0) if request.json else 1.0
+        par_y = float(request.json.get('par_y', 1.0) or 1.0) if request.json else 1.0
+
+        ts = int(time.time())
+        # Same naming + location as the auto workprint, so the existing
+        # "VIEW WORKPRINT" link (which grabs the newest *.mp4 in WorkPrints)
+        # surfaces this render with no extra wiring.
+        out_mp4 = os.path.join(BASE_DIR, "WorkPrints", f"vop_wp_{ts}.mp4")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(fps),
+            "-pattern_type", "glob",
+            "-i", os.path.join(CAM_MAG_DIR, "*.tif"),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+        ]
+        # Only attach the SAR filter when unsqueeze is requested, so a
+        # squeezed proof carries no aspect metadata at all (truly as-shot).
+        if unsqueeze:
+            cmd += ["-vf", f"setsar={par_x}/{par_y}"]
+        cmd += [out_mp4]
+
+        print(f"[VOP SERVER] ACTION: RENDER WORKPRINT -> {os.path.basename(out_mp4)} | unsqueeze={unsqueeze} PAR={par_x}:{par_y}")
+        workprint_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return jsonify({"status": "started", "filename": os.path.basename(out_mp4)})
+    except Exception as e:
+        print(f"[VOP SERVER] Workprint render error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/workprint_status', methods=['GET'])
+def workprint_status():
+    """ Polls the background workprint ffmpeg process for completion.
+        Mirrors /prores_status. """
+    global workprint_process
+    if workprint_process is None:
+        return jsonify({"status": "idle"})
+    code = workprint_process.poll()
+    if code is None:
+        return jsonify({"status": "rendering"})
+    elif code == 0:
+        # Hand back the freshest mp4 so the frontend can update the link.
+        wp_dir = os.path.join(BASE_DIR, "WorkPrints")
+        mp4s = glob.glob(os.path.join(wp_dir, "*.mp4"))
+        filename = os.path.basename(max(mp4s, key=os.path.getctime)) if mp4s else ""
+        return jsonify({"status": "done", "filename": filename})
+    else:
+        return jsonify({"status": "error", "code": code})
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():

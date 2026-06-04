@@ -29,6 +29,9 @@ https://www.keshikan.net/fonts-e.html
 
 I claim no ownership of the font. I just find it neat. :)
 
+### RENDER WORKPRINT button
+Button to manually trigger creation of a new workprint even when a new full job isn't run.
+
 
 ## Camera Feed for Focus and alignment
 Issue #198 - Added a way to get a camera feed into the GUI in order to make it easier to both line up the camera, monitor and set focus.. Find it in the calibration page. And when using it. You should see a focus chart on the screen with some crosshairs in the corners and boxes in the corners of the camera feed. You should be able to use these to line up the camera to the monitor and set focus and zoom. 
