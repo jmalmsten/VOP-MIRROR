@@ -90,8 +90,8 @@ Description:        Stylings for the whole GUI
     --bg-body:              #070707;                /* Background for the whole thing */
     --bg-panel:             #1a1a1a;                /* Control deck, preview area, status panels */
     --bg-group:             #151515;                /* Group Boxes */
-    --bg-group-glass:       rgba(21, 21, 21, 0.60); /* translucent group-box fill (#151515 @ 60%) */
-    --group-blur:           6px;                      /* how much the board texture frosts behind a box */
+    --bg-group-glass:       rgba(10, 10, 10, 0.60); /* translucent group-box fill (#151515 @ 60%) */
+    --group-blur:           1.5px;                      /* how much the board texture frosts behind a box */
     --bg-input:             #000;                   /* Inputs, progress bar track */
     --bg-button-muted:      #222;                   /* Nuke buttons, upload-btn, cam_preview */
     --bg-input-field:       #0d0d0d;                /* Input field background - slightly darker */
@@ -328,11 +328,16 @@ body {
     background-image:
         linear-gradient(135deg,
             rgba(60, 160, 210, 0.12) 0%,
-            rgba(60, 160, 210, 0.00) 55%),     /* faint blue-cyan diagonal sheen */
-        url("/static/mainbg.jpg");             /* tiled board grain              */
-    background-repeat: no-repeat, repeat;
-    background-size:   cover, auto;
-    background-blend-mode: screen, multiply;   /* cyan screens on; grain x grey dims it */
+            rgba(60, 160, 210, 0.00) 55%),       /* cyan diagonal sheen */
+        url("/static/VOP-Graphic.png"),          /* printed schematic   */
+        url("/static/mainbg.jpg");               /* board grain         */
+    background-repeat:   no-repeat, no-repeat, repeat;
+    /* Layer 2 (the graphic) is the only one you'll move: x then y from the
+       board's top-left. 72px clears the left cheek; 88px drops it just below
+       the status bar. Slide these to taste. */
+    background-position: 0 0, 72px 88px, 0 0;
+    background-size:     cover, 256px 128px, auto;   /* graphic at 50% (512x256 -> 256x128) */
+    background-blend-mode: screen, screen, multiply; /* graphic screens onto the dimmed grain */
     /* Soft highlight hugging the TOP edge of the board, matching the
        cheeks' top-left lighting. Inset + a small positive Y offset lays a
        light band along the top; it shows in the top texture margin and
@@ -727,13 +732,18 @@ body {
 
 /* ################ PROBE / PREVIEW / EXECUTE ################### */
 
-.control-deck { 
-    grid-column:        1 / -1; 
-    background:         var(--bg-panel); 
-    padding:            12px 15px; 
-    border-radius:      var(--radius-standard); 
-    border:             1px solid var(--border-color); 
-    margin-bottom:      20px; 
+.control-deck {
+    grid-column:              1 / -1;
+    /* Unified with the group boxes: translucent glass + frosted board + inner shadow. */
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
+
+    padding:                  12px 15px;
+    border-radius:            var(--radius-standard);
+    border:                   1px solid var(--border-color);
+    margin-bottom:            20px;
 }
 
 /* ===========================================================
@@ -937,8 +947,12 @@ body {
 }
 
 .preview-area {
-    background:         var(--bg-panel);
-    border:             1px solid var(--border-color);
+    /* Unified with the group boxes (was var(--bg-panel)). */
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
+    border:                   1px solid var(--border-color);
 
     /* Sizing strategy:
      *   - Width: auto, capped at 70vh. The panel sizes to its content
