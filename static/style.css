@@ -1899,3 +1899,35 @@ body.brk-mode .brk-probe-controls {
     min-height:         1.2em;  /* reserve space so the layout doesn't
                                    jump when content arrives */
 }
+
+/* ===================================================================
+ * NARROW-VIEWPORT FALLBACK — collapse the wood frame
+ *
+ * On a wide screen the wood cheeks + gaps (~160px total) sit
+ * comfortably beside the GUI. On narrower windows that same 160px is
+ * the difference between fitting and needing a horizontal scrollbar,
+ * and the cheeks just get in the way.
+ *
+ * Below the breakpoint we zero the two gutter tokens. Because every
+ * frame measurement derives from them — the page padding, the
+ * cheat-sheet inset, and --wood-frame-total (which feeds .sheets-area's
+ * width) — the whole layout snaps back to its pre-makeover full width
+ * with no other rules touched. We then hide the cheeks, since a
+ * zero-width cheek would still leave its 1px border + shadow behind.
+ *
+ * The 1500px is the one value to tune: drag your window narrower until
+ * a horizontal scrollbar just appears, then set this a little above
+ * that width. (It must be a literal — @media conditions can't read CSS
+ * custom properties.)
+ * =================================================================== */
+@media (max-width: 1500px) {
+    :root {
+        --wood-width: 0px;
+        --wood-gap:   0px;
+        /* --wood-frame-total recomputes from these to 0px automatically */
+    }
+    .page-section.page-active::before,
+    .page-section.page-active::after {
+        display: none;
+    }
+}
