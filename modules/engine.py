@@ -2518,26 +2518,96 @@ def run_persistent_engine():
                                 "current": 0, "total": total_frames, "eta": 0, "est_mb": 0.0, "msg": "PRIMING SENSOR..."
                             }, hbf)
 
+                        # Running telemetry carried ACROSS iterations. Because we
+                        # now write the heartbeat BEFORE each (blocking) exposure,
+                        # the ETA and size estimate shown during frame N are derived
+                        # from the frames completed up to N-1. We seed them to zero
+                        # so the very first frame shows a clean "no estimate yet"
+                        # state rather than a stale/garbage value.
+                        eta_sec = 0
+                        total_proj_est_mb = 0.0
+
+                        # Running telemetry carried ACROSS iterations. Because we
+                        # now write the heartbeat BEFORE each (blocking) exposure,
+                        # the ETA and size estimate shown during frame N are derived
+                        # from the frames completed up to N-1. We seed them to zero
+                        # so the very first frame shows a clean "no estimate yet"
+                        # state rather than a stale/garbage value.
+                        eta_sec = 0
+                        total_proj_est_mb = 0.0
+
                         for f in range(f_start, f_end + 1):
+                            # 1-based index of the frame we are ABOUT to expose.
+                            # This is the frame physically sitting in the gate for
+                            # the duration of the upcoming (blocking) capture, so
+                            # it is the number the status bar AND the gate playheads
+                            # should display WHILE the camera integrates. (vop.py
+                            # feeds hb["current"] straight into resolve_gate_playheads,
+                            # so fixing it here fixes the gate readouts too.)
+                            in_progress = f - f_start + 1
+
+                            # Announce the frame BEFORE the exposure starts. The UI
+                            # will read "EXPOSING <in_progress>" for the whole shot,
+                            # instead of the old behaviour where it showed the frame
+                            # that had just FINISHED (the off-by-one we're fixing).
+                            # eta_sec / total_proj_est_mb here are the values left
+                            # over from the previous completed frame (0 on frame 1).
+                            with open("/tmp/vop_heartbeat", "w") as hbf:
+                                json.dump({
+                                    "current": in_progress, "total": total_frames,
+                                    "eta": eta_sec, "est_mb": round(total_proj_est_mb, 1),
+                                    "msg": "EXPOSING"
+                                }, hbf)
+
+                            # Blocking capture of frame f: captures, composites, and
+                            # commits latent_XXXX.tif. Returns only once the frame is
+                            # fully in the CamMag.
                             execute_exposure(f)
-                            done = f - f_start + 1
+
+                            # ---- post-exposure accounting ----
+                            # Frame f is now in the can. "done" == its 1-based index,
+                            # which equals the count of frames completed so far. These
+                            # numbers feed the NEXT iteration's pre-exposure heartbeat.
+                            done = in_progress
 
                             elapsed = time.time() - start_t
                             avg_time = elapsed / done
                             eta_sec = int(avg_time * (total_frames - done))
 
+                            # Measure the file we just wrote so the size projection
+                            # gets steadily more accurate as the job proceeds.
                             out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
                             if os.path.exists(out_f):
                                 total_size_bytes += os.path.getsize(out_f)
                                 files_found += 1
-                            
+
                             avg_size = total_size_bytes / max(1, files_found)
                             total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
 
-                            with open("/tmp/vop_heartbeat", "w") as hbf:
-                                json.dump({
-                                    "current": done, "total": total_frames, "eta": eta_sec, "est_mb": round(total_proj_est_mb, 1), "msg": "EXPOSING"
-                                }, hbf)
+                            # Blocking capture of frame f: captures, composites, and
+                            # commits latent_XXXX.tif. Returns only once the frame is
+                            # fully in the CamMag.
+                            execute_exposure(f)
+
+                            # ---- post-exposure accounting ----
+                            # Frame f is now in the can. "done" == its 1-based index,
+                            # which equals the count of frames completed so far. These
+                            # numbers feed the NEXT iteration's pre-exposure heartbeat.
+                            done = in_progress
+
+                            elapsed = time.time() - start_t
+                            avg_time = elapsed / done
+                            eta_sec = int(avg_time * (total_frames - done))
+
+                            # Measure the file we just wrote so the size projection
+                            # gets steadily more accurate as the job proceeds.
+                            out_f = os.path.join(cam_mag_dir, f"latent_{str(f).zfill(4)}.tif")
+                            if os.path.exists(out_f):
+                                total_size_bytes += os.path.getsize(out_f)
+                                files_found += 1
+
+                            avg_size = total_size_bytes / max(1, files_found)
+                            total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
 
                         ts = int(time.time())
                         out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
@@ -2548,6 +2618,22 @@ def run_persistent_engine():
                             "-c:v", "libx264", "-pix_fmt", "yuv420p", out_mp4
                         ]
                         log_audit(f"Creating Workprint: {out_mp4}")
+
+                        # All frames are exposed; the ffmpeg mux below is blocking
+                        # and can run for a while on a long job. Without this, the
+                        # status bar would sit frozen on the last frame's "EXPOSING"
+                        # readout the whole time, which looks like a crash. We pin
+                        # current == total so the bar reads 100% and the suffix shows
+                        # [total/total] (e.g. "RENDERING WORKPRINT [30/30]"). eta is 0
+                        # since we don't track ffmpeg progress; est_mb carries the
+                        # final size projection from the exposure loop.
+                        with open("/tmp/vop_heartbeat", "w") as hbf:
+                            json.dump({
+                                "current": total_frames, "total": total_frames,
+                                "eta": 0, "est_mb": round(total_proj_est_mb, 1),
+                                "msg": "RENDERING WORKPRINT"
+                            }, hbf)
+
                         subprocess.run(ffmpeg_cmd)
 
                 elif task == 'lab_invert':
