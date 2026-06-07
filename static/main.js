@@ -966,13 +966,13 @@ const _gateState = {
     bp1: { cur: 1, total: 0 }, bp2: { cur: 1, total: 0 },
 };
 
-// total 0 -> ----/---- (empty gate). total 1 -> 0000/0000 (a lone still: the
+// total 0 -> ----/---- (empty gate). total 1 -> SINGLE_FR (a lone still: the
 // 0000 sentinel means "no sequence here"). total >= 2 -> the live counts, so
 // any digit in 0001-9999 tells you a TIFF sequence is loaded.
 function formatGateCount(cur, total) {
     const pad = n => String(Math.max(0, n | 0)).padStart(4, '0');
     if (!total || total <= 0) return '----/----';
-    if (total === 1)          return '0000/0000';
+    if (total === 1)          return 'SINGLE_FR';
     return `${pad(cur)}/${pad(total)}`;
 }
 
@@ -1433,6 +1433,81 @@ async function renderProRes() {
     }
 }
 
+/**
+ * Kicks off a background ffmpeg H.264 workprint (.mp4) render from the
+ * current CamMag, polls until complete, then opens the proof in a new
+ * tab for viewing. Mirrors renderProRes() with two differences:
+ *   - it forwards the Preview-unsqueeze checkbox as 'unsqueeze', so the
+ *     proof is rendered with PAR applied (or left squeezed) to match;
+ *   - on completion it OPENS the mp4 for viewing rather than forcing a
+ *     download, since a workprint is a proof, not a final deliverable.
+ */
+async function renderWorkprint() {
+    const btn = document.querySelector('.workprint-btn');
+    if (btn) { btn.innerText = 'RENDERING...'; btn.disabled = true; }
+
+    try {
+        // Pull current GUI state. par_x / par_y are the anamorphic fields;
+        // preview_unsqueeze is the checkbox that, when ticked, tells the
+        // backend to stamp the SAR so the proof plays back unsqueezed.
+        // collectParams() returns the checkbox as a real boolean and the
+        // number fields as strings - the backend floats the latter, so we
+        // forward them verbatim exactly like renderProRes() does.
+        const cp = collectParams();
+        const startResp = await fetch('/render_workprint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fps: cp.fps || 24,
+                par_x: cp.par_x || 1.0,
+                par_y: cp.par_y || 1.0,
+                unsqueeze: cp.preview_unsqueeze === true
+            })
+        });
+        const startData = await startResp.json();
+
+        if (!startResp.ok) {
+            // e.g. 404 "No frames found in CamMag", or 409 already_running.
+            alert(`Workprint render failed to start: ${startData.error || startData.status}`);
+            if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+            return;
+        }
+
+        // Poll /workprint_status until ffmpeg finishes.
+        const pollInterval = setInterval(async () => {
+            try {
+                const r = await fetch('/workprint_status');
+                const st = await r.json();
+
+                if (st.status === 'done') {
+                    clearInterval(pollInterval);
+                    if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+                    // Open the freshly-muxed proof for viewing. serve_workprint
+                    // sends it inline, so it plays straight in the browser tab.
+                    // The idle /status poll also refreshes the "VIEW WORKPRINT"
+                    // link to this same file, so it stays reachable afterwards.
+                    if (st.filename) {
+                        window.open(`/workprints/${st.filename}`, '_blank');
+                    }
+
+                } else if (st.status === 'error') {
+                    clearInterval(pollInterval);
+                    if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+                    alert(`Workprint render failed (ffmpeg exit code: ${st.code})`);
+                }
+                // 'rendering' -> keep polling
+            } catch (e) {
+                console.error("Workprint poll error:", e);
+            }
+        }, 2000); // Match the ProRes poll cadence - 2s is plenty.
+
+    } catch (e) {
+        console.error("Workprint render error:", e);
+        if (btn) { btn.innerText = 'RENDER WORKPRINT'; btn.disabled = false; }
+        alert("A network error occurred starting the workprint render.");
+    }
+}
+
 /* Job Management: Import
 Uploads a JSON file, replaces current_job.json, and handles version warnings.
 */
@@ -1497,6 +1572,248 @@ async function importJob(input) {
 // of JS coupling and slice 6 part 2 can be re-styled or restructured
 // without breaking the JS bindings here.
 
+// ====================================================================
+// FRAMING & FOCUS controller (issue #198)
+//
+// Drives the live camera feed on the Calibration page. Starting the
+// feed POSTs /calibration_feed/start (which refuses if the engine is
+// busy), then points the feed <img> at the streaming route. Stopping
+// clears the <img> src (so the browser closes the MJPEG connection)
+// and POSTs /calibration_feed/stop to release the camera.
+//
+// The feed and any camera capture are mutually exclusive on the sensor,
+// so we stop the feed whenever the user leaves the page or starts a
+// calibration measurement. The backend also stops it defensively in
+// dispatch_engine, but stopping here too keeps the UI honest (no broken
+// <img> left pointing at a dead stream).
+// ====================================================================
+const framing = {
+    active: false,
+
+    init() {
+        const startBtn = document.getElementById('cal_feed_start_btn');
+        const stopBtn  = document.getElementById('cal_feed_stop_btn');
+        if (startBtn) startBtn.addEventListener('click', () => this.startFeed());
+        if (stopBtn)  stopBtn.addEventListener('click',  () => this.stopFeed());
+
+        // 1:1 focus zoom (Slice 4): the toggle button + the click-drag pan.
+        const zoomBtn = document.getElementById('cal_feed_zoom_btn');
+        if (zoomBtn) zoomBtn.addEventListener('click', () => this.toggleZoom());
+        this.initZoomPan();
+    },
+
+    setStatus(text) {
+        const el = document.getElementById('cal_feed_status');
+        if (el) el.innerText = text;
+    },
+
+    async startFeed() {
+        // Ask the backend to claim the camera first. 409 = engine busy.
+        const resp = await fetch('/calibration_feed/start', { method: 'POST' });
+        if (!resp.ok) {
+            this.setStatus('Busy (engine running)');
+            return;
+        }
+        // Point the <img> at the stream. The cache-buster guarantees a
+        // fresh connection even if the feed was started before in this
+        // session (browsers will otherwise reuse a closed stream URL).
+        const img = document.getElementById('cal_feed_img');
+        if (img) img.src = '/calibration_feed?t=' + Date.now();
+        const stack = document.getElementById('cal_preview_stack');
+        if (stack) stack.classList.add('feed-active');
+        // Draw/refresh the aspect-aware corner boxes for the current panel.
+        // Fire-and-forget: the overlay appears a beat after the feed, which
+        // is fine - the feed is what the operator looks at first anyway.
+        this.refreshOverlay();
+        this.active = true;
+        this.setStatus('Live');
+        // Turn on the on-screen alignment/focus targets so they appear on
+        // the projection monitor - visible through the feed you just
+        // started. Independent of the camera (display-only), so this rides
+        // alongside the live feed rather than competing for the sensor.
+        fetch('/calibration_targets/on', { method: 'POST' });
+    },
+
+    async stopFeed() {
+        if (!this.active) return;   // nothing to do; keeps page-leave cheap
+        // Drop the <img> src FIRST so the browser tears down the MJPEG
+        // connection, then tell the backend to kill rpicam-vid.
+        const img = document.getElementById('cal_feed_img');
+        if (img) img.src = '';
+        const stack = document.getElementById('cal_preview_stack');
+        if (stack) {
+            stack.classList.remove('feed-active');
+            // Also drop 1:1 zoom: a stopped feed left in zoom mode would hide
+            // BOTH the feed (no feed-active) and the still (zoom-1x hides it),
+            // leaving a blank box. Returning to FIT keeps the next START clean.
+            stack.classList.remove('zoom-1x');
+        }
+        const zoomBtn = document.getElementById('cal_feed_zoom_btn');
+        if (zoomBtn) zoomBtn.innerText = '1:1 FOCUS';
+        this.active = false;
+        this.setStatus('Stopped');
+        // Drop the on-screen targets too; the idle loop returns to the logo.
+        fetch('/calibration_targets/off', { method: 'POST' });
+        await fetch('/calibration_feed/stop', { method: 'POST' });
+    },
+
+    // Draw the aspect-aware corner boxes onto the SVG overlay. Fetches the
+    // panel + sensor dimensions, works out where the projection monitor sits
+    // inside the 4:3 sensor frame (the "content rect" - same geometry vop.py
+    // uses for Cam Mag ingest), and places a target box at each 10%-inset
+    // corner: exactly where the on-screen crosshairs land when the camera is
+    // squared up. We only ever work in sensor-pixel units; the SVG's
+    // preserveAspectRatio handles every bit of letterbox scaling for us.
+    async refreshOverlay() {
+        const svg = document.getElementById('cal_feed_overlay');
+        if (!svg) return;
+
+        let info;
+        try {
+            const r = await fetch('/display_info');
+            info = await r.json();
+        } catch (e) {
+            return;   // show no overlay rather than a wrong one
+        }
+
+        const camW = info.cam_w, camH = info.cam_h;
+        const monW = info.monitor_w, monH = info.monitor_h;
+        const camAspect = camW / camH;     // ~1.333 (the sensor / the feed)
+        const monAspect = monW / monH;     // e.g. 1.5 for the 3:2 panel
+
+        // viewBox = the actual sensor, so our pixel-unit geometry below maps
+        // 1:1 onto the feed image.
+        svg.setAttribute('viewBox', `0 0 ${camW} ${camH}`);
+
+        // Content rect = largest monitor-aspect rectangle that fits the
+        // sensor, matched to sensor WIDTH and centred (the framing
+        // convention). fw/fh = its size as fractions of the sensor; cx0/cy0
+        // = its top-left, also fractional.
+        let fw, fh, cx0, cy0;
+        if (monAspect >= camAspect) {
+            // Panel wider than the sensor (16:9, 3:2): spans full width,
+            // centred vertical band with black bars top/bottom.
+            fw = 1.0;
+            fh = camAspect / monAspect;
+            cx0 = 0.0;
+            cy0 = (1.0 - fh) / 2.0;
+        } else {
+            // Panel narrower than the sensor: spans full height, pillarboxed.
+            fh = 1.0;
+            fw = monAspect / camAspect;
+            cy0 = 0.0;
+            cx0 = (1.0 - fw) / 2.0;
+        }
+
+        const inset = 0.10;   // must match the 10% inset baked into the shader
+        const xs = [cx0 + inset * fw, cx0 + (1.0 - inset) * fw];
+        const ys = [cy0 + inset * fh, cy0 + (1.0 - inset) * fh];
+
+        const box  = 0.05 * camW;   // box side: 5% of sensor width (square, px)
+        const half = box / 2.0;
+        const tick = box * 0.25;    // centre-cross arm length
+
+        // Rebuild from scratch each call (idempotent). createElementNS is
+        // mandatory for SVG - createElement makes inert HTML nodes that never
+        // render inside an <svg>.
+        const NS = 'http://www.w3.org/2000/svg';
+        svg.replaceChildren();
+
+        // Faint outline of the whole content rect (expected panel edges).
+        const outline = document.createElementNS(NS, 'rect');
+        outline.setAttribute('class', 'cal-content-outline');
+        outline.setAttribute('x', cx0 * camW);
+        outline.setAttribute('y', cy0 * camH);
+        outline.setAttribute('width', fw * camW);
+        outline.setAttribute('height', fh * camH);
+        svg.appendChild(outline);
+
+        // Four corner boxes, each with a small centre cross.
+        for (const nx of xs) {
+            for (const ny of ys) {
+                const px = nx * camW, py = ny * camH;
+
+                const rect = document.createElementNS(NS, 'rect');
+                rect.setAttribute('class', 'cal-target-box');
+                rect.setAttribute('x', px - half);
+                rect.setAttribute('y', py - half);
+                rect.setAttribute('width', box);
+                rect.setAttribute('height', box);
+                svg.appendChild(rect);
+
+                const hLine = document.createElementNS(NS, 'line');
+                hLine.setAttribute('class', 'cal-target-tick');
+                hLine.setAttribute('x1', px - tick); hLine.setAttribute('y1', py);
+                hLine.setAttribute('x2', px + tick); hLine.setAttribute('y2', py);
+                svg.appendChild(hLine);
+
+                const vLine = document.createElementNS(NS, 'line');
+                vLine.setAttribute('class', 'cal-target-tick');
+                vLine.setAttribute('x1', px); vLine.setAttribute('y1', py - tick);
+                vLine.setAttribute('x2', px); vLine.setAttribute('y2', py + tick);
+                svg.appendChild(vLine);
+            }
+        }
+    },
+
+    // Toggle between FIT (whole sensor scaled to the box, for alignment) and
+    // 1:1 (native sensor pixels, for focus). The CSS class does all the
+    // layout switching; here we just flip it, update the label, and recentre.
+    toggleZoom() {
+        if (!this.active) return;   // nothing to zoom without a live feed
+        const stack = document.getElementById('cal_preview_stack');
+        const btn = document.getElementById('cal_feed_zoom_btn');
+        if (!stack) return;
+
+        const goingTo1x = !stack.classList.contains('zoom-1x');
+        stack.classList.toggle('zoom-1x', goingTo1x);
+        if (btn) btn.innerText = goingTo1x ? 'FIT VIEW' : '1:1 FOCUS';
+
+        // On entering 1:1, jump to the centre of the sensor where the moire
+        // focus target lives, so the operator starts looking at the right spot.
+        if (goingTo1x) this.centerZoom();
+    },
+
+    // Centre the scroll position on the middle of the oversized feed image.
+    // Reading scrollWidth/clientWidth right after the class flip forces a
+    // synchronous reflow, so these already reflect the native-size layout.
+    centerZoom() {
+        const stack = document.getElementById('cal_preview_stack');
+        if (!stack) return;
+        stack.scrollLeft = (stack.scrollWidth  - stack.clientWidth)  / 2;
+        stack.scrollTop  = (stack.scrollHeight - stack.clientHeight) / 2;
+    },
+
+    // Click-drag panning, active only in 1:1 mode. We move the crop opposite
+    // to the drag (grab-and-pull). Panning is pure scrollLeft/scrollTop, so
+    // nothing here writes an inline style. mousemove/up are on window so a
+    // drag keeps tracking even if the cursor leaves the box mid-pull.
+    initZoomPan() {
+        const stack = document.getElementById('cal_preview_stack');
+        if (!stack) return;
+        let dragging = false, startX = 0, startY = 0, startL = 0, startT = 0;
+
+        stack.addEventListener('mousedown', (e) => {
+            if (!stack.classList.contains('zoom-1x')) return;
+            dragging = true;
+            stack.classList.add('dragging');   // CSS swaps cursor to grabbing
+            startX = e.clientX; startY = e.clientY;
+            startL = stack.scrollLeft; startT = stack.scrollTop;
+            e.preventDefault();   // suppress the browser's native image drag-ghost
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            stack.scrollLeft = startL - (e.clientX - startX);
+            stack.scrollTop  = startT - (e.clientY - startY);
+        });
+        window.addEventListener('mouseup', () => {
+            if (!dragging) return;
+            dragging = false;
+            stack.classList.remove('dragging');
+        });
+    },
+};
+
 const calibration = {
     // Tracks whether *this* page's UI has initiated a task.
     // Different from the global isEngineRunning (which fires for ANY
@@ -1546,6 +1863,9 @@ const calibration = {
 
     // Gate all calibration buttons (including WB) while anytask runs.
     setButtonsEnabled(enabled) {
+        // A measurement is starting whenever we disable the buttons. It uses
+        // the camera, so release the framing feed first (single-owner sensor).
+        if (!enabled && typeof framing !== 'undefined') framing.stopFeed();
         ['cal_single_btn', 'cal_acb_btn', 'cal_wb_btn'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.disabled = !enabled;
@@ -1914,7 +2234,8 @@ const calibration = {
 // near the bottom of the body, so DOMContentLoaded has typically
 // already fired by the time main.js executes - we handle both cases.
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => calibration.init());
+document.addEventListener('DOMContentLoaded', () => { calibration.init(); framing.init(); });
 } else {
     calibration.init();
+    framing.init();
 }

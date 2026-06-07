@@ -87,12 +87,23 @@ Description:        Stylings for the whole GUI
 
     /* >>> Background & Panels <<< */
 
-    --bg-body:              #0b0b0b;    /* Background for the whole thing */
-    --bg-panel:             #1a1a1a;    /* Control deck, preview area, status panels */
-    --bg-group:             #151515;    /* Group Boxes */
-    --bg-input:             #000;       /* Inputs, progress bar track */
-    --bg-button-muted:      #222;       /* Nuke buttons, upload-btn, cam_preview */
-    --bg-input-field:       #0d0d0d;    /* Input field background - slightly darker */
+    --bg-body:              #070707;                /* Background for the whole thing */
+    --bg-panel:             #1a1a1a;                /* Control deck, preview area, status panels */
+    --bg-group:             #151515;                /* Group Boxes */
+    --bg-group-glass:       rgba(10, 10, 10, 0.60); /* translucent group-box fill (#151515 @ 60%) */
+    --group-blur:           1.5px;                      /* how much the board texture frosts behind a box */
+    --bg-input:             #000;                   /* Inputs, progress bar track */
+    --bg-button-muted:      #222;                   /* Nuke buttons, upload-btn, cam_preview */
+    --bg-input-field:       #0d0d0d;                /* Input field background - slightly darker */
+
+    --graphic-w: 256px;   /* schematic display size = 50% of the 512x256 source */
+    --graphic-h: 128px;
+
+    /* Inset bevel shared by both cheeks (lit from top-left). Stored as a
+       token so each cheek can append its own outer shadow below. */
+    --cheek-bevel:
+        inset  2px  2px 3px rgba(255, 235, 220, 0.22),
+        inset -3px -3px 4px rgba(0, 0, 0, 0.55);
     
     /* >>> Text Colors <<< */
 
@@ -124,6 +135,20 @@ Description:        Stylings for the whole GUI
     --color-bipack2:        #0a8;
     --tag-bipack2-border:   #075;
     --bg-sss-tag:           #331122;    /* Background for the SSS add-row button */
+
+    /* >>> Wood frame (makeover placeholder) <<< */
+    /* Solid "wood block" cheeks that flank the active page, evoking old
+       electronics: a central black board (the dark UI) framed by solid
+       wood end-pieces. These are placeholders only — real tileable wood
+       and board textures replace the fills later. */
+    --wood-color:       #8a1c0a;   /* dark red mahogany placeholder fill   */
+    --wood-width:       60px;      /* width of each side cheek             */
+    --wood-gap:         20px;      /* breathing space between wood + board  */
+
+    /* Total horizontal space the frame removes (both cheeks + both gaps).
+       Anything that was sized off 100vw must subtract this so it stays
+       inside the cheeks instead of running under them. */
+    --wood-frame-total: calc(2 * (var(--wood-width) + var(--wood-gap)));
 }
 
 /* ############### Custom Instant Tooltips ############### */
@@ -282,23 +307,103 @@ body {
  * means the layout inside the active page is byte-identical to
  * pre-page-nav behaviour. */
 .page-section.page-active {
-    /* Span both columns of the outer .container grid, same as
-     * .vop-header does at the top of the container. Without this,
-     * the page wrapper auto-places into a single column and any
-     * sibling element (notably the cheat-sheet) drops into the
-     * adjacent column instead of onto a new row below. */
     grid-column: 1 / -1;
-
-    /* Inside, this page wrapper is itself a grid that recreates
-     * the column layout .container was providing directly before
-     * page-nav. .preview-area / .controls-area / .sheets-area
-     * declare grid-column and grid-row, so their direct parent
-     * has to be a grid with the matching template. */
     display: grid;
     grid-template-columns: 1fr 420px;
     gap: 20px;
+
+    /* --- wood frame --- */
+    position: relative;
+    box-sizing: border-box;
+    padding-left:  calc(var(--wood-width) + var(--wood-gap));
+    padding-right: calc(var(--wood-width) + var(--wood-gap));
+    /* Texture margin top & bottom so the first/last elements don't sit
+       right on the board edge now that there's a visible backplate. */
+    padding-top:    var(--wood-gap);
+    padding-bottom: var(--wood-gap);
+
+    /* --- board backplate (inside the cheeks only) ---
+     * Faint blue-cyan diagonal sheen over the tiled grain. The grain is
+     * dimmed by MULTIPLYING it against background-color: 50% grey halves
+     * its brightness. That grey IS the brightness dial — lower it to go
+     * darker (#666 ~= 40%, #4d4d4d ~= 30%, #000 = black). */
+    background-color: #666;
+    background-image:
+        linear-gradient(135deg,
+            rgba(60, 160, 210, 0.12) 0%,
+            rgba(60, 160, 210, 0.00) 55%),     /* cyan diagonal sheen */
+        url("/static/mainbg.jpg");             /* board grain         */
+    background-repeat: no-repeat, repeat;
+    background-size:   cover, auto;
+    background-blend-mode: screen, multiply;
+    /* Soft highlight hugging the TOP edge of the board, matching the
+       cheeks' top-left lighting. Inset + a small positive Y offset lays a
+       light band along the top; it shows in the top texture margin and
+       reads as the upper edge of the recessed section. */
+    box-shadow: inset 0 2px 3px rgba(255, 235, 220, 0.18);
 }
 
+/* Decorative VOP schematic, "printed" onto the board texture in the top-left.
+   Absolute, so it sits outside the grid and shifts no panels. mix-blend-mode
+   screen drops the PNG's black onto the texture (only the white linework
+   shows); opacity is the print-strength dial. The control-deck indent and
+   mags-row drop below open a clear patch of texture for it to land on. */
+.vop-graphic {
+    position:           absolute;
+    top:                var(--wood-gap);                        /* aligns with content top   */
+    left:               calc(var(--wood-width) + var(--wood-gap)); /* just right of left cheek */
+    width:              var(--graphic-w);
+    height:             var(--graphic-h);
+
+    background-image:   url("/static/VOP-Graphic.png");
+    background-size:    contain;
+    background-repeat:  no-repeat;
+
+    mix-blend-mode:     screen;   /* black vanishes onto the texture, white prints */
+    opacity:            0.75;     /* your 75% print strength */
+    pointer-events:     none;     /* purely decorative — never intercept clicks */
+}
+
+/* ---- WOOD FRAME — left/right cheeks ------------------------------- */
+.page-section.page-active::before,
+.page-section.page-active::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: var(--wood-width);
+
+    background-image:
+        linear-gradient(var(--wood-color), var(--wood-color)),
+        url("/static/cheeks.jpg");
+    background-blend-mode: multiply;
+
+    background-repeat: no-repeat, repeat-y;
+    background-size:   cover, calc(var(--wood-width) * 2) auto;
+
+    border-radius: 6px;
+    /* Bevel + per-side outer shadow are set on each cheek below, so the
+       outer shadow can be thrown inward toward the board. */
+}
+
+.page-section.page-active::before {
+    left: 0;
+    background-position: center, left top;
+    /* Inset bevel, then an outer shadow thrown RIGHT onto the board so the
+       cheek reads as standing proud of a recessed main section. */
+    box-shadow:
+        var(--cheek-bevel),
+        8px 0 14px -3px rgba(0, 0, 0, 0.55);
+}
+
+.page-section.page-active::after {
+    right: 0;
+    background-position: center, right top;
+    /* Same, thrown LEFT onto the board. */
+    box-shadow:
+        var(--cheek-bevel),
+        -8px 0 14px -3px rgba(0, 0, 0, 0.55);
+}
 
 /* ===========================================================
  * Calibration page styling 
@@ -331,6 +436,115 @@ body {
 .cal-controls-area {
     grid-column:        2;
 }
+
+/* Framing/focus preview stack (issue #198). The wrapper fills the
+ * preview box and positions its two <img> children on top of each
+ * other so the live feed and the still capture share the same space.
+ * A future alignment overlay (Slice 3) becomes a third absolutely-
+ * positioned child here. */
+.cal-preview-stack {
+    position:           relative;
+    width:              100%;
+    height:             100%;
+}
+
+/* Both images fill the stack and letterbox via object-fit:contain,
+ * matching #probe_img's behaviour on the Main page. */
+.cal-preview-stack img {
+    position:           absolute;
+    top:                0;
+    left:               0;
+    width:              100%;
+    height:             100%;
+    object-fit:         contain;
+}
+
+/* Default: still capture visible, live feed hidden. */
+#cal_feed_img {
+    display:            none;
+}
+
+/* When framing is active, the stack gets .feed-active: show the live
+ * feed, hide the still. Toggled by main.js's framing controller. */
+.cal-preview-stack.feed-active #cal_feed_img  { display: block; }
+.cal-preview-stack.feed-active #cal_probe_img { display: none;  }
+
+/* Framing overlay (issue #198, Slice 3). Fills the stack; its SVG content
+ * auto-letterboxes to coincide with the feed image. Hidden until framing
+ * is active. pointer-events:none so the overlay never swallows clicks -
+ * right-click -> "open feed in new tab" keeps working through it. */
+.cal-feed-overlay {
+    position:           absolute;
+    top:                0;
+    left:               0;
+    width:              100%;
+    height:             100%;
+    pointer-events:     none;
+    display:            none;
+}
+.cal-preview-stack.feed-active .cal-feed-overlay { display: block; }
+
+/* Faint dashed outline of where the projection monitor SHOULD sit in the
+ * sensor frame (full sensor width, centred band per the framing
+ * convention). Helps eyeball the panel edges as well as the corners. */
+.cal-content-outline {
+    fill:               none;
+    stroke:             rgba(255, 255, 255, 0.35);
+    stroke-width:       1;
+    stroke-dasharray:   6 6;
+    vector-effect:      non-scaling-stroke;
+}
+
+/* The four corner target boxes the operator aligns the on-screen
+ * crosshairs into. Uses the UI accent (#0ad) - swap the colour here if it
+ * doesn't pop enough against your panel content. */
+.cal-target-box {
+    fill:               none;
+    stroke:             var(--color-accent);
+    stroke-width:       2;
+    vector-effect:      non-scaling-stroke;
+}
+
+/* Small centre tick inside each box for precise targeting. */
+.cal-target-tick {
+    stroke:             var(--color-accent);
+    stroke-width:       2;
+    vector-effect:      non-scaling-stroke;
+}
+
+/* ---- 1:1 FOCUS ZOOM (issue #198, Slice 4) ----
+ * In zoom mode the feed renders at native sensor pixels and the stack
+ * becomes a fixed-size viewport the operator pans by click-dragging
+ * (main.js sets scrollLeft/scrollTop - DOM properties, never inline
+ * styles, per the no-inline-styles rule). The alignment overlay and the
+ * still are hidden: focus is a centre-of-frame, look-at-the-moire task,
+ * not an alignment one.
+ *
+ * overflow:hidden (not auto) clips without scrollbars; programmatic
+ * scrollLeft/scrollTop still pans it. If panning ever feels stuck on a
+ * given browser, switch this to overflow:auto. */
+.cal-preview-stack.zoom-1x {
+    overflow:           hidden;
+    cursor:             grab;
+}
+.cal-preview-stack.zoom-1x.dragging {
+    cursor:             grabbing;
+}
+.cal-preview-stack.zoom-1x #cal_feed_img {
+    /* Pull the feed out of the absolute object-fit:contain layout and let
+     * it size to its intrinsic 2028x1520, becoming the scroll content.
+     * These override the base ".cal-preview-stack img" rule (higher
+     * specificity: two classes + an id beats one class + a type). */
+    position:           static;
+    width:              auto;
+    height:             auto;
+    max-width:          none;
+    max-height:         none;
+    object-fit:         none;
+}
+/* Hide the alignment overlay and the still while focusing. */
+.cal-preview-stack.zoom-1x .cal-feed-overlay { display: none; }
+.cal-preview-stack.zoom-1x #cal_probe_img    { display: none; }
 
 /* Status row inside the Peak White group box.
  * "Status: Ready" / "Status: Measuring" indicator. */
@@ -537,13 +751,22 @@ body {
 
 /* ################ PROBE / PREVIEW / EXECUTE ################### */
 
-.control-deck { 
-    grid-column:        1 / -1; 
-    background:         var(--bg-panel); 
-    padding:            12px 15px; 
-    border-radius:      var(--radius-standard); 
-    border:             1px solid var(--border-color); 
-    margin-bottom:      20px; 
+.control-deck {
+    grid-column:              1 / -1;
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
+
+    /* Indent the left end past the schematic so the bar starts to its right... */
+    margin-left:              calc(var(--graphic-w) + 16px);
+    /* ...and drop the bottom margin so the schematic's lower half lands on open
+       texture above the CAM MAG box (≈ schematic height minus the bar's own). */
+    margin-bottom:            calc(var(--graphic-h) - 50px);
+
+    padding:                  12px 15px;
+    border-radius:            var(--radius-standard);
+    border:                   1px solid var(--border-color);
 }
 
 /* ===========================================================
@@ -583,12 +806,22 @@ body {
     box-sizing:         border-box;
 }
 
-.group-box { 
-    background:         var(--bg-group); 
-    border:             1px solid var(--border-color); 
-    border-radius:      var(--radius-standard); 
-    padding:            12px; 
-    margin-bottom:      10px; 
+.group-box {
+    /* Translucent fill so the board texture reads through, then frost what
+       shows through with backdrop-filter — a subtle glass panel sitting on
+       the textured board. Alpha (in --bg-group-glass) trades panel solidity
+       for how much texture bleeds through; --group-blur is the frost amount. */
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+
+    border:                   1px solid var(--border-color);
+    border-radius:            var(--radius-standard);
+    padding:                  12px;
+    margin-bottom:            10px;
+
+    /* Slight inner shadow so the panel reads as gently recessed. */
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
 .group-box.bipack {
@@ -624,7 +857,7 @@ body {
  * font as everything else - only the digit spacing is fixed (tabular-nums)
  * so the numbers don't jitter as they tick, and it's dimmed so the title
  * still reads as primary. The 7-segment styling pass comes later; this is
- * deliberately plain. The three states (----/---- empty, 0000/0000 still,
+ * deliberately plain. The three states (----/---- empty, SINGLE_FR still,
  * 0001-9999 sequence) are produced by formatGateCount() in main.js. */
 /* Per-gate frame readout - inset DSEG14 "LED window".
  *
@@ -737,8 +970,12 @@ body {
 }
 
 .preview-area {
-    background:         var(--bg-panel);
-    border:             1px solid var(--border-color);
+    /* Unified with the group boxes (was var(--bg-panel)). */
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
+    border:                   1px solid var(--border-color);
 
     /* Sizing strategy:
      *   - Width: auto, capped at 70vh. The panel sizes to its content
@@ -1166,8 +1403,8 @@ body {
      * column, minus the 20px container gap. The sheet now starts at its 
      * natural grid position on the left and ends just before the controls 
      * column on the right. */
-    width:              max(830px, calc(100vw - 480px));
-    max-width:          max(830px, calc(100vw - 480px));
+    width:              max(830px, calc(100vw - 480px - var(--wood-frame-total)));
+    max-width:          max(830px, calc(100vw - 480px - var(--wood-frame-total)));
     box-sizing:         border-box;
 }
 
@@ -1418,6 +1655,18 @@ body {
 .brk-sheet.layer-disabled-pm  .pm-spatial-cell { display: none; }
 .brk-sheet.layer-disabled-bp1 .bp1-spatial-cell { display: none; }
 .brk-sheet.layer-disabled-bp2 .bp2-spatial-cell { display: none; }
+
+/* The cheat-sheet sits BELOW the wood-framed page, outside the frame.
+   It deliberately gets no wood cheeks of its own — but we inset its
+   sides by the same gutter as the framed UI above so its content lines
+   up inside the same boundaries. Result: visually contained, yet clearly
+   not part of the main instrument panel. Reuses the frame gutter token
+   so it tracks any future change to --wood-width or --wood-gap. */
+.cheat-sheet-section {
+    padding-left:  calc(var(--wood-width) + var(--wood-gap));
+    padding-right: calc(var(--wood-width) + var(--wood-gap));
+    box-sizing:    border-box;   /* inset stays inside the block's own width */
+}
 
 /* Add-row button. Reuses the existing .add-row layout and gives BRK
  * its own visual accent so users can tell at a glance which mode's
@@ -1713,4 +1962,36 @@ body.brk-mode .brk-probe-controls {
     margin-top:         4px;
     min-height:         1.2em;  /* reserve space so the layout doesn't
                                    jump when content arrives */
+}
+
+/* ===================================================================
+ * NARROW-VIEWPORT FALLBACK — collapse the wood frame
+ *
+ * On a wide screen the wood cheeks + gaps (~160px total) sit
+ * comfortably beside the GUI. On narrower windows that same 160px is
+ * the difference between fitting and needing a horizontal scrollbar,
+ * and the cheeks just get in the way.
+ *
+ * Below the breakpoint we zero the two gutter tokens. Because every
+ * frame measurement derives from them — the page padding, the
+ * cheat-sheet inset, and --wood-frame-total (which feeds .sheets-area's
+ * width) — the whole layout snaps back to its pre-makeover full width
+ * with no other rules touched. We then hide the cheeks, since a
+ * zero-width cheek would still leave its 1px border + shadow behind.
+ *
+ * The 1500px is the one value to tune: drag your window narrower until
+ * a horizontal scrollbar just appears, then set this a little above
+ * that width. (It must be a literal — @media conditions can't read CSS
+ * custom properties.)
+ * =================================================================== */
+@media (max-width: 1500px) {
+    :root {
+        --wood-width: 0px;
+        --wood-gap:   0px;
+        /* --wood-frame-total recomputes from these to 0px automatically */
+    }
+    .page-section.page-active::before,
+    .page-section.page-active::after {
+        display: none;
+    }
 }

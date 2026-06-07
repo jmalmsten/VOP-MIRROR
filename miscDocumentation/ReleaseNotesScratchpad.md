@@ -1,4 +1,4 @@
-# V0.13.0 (YYYYMMDD)
+# V0.13.1 (YYYYMMDD)
 ## Added: 
 ### Restored the IP output for the idle screen
 This one has been missed for a while. The idle screen used to show the IP and Port for the WebGUI. Now it's back.
@@ -17,7 +17,7 @@ The number is four digits. 0001-9999 because, right now, the step printer logic 
 The step printers have three stages depending on what is loaded. 
 
 - ``----/----`` - means the mag is empty and nothing is loaded
-- ``0000/0000`` - means that a lone image is loaded and is treated as a still image. No step printing available.
+- ``SINGLE_FR`` - means that a lone image is loaded and is treated as a still image. No step printing available.
 - ``0001-9999/0001-9999`` - this means a video has been ingested and transcoded to a tiff sequence that can be used with step printing.
 
 ### Font choice
@@ -29,6 +29,17 @@ https://www.keshikan.net/fonts-e.html
 
 I claim no ownership of the font. I just find it neat. :)
 
+### RENDER WORKPRINT button
+Button to manually trigger creation of a new workprint even when a new full job isn't run.
+
+
+## Camera Feed for Focus and alignment
+Issue #198 - Added a way to get a camera feed into the GUI in order to make it easier to both line up the camera, monitor and set focus.. Find it in the calibration page. And when using it. You should see a focus chart on the screen with some crosshairs in the corners and boxes in the corners of the camera feed. You should be able to use these to line up the camera to the monitor and set focus and zoom. 
+
+A focus peaking mode is coming once this is nailed down.
+
+## Wood grain makeover
+Mostly a GUI niceity. I want to see the VOP using a wood style. 
 
 ## Changed:
 ### Rearranged the sections of the GUI
@@ -37,6 +48,17 @@ In order to limit the vertical space used by the sidebar I moved the mags up as 
 ### Moved Noise Crusher and Hot Pixel Mapper to the Calibration Page
 Simply because those are calibration steps. 
 
+### Renamed mode names
+Mostly to clean it up and make them less width hungry.
+
+### Display branding when job is nuked
+When the NUKE JOB button is pressed and confirmed. The job is nuked and now a placeholder image is put into the preview. That placeholder is the branding image that's also used for the screensaver on the monitor.
+
+### Moved copyright text to bottom
+
+### Removed the Cheat Sheet from the bottom of the GUI
+the cheatsheet.html remains for a while until I decide this change didn't become more troublesome than I wanted.
+
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.
 - #186 - unified naming so type is now task in the python code and json. 
@@ -44,4 +66,4 @@ Simply because those are calibration steps.
 - Cleaned up a little inline css codes. 
 - #140 - not actionable here either. 
 - #141 - the whole standalone idle_screen.py is no more already. Nothing to do here.
-- When frame counter was added. Its using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.
+- When frame counter was added. It's using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.

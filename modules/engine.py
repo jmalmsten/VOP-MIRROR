@@ -62,6 +62,12 @@ os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
 # The IPC command file written by vop.py
 COMMAND_FILE = "/tmp/vop_cmd.json"
 
+# Sentinel polled by the idle loop (issue #198). While this file exists,
+# the projection monitor shows the framing/focus targets instead of the
+# bouncing logo. Same /tmp on-disk-IPC paradigm as COMMAND_FILE. vop.py
+# defines the identical path on its side - keep the two in sync.
+CAL_TARGETS_FILE = "/tmp/vop_cal_targets"
+
 def handle_sigterm(signum, frame):
     """
     Catches the Kill signal (sent when the VOP service restarts or stops).
@@ -261,6 +267,11 @@ def run_persistent_engine():
         screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
     
     ctx, prog, vao = gfx.init_render_pipeline()
+
+    # Calibration framing/focus targets (issue #198): its own program +
+    # fullscreen quad, drawn in the idle branch while CAL_TARGETS_FILE
+    # exists. Separate from prog/vao so it can't disturb the main pipeline.
+    cal_prog, cal_vao = gfx.init_calibration_targets(ctx)
 
     # Pre-allocate off-screen Framebuffer Objects (FBOs) for the BiPack masks.
     # One FBO per bipack layer so they render independently before being
@@ -2507,9 +2518,39 @@ def run_persistent_engine():
                                 "current": 0, "total": total_frames, "eta": 0, "est_mb": 0.0, "msg": "PRIMING SENSOR..."
                             }, hbf)
 
+                        # Running telemetry carried ACROSS iterations. Because we
+                        # now write the heartbeat BEFORE each (blocking) exposure,
+                        # the ETA and size estimate shown during frame N are derived
+                        # from the frames completed up to N-1. We seed them to zero
+                        # so the very first frame shows a clean "no estimate yet"
+                        # state rather than a stale/garbage value.
+                        eta_sec = 0
+                        total_proj_est_mb = 0.0
+
                         for f in range(f_start, f_end + 1):
+                            # 1-based index of the frame we are ABOUT to expose - the
+                            # frame in the gate for the upcoming blocking capture, so
+                            # it's the number the status bar AND gate playheads show
+                            # WHILE the camera integrates.
+                            in_progress = f - f_start + 1
+
+                            # Announce the frame BEFORE the exposure starts, so the
+                            # UI reads "EXPOSING <in_progress>" for the whole shot.
+                            # eta_sec / total_proj_est_mb are carried from the
+                            # previous completed frame (0 on frame 1).
+                            with open("/tmp/vop_heartbeat", "w") as hbf:
+                                json.dump({
+                                    "current": in_progress, "total": total_frames,
+                                    "eta": eta_sec, "est_mb": round(total_proj_est_mb, 1),
+                                    "msg": "EXPOSING"
+                                }, hbf)
+
+                            # Blocking capture of frame f: captures, composites, and
+                            # commits latent_XXXX.tif. Returns once it's in the CamMag.
                             execute_exposure(f)
-                            done = f - f_start + 1
+
+                            # ---- post-exposure accounting (feeds NEXT iteration) ----
+                            done = in_progress
 
                             elapsed = time.time() - start_t
                             avg_time = elapsed / done
@@ -2519,14 +2560,9 @@ def run_persistent_engine():
                             if os.path.exists(out_f):
                                 total_size_bytes += os.path.getsize(out_f)
                                 files_found += 1
-                            
+
                             avg_size = total_size_bytes / max(1, files_found)
                             total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
-
-                            with open("/tmp/vop_heartbeat", "w") as hbf:
-                                json.dump({
-                                    "current": done, "total": total_frames, "eta": eta_sec, "est_mb": round(total_proj_est_mb, 1), "msg": "EXPOSING"
-                                }, hbf)
 
                         ts = int(time.time())
                         out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
@@ -2537,6 +2573,22 @@ def run_persistent_engine():
                             "-c:v", "libx264", "-pix_fmt", "yuv420p", out_mp4
                         ]
                         log_audit(f"Creating Workprint: {out_mp4}")
+
+                        # All frames are exposed; the ffmpeg mux below is blocking
+                        # and can run for a while on a long job. Without this, the
+                        # status bar would sit frozen on the last frame's "EXPOSING"
+                        # readout the whole time, which looks like a crash. We pin
+                        # current == total so the bar reads 100% and the suffix shows
+                        # [total/total] (e.g. "RENDERING WORKPRINT [30/30]"). eta is 0
+                        # since we don't track ffmpeg progress; est_mb carries the
+                        # final size projection from the exposure loop.
+                        with open("/tmp/vop_heartbeat", "w") as hbf:
+                            json.dump({
+                                "current": total_frames, "total": total_frames,
+                                "eta": 0, "est_mb": round(total_proj_est_mb, 1),
+                                "msg": "RENDERING WORKPRINT"
+                            }, hbf)
+
                         subprocess.run(ffmpeg_cmd)
 
                 elif task == 'lab_invert':
@@ -2588,8 +2640,50 @@ def run_persistent_engine():
             idle_x += idle_dx
             idle_y += idle_dy
             
-            if idle_x <= -0.8 or idle_x >= 0.8: idle_dx *= -1
-            if idle_y <= -0.6 or idle_y >= 0.6: idle_dy *= -1
+            if idle_x <= -0.7 or idle_x >= 0.7: idle_dx *= -1
+            if idle_y <= -0.5 or idle_y >= 0.5: idle_dy *= -1
+
+            # --- CLEAR BEFORE DRAW (idle frame) ---
+            # The idle branch never cleared, so with DOUBLEBUF every flip()
+            # swapped to a back buffer still holding an OLDER idle frame and
+            # we drew the logo on top of it. Because the logo uses an "over"
+            # blend (SRC_ALPHA / ONE_MINUS_SRC_ALPHA below), only its opaque
+            # pixels overwrite - transparent areas keep whatever was already
+            # there - so the logo's swept path accumulated into the white
+            # smear-blocks now visible through the live feed.
+            #
+            # Bind the default framebuffer first (a prior task may have left
+            # a BiPack FBO bound) and clear to opaque black so each idle
+            # frame starts clean. Slice 2's alignment targets render in this
+            # same branch and rely on this clear too.
+            ctx.screen.use()
+            ctx.clear(0.0, 0.0, 0.0, 1.0)
+
+            # --- CALIBRATION TARGETS MODE (issue #198) ---
+            # While the framing tool is active, vop.py drops CAL_TARGETS_FILE.
+            # As long as it exists we draw the alignment/focus targets instead
+            # of the bouncing logo, so the operator - watching the live feed -
+            # can square the camera to the panel and dial in focus.
+            #
+            # This is a DISPLAY mode only; it never touches the camera, so the
+            # rpicam-vid feed keeps running right alongside it (the whole point
+            # is that you see these targets THROUGH the feed).
+            #
+            # We render, flip, throttle, then `continue` so the logo/IP block
+            # below is skipped entirely while targets are showing.
+            if os.path.exists(CAL_TARGETS_FILE):
+                # Opaque procedural geometry on a freshly-cleared black frame,
+                # so no alpha compositing is wanted. The exposure path can
+                # leave BLEND enabled on a multiplicative func; disabling it
+                # here guarantees the crosshairs/moire draw at full strength.
+                ctx.disable(moderngl.BLEND)
+                # Panel aspect -> circular centre target on 3:2 / 16:9 panels.
+                # float() guards against any chance of integer division.
+                cal_prog['u_aspect'].value = WIDTH / float(HEIGHT)
+                cal_vao.render(moderngl.TRIANGLE_STRIP)
+                pygame.display.flip()
+                time.sleep(1 / 60)   # same 60fps throttle as the logo path
+                continue
 
             # --- IDLE-SCREEN ALPHA BLENDING ---
             # The logo and IP textures are straight-alpha RGBA surfaces
@@ -2644,18 +2738,40 @@ def run_persistent_engine():
             # Render the IP quad below the logo, only if we have one.
             if tex_ip is not None:
                 ip_mvp = np.eye(4, dtype='f4')
-                # Scale: smaller than the logo. 0.18 height vs the logo's
-                # 0.4. Width follows the text aspect, screen-aspect
-                # corrected exactly like the logo so it isn't stretched
-                # on non-square panels.
-                ip_h = 0.18
-                ip_mvp[0, 0] = ip_h * asp_ip / (WIDTH / HEIGHT)
-                ip_mvp[1, 1] = ip_h
-                # Position: locked to the logo's X, and offset below it
-                # in Y so it tracks the bounce rigidly. The 0.30 offset
-                # clears the logo (half its 0.4 height) plus a small gap.
+
+                # ---- SIZE: width-driven, not height-driven ----
+                # The old code fixed the text HEIGHT and let WIDTH follow the
+                # text aspect ratio. Because the address string is long, its
+                # aspect ratio is large, so a fixed height produced a quad
+                # wider than the entire screen.
+                #
+                # Instead we fix the WIDTH to a small fraction of the screen
+                # and derive the height from the aspect ratio. Now any address,
+                # long or short, occupies the same modest width and just gets a
+                # proportionally small height.
+                #
+                # ip_half_w is the quad's NDC half-width (base quad spans
+                # -1..1), so 0.30 => 0.60 NDC wide => ~30% of screen width.
+                # This is the main knob for "how big is the address"; shrink it
+                # to make the text smaller.
+                ip_half_w = 0.30
+                ip_mvp[0, 0] = ip_half_w
+                # Height = width * screen_aspect / text_aspect. This is the old
+                # width formula solved for height instead, so glyphs stay
+                # undistorted on any panel (16:9, 3:2, UHD...).
+                ip_mvp[1, 1] = ip_half_w * (WIDTH / HEIGHT) / asp_ip
+
+                # ---- POSITION: fully below the logo, never overlapping ----
+                # X tracks the logo so the address bounces along with it.
                 ip_mvp[3, 0] = idle_x
-                ip_mvp[3, 1] = idle_y - 0.30
+                # Y: drop from the logo CENTER (idle_y) by the logo's real NDC
+                # half-height, then a small gap, then a further half of THIS
+                # quad's height so the text's TOP edge clears the logo's BOTTOM.
+                # The old 0.30 assumed the logo was half as tall as it is, which
+                # is why the address sat over the logo's lower edge.
+                logo_half_h = 0.4          # MUST match the logo's mvp[1,1] above
+                gap = 0.06                 # blank space between logo and address
+                ip_mvp[3, 1] = idle_y - logo_half_h - gap - ip_mvp[1, 1]
 
                 prog['mvp'].write(ip_mvp.tobytes())
                 # White, never monochrome-filtered - same treatment as

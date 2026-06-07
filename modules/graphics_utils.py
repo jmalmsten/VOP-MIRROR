@@ -154,6 +154,123 @@ def init_render_pipeline():
     
     return ctx, prog, vao
 
+
+def init_calibration_targets(ctx):
+    """
+    Build a SECOND, independent program + fullscreen quad that draws the
+    framing/focus targets (issue #198): corner crosshairs at a 10% inset
+    plus a centre moire (Siemens-star) focus pattern.
+
+    Kept entirely separate from init_render_pipeline's textured-quad
+    program so the alignment overlay never shares or disturbs the
+    exposure/idle render state. It owns its own program and its own
+    fullscreen quad buffer; the engine renders it in the idle branch only
+    while the calibration sentinel file exists.
+
+    Returns (cal_prog, cal_vao). Render cal_vao as a TRIANGLE_STRIP.
+    """
+    # VERTEX SHADER: plain fullscreen pass-through. No mvp - the quad is
+    # already in NDC (-1..1), so we just forward position and hand the
+    # 0..1 uv to the fragment shader to draw against.
+    vert = """
+    #version 300 es
+    layout (location = 0) in vec2 in_vert;
+    layout (location = 1) in vec2 in_tex;
+    out vec2 v_tex;
+    void main() {
+        gl_Position = vec4(in_vert, 0.0, 1.0);
+        v_tex = in_tex;
+    }
+    """
+
+    # FRAGMENT SHADER: everything is procedural, so the targets stay
+    # razor-sharp at any panel resolution with no texture to upload.
+    # highp (not mediump) because the centre moire's atan/sin at fine
+    # angles needs the precision to avoid shimmer artefacts of its own -
+    # this matches the old standalone vop_setup_align.py which worked well.
+    frag = """
+    #version 300 es
+    precision highp float;
+    in vec2 v_tex;
+    out vec4 f_col;
+
+    // Panel width/height. Used to undo the UV stretch on non-square
+    // panels so the centre target is a true circle, not an ellipse.
+    uniform float u_aspect;
+
+    void main() {
+        vec2 uv = v_tex;
+        vec3 col = vec3(0.0);
+
+        // ---- CENTRE FOCUS / MOIRE TARGET ----
+        // Centre the coords (-1..1) and stretch x by the panel aspect so
+        // the radial pattern is circular. A dense 64-spoke grating creates
+        // a strong moire shimmer that resolves into crisp, separate spokes
+        // exactly at best focus - the classic optical-printer focus aid.
+        vec2 c = (uv - 0.5) * 2.0;
+        c.x *= u_aspect;
+        float d = length(c);
+        if (d < 0.35) {
+            float a = atan(c.y, c.x);
+            float spokes = step(0.0, sin(a * 64.0));
+            // Fade the innermost few percent so the spokes don't collapse
+            // into aliased mush right at the hub where they all converge.
+            col += vec3(spokes * smoothstep(0.01, 0.04, d));
+        }
+
+        // ---- CORNER CROSSHAIRS (10% inset from each edge) ----
+        // A '+' at each of the four corners. Their CENTRES (0.1 / 0.9 in
+        // uv) are exactly what the feed-overlay boxes will target in
+        // Slice 3, and those centres are aspect-independent, which is why
+        // the crosshairs stay in plain uv space (only the centre circle
+        // needs aspect correction). t = arm thickness, l = arm half-length.
+        float t = 0.0015;
+        float l = 0.04;
+        vec2 p = vec2(0.1);   // inset fraction from the edges
+
+        // Vertical arms: narrow in x, extended in y, at all four corners.
+        bool vbar =
+            (abs(uv.x - p.x)       < t && abs(uv.y - p.y)       < l) ||
+            (abs(uv.x - (1.0-p.x)) < t && abs(uv.y - p.y)       < l) ||
+            (abs(uv.x - p.x)       < t && abs(uv.y - (1.0-p.y)) < l) ||
+            (abs(uv.x - (1.0-p.x)) < t && abs(uv.y - (1.0-p.y)) < l);
+
+        // Horizontal arms: narrow in y, extended in x, at all four corners.
+        bool hbar =
+            (abs(uv.y - p.y)       < t && abs(uv.x - p.x)       < l) ||
+            (abs(uv.y - (1.0-p.y)) < t && abs(uv.x - p.x)       < l) ||
+            (abs(uv.y - p.y)       < t && abs(uv.x - (1.0-p.x)) < l) ||
+            (abs(uv.y - (1.0-p.y)) < t && abs(uv.x - (1.0-p.x)) < l);
+
+        if (vbar || hbar) col = vec3(1.0);
+
+        f_col = vec4(col, 1.0);
+    }
+    """
+
+    cal_prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
+
+    # Safe default so a render before the engine first sets it still
+    # produces a circle on a square panel (and never divides by zero).
+    if 'u_aspect' in cal_prog:
+        cal_prog['u_aspect'].value = 1.0
+
+    # Fullscreen quad. SAME [x, y, u, v] vertex layout and TRIANGLE_STRIP
+    # winding as init_render_pipeline's quad, so the '2f 2f' format string
+    # and attribute names line up identically - one less thing to diverge.
+    verts = np.array([
+        -1.0,  1.0, 0.0, 1.0,
+         1.0,  1.0, 1.0, 1.0,
+        -1.0, -1.0, 0.0, 0.0,
+         1.0, -1.0, 1.0, 0.0
+    ], dtype='f4')
+
+    vbo = ctx.buffer(verts)
+    cal_vao = ctx.vertex_array(cal_prog, [(vbo, '2f 2f', 'in_vert', 'in_tex')])
+
+    return cal_prog, cal_vao
+
+
 class TextureManager:
     """
     Per-layer image cache and texture loader for the engine.

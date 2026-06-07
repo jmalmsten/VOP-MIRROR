@@ -35,15 +35,11 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.18">
 </head>
 <body>
-    VOP &copy; 2026 jmalmsten. 
-            Licensed under <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPLv3</a>.
-            <a href="https://codeberg.org/jmalmsten-com/VOP">Source Code</a>
-    <br>
     <div class="container">
         
         <div class="vop-header">
             <!-- Page title -->
-            <h2>VOP v0.13.0</h2>
+            <h2>VOP v0.13.1</h2>
 
             <!-- Page navigation. Click to switch between Main
                  (job editor + status + xsheet) and Calibration
@@ -67,6 +63,8 @@
              the "Main" page. The page-nav button toggles its
              visibility against #page_calibration further below. -->
         <div id="page_main" class="page-section page-active">
+            <!-- Decorative schematic, "printed" onto the board texture, top-left. -->
+            <div class="vop-graphic" aria-hidden="true"></div>
             {% include 'sections/status.html' %}
 
             <!-- Mag / BiPack row.
@@ -381,9 +379,9 @@
                                  about it yet. The dropdown option will be
                                  re-added in a future slice after the
                                  engine plumbing lands. -->
-                            <optgroup label="Frame-locked">
+                            <optgroup label="HDR / No Smear">
                                 <option value="DRE">DRE (Experimental)</option>
-                                <option value="BRK">BRK (Bracketed, not yet implemented)</option>
+                                <option value="BRK">BRK (Experimental)</option>
                             </optgroup>
                         </select>
                     </div>
@@ -411,15 +409,20 @@
         <div id="page_calibration" class="page-section">
             {% include 'sections/calibration.html' %}
         </div>
-        {% include 'sections/cheat-sheet.html' %}
+        <!-- {% include 'sections/cheat-sheet.html' %} -->
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=69"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=73"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling
              navigation to the larger Calibration controller. -->
         <script>
             function showPage(name) {
+                // Leaving the Calibration page must release the framing feed
+                // so the camera is free and no broken <img> stream lingers.
+                if (name !== 'calibration' && typeof framing !== 'undefined') {
+                    framing.stopFeed();
+                }
                 // Toggle the .page-active class between the two
                 // top-level page divs. CSS handles the actual
                 // hiding via display: none.
@@ -431,5 +434,12 @@
                 document.getElementById('nav_calibration_btn').classList.toggle('active', name === 'calibration');
             }
         </script>
-</body>
+        <br>
+        <br>
+        <br>
+        VOP &copy; 2026 jmalmsten. 
+            Licensed under <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPLv3</a>.
+            <a href="https://codeberg.org/jmalmsten-com/VOP">Source Code</a>
+        <br>
+    </body>
 </html>

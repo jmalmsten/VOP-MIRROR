@@ -43,17 +43,63 @@ All styling lives in static/style.css per project convention.
 No JS event handlers here - those are wired up by slice 7 in main.js.
 -->
 
-<!-- LEFT COLUMN: preview window.
-     Mirrors the Main page's .preview-area in structure so the user's
-     mental model carries over - both pages put the captured image
-     on the left. The probe_live.jpg path is shared with Main; the
-     engine writes to one path and either page can display it. -->
+<!-- LEFT COLUMN: preview window. Now a STACK so the live framing feed
+     (issue #198) and the still capture can occupy the same box, with a
+     future alignment overlay layered on top (Slice 3). Only one of the
+     two images is visible at a time:
+       - cal_probe_img : still from the last measurement (default)
+       - cal_feed_img  : live MJPEG feed, shown while framing is active
+     The .feed-active class on the stack flips which one shows; CSS
+     handles the visibility so the HTML stays logic-free. -->
 <div class="preview-area cal-preview-area">
-    <img id="cal_probe_img" alt="Calibration Capture Preview">
+    <div class="cal-preview-stack" id="cal_preview_stack">
+        <img id="cal_probe_img" alt="Calibration Capture Preview">
+        <img id="cal_feed_img" alt="Live Framing Feed">
+        <!-- Aspect-aware framing overlay (issue #198, Slice 3).
+             preserveAspectRatio="xMidYMid meet" letterboxes the viewBox the
+             SAME way the feed <img>'s object-fit:contain does, so boxes drawn
+             in viewBox units (sensor pixels) line up with the camera image at
+             any window size - no JS resize math. main.js sets the real viewBox
+             (from the sensor dims) and positions the corner boxes from the
+             panel aspect. Placed last in the stack so it layers on top. -->
+        <svg id="cal_feed_overlay" class="cal-feed-overlay"
+             viewBox="0 0 2028 1520" preserveAspectRatio="xMidYMid meet"
+             aria-hidden="true"></svg>
+    </div>
 </div>
 
 <!-- RIGHT COLUMN: measurement controls + readout. -->
 <div class="cal-controls-area">
+    <!-- Framing & Focus (issue #198).
+         Starts/stops the live camera feed shown in the left preview box,
+         for setting physical camera XYZ / PTR / zoom / focus between jobs.
+         The feed holds the sensor, so starting it is refused while a job
+         is running, and it auto-stops when a measurement starts or when
+         the user leaves this page (wired in main.js). On-screen alignment
+         targets and the corner-box overlay arrive in later slices. -->
+    <div class="group-box">
+        <div class="group-title">Framing &amp; Focus</div>
+
+        <div class="cal-status-row">
+            <span class="cal-status-label">Feed:</span>
+            <span id="cal_feed_status" class="cal-status-text">Stopped</span>
+        </div>
+
+        <div class="input-row spaced">
+            <button type="button" class="action-btn" id="cal_feed_start_btn"
+                    title="Start the live camera feed in the preview window for framing and focus.">START FEED</button>
+            <button type="button" class="action-btn danger" id="cal_feed_stop_btn"
+                    title="Stop the live feed and release the camera.">STOP FEED</button>
+        </div>
+
+        <!-- 1:1 focus zoom toggle (Slice 4). Label flips between 1:1 FOCUS
+             and FIT VIEW in main.js. Only does anything while the feed is
+             live (it needs an image to zoom into). -->
+        <div class="input-row spaced">
+            <button type="button" class="action-btn" id="cal_feed_zoom_btn"
+                    title="Toggle 1:1 native-pixel zoom for judging focus. Click and drag to pan around the sensor; click again to return to the full framing view.">1:1 FOCUS</button>
+        </div>
+    </div>
 
     <!-- Peak White section. The main calibration routine: find the
          exposure time at which the projection monitor's max white

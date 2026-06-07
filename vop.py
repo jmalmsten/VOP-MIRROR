@@ -40,7 +40,7 @@ import math
 import socket
 import time
 import numpy as np  # for 16-bit → 8-bit reduction in /cam_probe
-from flask import Flask, jsonify, request, render_template, send_from_directory, send_file
+from flask import Flask, jsonify, request, render_template, send_from_directory, send_file, Response
 
 # Append the modules directory to the system path for local imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
@@ -50,6 +50,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
 # current state to the frontend.
 import calibration_store as cstore
 import interpolator  # for resolving per-gate JK playheads in /status and /cam_probe
+
+# Live MJPEG framing/focus feed for the Calibration page (issue #198).
+# Owns its own rpicam-vid process; see the single-owner camera note in
+# dispatch_engine where we stop it before any capture.
+import camera_feed
 
 # Suppress default Flask HTTP request logging to keep the terminal output clean for audit logs
 log = logging.getLogger('werkzeug')
@@ -69,6 +74,11 @@ CURRENT_JOB_FILE = os.path.join(BASE_DIR, "current_job.json")
 # The Flask server writes JSON payloads here; engine.py polls this file to execute commands
 COMMAND_FILE = "/tmp/vop_cmd.json" 
 
+# Sentinel the engine's idle loop polls to show the framing/focus targets
+# (issue #198). The two routes below create/remove it. MUST match the path
+# CAL_TARGETS_FILE in modules/engine.py.
+CAL_TARGETS_FILE = "/tmp/vop_cal_targets"
+
 VOP_VERSION ="0.10.0"
 
 # Initialize required directory structure on boot if missing
@@ -80,6 +90,11 @@ for d in [PROJ_MAG_DIR, PROJ_BIPACK1_DIR, PROJ_BIPACK2_DIR, CAM_MAG_DIR, os.path
 
 engine_process = None
 prores_process = None
+
+# Background handle for the on-demand workprint render, mirroring
+# prores_process above. /workprint_status polls this to report the
+# in-flight ffmpeg mux back to the button.
+workprint_process = None
 
 def ensure_engine_running():
     """
@@ -569,6 +584,15 @@ def dispatch_engine(task, payload):
     # Guarantee background daemon is active before dispatching
     ensure_engine_running()
 
+    # SINGLE-OWNER CAMERA GUARD (issue #198).
+    # The Calibration framing feed holds the sensor via rpicam-vid. Every
+    # engine task that touches the camera does so via rpicam-still, which
+    # would fail with "device busy" if the feed were still up. Stopping it
+    # here - the one path all tasks funnel through - guarantees the sensor
+    # is free before the engine reaches for it. No-op (and cheap) if the
+    # feed isn't running.
+    camera_feed.stop_feed()
+
     payload['task'] = task
     payload['vop_version'] = VOP_VERSION 
     
@@ -781,6 +805,90 @@ def check_validation_warning():
 def serve_prores(filename):
     """ Serves the rendered ProRes file for browser download. """
     return send_from_directory(PRORES_DIR, filename, as_attachment=True)
+
+@app.route('/render_workprint', methods=['POST'])
+def render_workprint():
+    """
+    On-demand H.264 workprint (.mp4) render from the current CamMag TIFFs,
+    written into the WorkPrints dir exactly like the auto end-of-job
+    workprint. Lets the user re-mux a proof at will - e.g. after toggling
+    PAR unsqueeze, or after a LAB/INVERT - without running a whole job.
+    Returns immediately; poll /workprint_status for completion.
+    """
+    global workprint_process
+
+    # Refuse to start a second render while one is still in flight. Same
+    # guard the ProRes route uses - prevents two ffmpegs fighting over the
+    # CamMag and the output dir.
+    if workprint_process and workprint_process.poll() is None:
+        return jsonify({"status": "already_running"}), 409
+
+    # Nothing to mux if the CamMag is empty.
+    tiffs = sorted(glob.glob(os.path.join(CAM_MAG_DIR, "*.tif")))
+    if not tiffs:
+        return jsonify({"error": "No frames found in CamMag"}), 404
+
+    try:
+        fps = request.json.get('fps', 24) if request.json else 24
+
+        # UNSQUEEZE (PAR) - driven by the Preview-unsqueeze checkbox in the
+        # GUI, forwarded as the 'unsqueeze' flag. When True we stamp the
+        # stream's sample aspect ratio (SAR = par_x/par_y) so the mp4 plays
+        # back unsqueezed: display_width = coded_width * (par_x/par_y). This
+        # is the same idea as the ProRes 'pasp' atom and is a clean no-op at
+        # PAR 1:1. When False, no SAR filter is added and the proof stays
+        # squeezed exactly as it sits on disk.
+        unsqueeze = bool(request.json.get('unsqueeze', False)) if request.json else False
+        par_x = float(request.json.get('par_x', 1.0) or 1.0) if request.json else 1.0
+        par_y = float(request.json.get('par_y', 1.0) or 1.0) if request.json else 1.0
+
+        ts = int(time.time())
+        # Same naming + location as the auto workprint, so the existing
+        # "VIEW WORKPRINT" link (which grabs the newest *.mp4 in WorkPrints)
+        # surfaces this render with no extra wiring.
+        out_mp4 = os.path.join(BASE_DIR, "WorkPrints", f"vop_wp_{ts}.mp4")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(fps),
+            "-pattern_type", "glob",
+            "-i", os.path.join(CAM_MAG_DIR, "*.tif"),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+        ]
+        # Only attach the SAR filter when unsqueeze is requested, so a
+        # squeezed proof carries no aspect metadata at all (truly as-shot).
+        if unsqueeze:
+            cmd += ["-vf", f"setsar={par_x}/{par_y}"]
+        cmd += [out_mp4]
+
+        print(f"[VOP SERVER] ACTION: RENDER WORKPRINT -> {os.path.basename(out_mp4)} | unsqueeze={unsqueeze} PAR={par_x}:{par_y}")
+        workprint_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return jsonify({"status": "started", "filename": os.path.basename(out_mp4)})
+    except Exception as e:
+        print(f"[VOP SERVER] Workprint render error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/workprint_status', methods=['GET'])
+def workprint_status():
+    """ Polls the background workprint ffmpeg process for completion.
+        Mirrors /prores_status. """
+    global workprint_process
+    if workprint_process is None:
+        return jsonify({"status": "idle"})
+    code = workprint_process.poll()
+    if code is None:
+        return jsonify({"status": "rendering"})
+    elif code == 0:
+        # Hand back the freshest mp4 so the frontend can update the link.
+        wp_dir = os.path.join(BASE_DIR, "WorkPrints")
+        mp4s = glob.glob(os.path.join(wp_dir, "*.mp4"))
+        filename = os.path.basename(max(mp4s, key=os.path.getctime)) if mp4s else ""
+        return jsonify({"status": "done", "filename": filename})
+    else:
+        return jsonify({"status": "error", "code": code})
 
 @app.route('/upload_target', methods=['POST'])
 def upload_target():
@@ -1150,6 +1258,72 @@ def comp_preview():
     # viewfinder for lining up multi-pass exposures.
     dispatch_engine('comp_preview', request.json)
     return jsonify({"status": "started"})
+
+@app.route('/calibration_feed')
+def calibration_feed():
+    # The live MJPEG stream itself. The browser consumes this directly via
+    # <img src="/calibration_feed">; each part is a full JPEG frame. We do
+    # NOT auto-start here - the frontend calls /calibration_feed/start
+    # first - so that a stray <img> can't grab the camera unexpectedly.
+    return Response(
+        camera_feed.frames(),
+        mimetype='multipart/x-mixed-replace; boundary=vopframe'
+    )
+
+@app.route('/calibration_feed/start', methods=['POST'])
+def calibration_feed_start():
+    # Refuse to start while the engine is mid-task: COMMAND_FILE existing
+    # means a capture/render is in flight and owns (or is about to own)
+    # the sensor. Starting rpicam-vid then would collide.
+    if os.path.exists(COMMAND_FILE):
+        return jsonify({"status": "busy"}), 409
+    camera_feed.start_feed()
+    return jsonify({"status": "started"})
+
+@app.route('/calibration_feed/stop', methods=['POST'])
+def calibration_feed_stop():
+    # Explicit stop from the frontend (Stop button, or navigating away
+    # from the Calibration page). Releases the camera immediately.
+    camera_feed.stop_feed()
+    return jsonify({"status": "stopped"})
+
+@app.route('/calibration_targets/on', methods=['POST'])
+def calibration_targets_on():
+    # Drop the sentinel the engine's idle loop polls. While it exists the
+    # projection monitor shows the framing/focus targets instead of the
+    # idle logo. Deliberately NOT routed through dispatch_engine: that stops
+    # the camera, but targets are display-only and must run alongside the
+    # live feed. open()/close() just touches the file into existence.
+    open(CAL_TARGETS_FILE, 'w').close()
+    return jsonify({"status": "on"})
+
+@app.route('/calibration_targets/off', methods=['POST'])
+def calibration_targets_off():
+    # Remove the sentinel; the idle loop falls back to the bouncing logo on
+    # its next frame. FileNotFoundError is fine - "off" is the goal state,
+    # so a double-off (or off before any on) is a harmless no-op.
+    try:
+        os.remove(CAL_TARGETS_FILE)
+    except FileNotFoundError:
+        pass
+    return jsonify({"status": "off"})
+
+@app.route('/display_info', methods=['GET'])
+def display_info():
+    # Panel + sensor dimensions for the framing overlay (issue #198, Slice 3).
+    # The frontend uses the PANEL aspect to place the corner target boxes
+    # where the on-screen crosshairs land in the sensor frame, and the SENSOR
+    # dims to size the SVG viewBox 1:1 with the feed. get_display_size() reads
+    # the engine's EDID-published resolution (cached after first call); cam_w/
+    # cam_h come from the feed module so the viewBox always tracks the actual
+    # stream resolution even if we retune it later.
+    w, h = get_display_size()
+    return jsonify({
+        "monitor_w": w,
+        "monitor_h": h,
+        "cam_w": camera_feed.FEED_WIDTH,
+        "cam_h": camera_feed.FEED_HEIGHT,
+    })
 
 @app.route('/cam_probe', methods=['POST'])
 def cam_probe():
@@ -1559,12 +1733,97 @@ def nuke_mag():
     
     return jsonify({"status": "mag_cleared"})
 
+def write_branding_preview():
+    """
+    Render the branding logo centered on a black background and write it to
+    static/probe_live.jpg, replacing whatever preview was last shown.
+
+    This is the "standby" preview - used when there is nothing meaningful to
+    show, e.g. right after Nuke Job, where the previous job's preview would
+    otherwise linger and falsely imply state that no longer exists.
+
+    The output is an ordinary preview JPG, so the next Proj Probe / Cam View /
+    Cam Probe just overwrites it like any other preview - no special-casing
+    needed anywhere else in the pipeline.
+
+    branding.png is a 512x512 square today, but a user may swap in a logo of
+    any aspect ratio. We scale-to-fit (contain) while preserving aspect, then
+    center it and let the black canvas pad the rest - so any AR lands cleanly
+    with black bars rather than being distorted.
+    """
+    # Match the projection monitor resolution so the standby card has the same
+    # dimensions as a real preview. probe_img uses object-fit:contain so exact
+    # size isn't critical, but matching avoids the panel visibly resizing when
+    # switching between this and a live probe.
+    disp_w, disp_h = get_display_size()
+    out_jpg = os.path.join(BASE_DIR, "static", "probe_live.jpg")
+
+    # Pure-black canvas (BGR, cv2's channel order). Shape is (H, W, 3). This is
+    # the "blank black background" the logo sits on.
+    canvas = np.zeros((disp_h, disp_w, 3), dtype=np.uint8)
+
+    logo_path = os.path.join(BASE_DIR, "graphics", "branding.png")
+
+    # Fraction of each axis the logo may occupy. The logo is fit INSIDE this
+    # centered box, so 0.6 leaves a comfortable black margin all around instead
+    # of the logo touching the edges. Tune to taste (1.0 = edge-to-edge on the
+    # limiting axis).
+    LOGO_FILL = 0.6
+
+    try:
+        # IMREAD_COLOR forces a 3-channel BGR image (and drops any alpha), so
+        # the paste below always matches the canvas channel count even if a
+        # user supplies an RGBA PNG.
+        logo = cv2.imread(logo_path, cv2.IMREAD_COLOR)
+        if logo is None:
+            raise FileNotFoundError(logo_path)
+
+        logo_h, logo_w = logo.shape[:2]
+
+        # Centered target box the logo must fit within.
+        box_w = disp_w * LOGO_FILL
+        box_h = disp_h * LOGO_FILL
+
+        # "Contain" scale: the SMALLER ratio, so the whole logo fits inside the
+        # box on both axes with its aspect ratio preserved.
+        scale = min(box_w / logo_w, box_h / logo_h)
+        new_w = max(1, int(round(logo_w * scale)))
+        new_h = max(1, int(round(logo_h * scale)))
+
+        # Pick interpolation by direction: INTER_AREA is best when shrinking,
+        # INTER_CUBIC when enlarging (a small logo on a big monitor upscales).
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+        resized = cv2.resize(logo, (new_w, new_h), interpolation=interp)
+
+        # Integer top-left offset so the logo sits dead-center and the black
+        # canvas pads the remainder symmetrically.
+        x0 = (disp_w - new_w) // 2
+        y0 = (disp_h - new_h) // 2
+
+        # Paste by overwriting the pixel block - the logo is opaque BGR on a
+        # black background, so no alpha blending is required.
+        canvas[y0:y0 + new_h, x0:x0 + new_w] = resized
+
+    except Exception as e:
+        # Missing/unreadable logo: fall back to a plain black standby card.
+        # Still better than a stale preview, and never blocks the nuke.
+        print(f"[VOP SERVER] Branding preview: logo unavailable, writing black ({e})")
+
+    # cv2.imwrite expects BGR, which is exactly what we built.
+    cv2.imwrite(out_jpg, canvas)
+
 @app.route('/nuke_job', methods=['POST'])
 def nuke_job():
     # Deletes the active session configuration file
     print("[VOP SERVER] ACTION: NUKE CURRENT JOB")
     if os.path.exists(CURRENT_JOB_FILE):
         os.remove(CURRENT_JOB_FILE)
+    # Replace the lingering preview with the branding standby card. Without
+    # this, the previous job's last preview stays up after the reload and
+    # falsely implies there's still something to preview. Written here during
+    # the POST so the frontend's post-reload first-load fetch of
+    # probe_live.jpg (already cache-busted) picks it up.
+    write_branding_preview()
     return jsonify({"status": "job_nuked"})
 
 @app.route('/workprints/<filename>')

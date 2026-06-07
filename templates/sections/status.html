@@ -10,6 +10,7 @@
     
     <div class="status-actions">
         <button class="io-btn prores-btn" onclick="renderProRes()" title="Render Prores 4444 from CamMag (linear tagged for NLE/Compositing)">RENDER PRORES</button>
+        <button class="io-btn workprint-btn" onclick="renderWorkprint()" title="Render an H.264 workprint (.mp4) from the current CamMag. Honours the Preview-unsqueeze checkbox for PAR. Works any time there are frames in the CamMag - e.g. after a LAB/INVERT.">RENDER WORKPRINT</button>
         <button class="io-btn" onclick="exportJob()" title="Export current session to JSON">EXPORT JOB</button>
         <button class="io-btn" onclick="document.getElementById('import_file').click()" title="Load session from JSON">IMPORT JOB</button>
         <input type="file" id="import_file" style="display:none" accept=".json" onchange="importJob(this)">
