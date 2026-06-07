@@ -56,6 +56,9 @@ When the NUKE JOB button is pressed and confirmed. The job is nuked and now a pl
 
 ### Moved copyright text to bottom
 
+### Removed the Cheat Sheet from the bottom of the GUI
+the cheatsheet.html remains for a while until I decide this change didn't become more troublesome than I wanted.
+
 ## Fixed: 
 - #187 - corrected exposure time for noise measure and hot pixel mapping.
 - #186 - unified naming so type is now task in the python code and json. 
