@@ -52,6 +52,13 @@ let currentMode = 'SSS'; // <-- tracks the current active mode and sets the init
 
 // Initialize the dropdown listener when the DOM loads
 document.addEventListener('DOMContentLoaded', () => {
+    // issue #185: repaint the luma waveform whenever a new preview JPEG
+    // decodes. Every probe/preview/live-frame path swaps #probe_img.src,
+    // and they all fire this one 'load' event - so this single listener
+    // covers all of them.
+    const _wfImg = document.getElementById('probe_img');
+    if (_wfImg) _wfImg.addEventListener('load', drawLumaWaveform);
+
     const modeSelect = document.getElementById('smear_mode');
     if (modeSelect) {
         currentMode = modeSelect.value;
@@ -402,6 +409,90 @@ async function runCamProbe() {
         // readouts as-is rather than throwing in the click handler.
         console.error("Cam Probe gate readout update failed:", e);
     }
+}
+
+// ============================================================
+//  LUMA WAVEFORM SCOPE  (issue #185)
+// ------------------------------------------------------------
+//  Reads the live preview JPEG and paints a luma waveform into
+//  #luma_wf. This is the DISPLAY-REFERRED waveform: it scopes
+//  the 8-bit preview you're actually looking at, not the linear
+//  16-bit latent (that's a later, server-side phase).
+//
+//  Mechanically it's the per-column histogram we discussed: for
+//  every image column, count how many pixels land in each
+//  intensity bin, and paint that count as brightness. x = image
+//  column, y = intensity (bright at top), glow = pixel density.
+// ============================================================
+
+// Backing-store resolution of the scope raster.
+const WF_COLS = 256;   // horizontal: image columns resolved (image is resampled to this)
+const WF_VALS = 256;   // vertical: intensity bins. JPEG is 8-bit so 256 is exact.
+const WF_ROWS = 256;   // how many image rows we sample per column (more = denser trace)
+
+// Per-hit brightness. Each pixel landing in a (column, value) cell adds
+// this to that cell's alpha. Higher = sparse highlight pixels near the
+// clip line show up sooner (good for clip-watching) but dense areas bloom
+// to solid faster, losing density detail. Tune to taste.
+const WF_GAIN = 16;
+
+// Trace tint (RGB). Alpha carries the intensity so the panel glass shows
+// through the empty areas. Greenish = classic luma-scope look.
+const WF_R = 120, WF_G = 255, WF_B = 140;
+
+// Reused offscreen canvas for the native downscale - built once, not per frame.
+let _wfScratch = null;
+
+function drawLumaWaveform() {
+    const img = document.getElementById('probe_img');
+    const out = document.getElementById('luma_wf');
+    // naturalWidth is 0 until the first real decode - bail until then.
+    if (!img || !out || !img.naturalWidth) return;
+
+    // Build the scratch canvas once and keep reusing it.
+    if (!_wfScratch) {
+        _wfScratch = document.createElement('canvas');
+        _wfScratch.width  = WF_COLS;
+        _wfScratch.height = WF_ROWS;
+    }
+    const sctx = _wfScratch.getContext('2d', { willReadFrequently: true });
+
+    // Native downscale of the WHOLE preview into the scratch buffer in one
+    // fast call. drawImage reads the decoded source bitmap, NOT the CSS
+    // object-fit:contain letterboxing - so the black display bars never
+    // contaminate the data.
+    sctx.drawImage(img, 0, 0, WF_COLS, WF_ROWS);
+    const src = sctx.getImageData(0, 0, WF_COLS, WF_ROWS).data;  // same-origin, no taint
+
+    // Fresh raster, all transparent. putImageData later OVERWRITES the whole
+    // canvas region, so there's no stale-frame cleanup to do.
+    const wf = out.getContext('2d');
+    const ras = wf.createImageData(WF_COLS, WF_VALS);
+    const px = ras.data;
+
+    for (let y = 0; y < WF_ROWS; y++) {
+        const rowBase = y * WF_COLS * 4;
+        for (let x = 0; x < WF_COLS; x++) {
+            const s = rowBase + x * 4;
+            // Rec.709 luma on the display-referred preview, rounded to an
+            // integer 0..255. With WF_VALS == 256 that IS the value bin.
+            const v = (0.2126 * src[s] + 0.7152 * src[s + 1] + 0.0722 * src[s + 2] + 0.5) | 0;
+            // Flip so value 0 (black) sits on the BOTTOM row, max on top.
+            const row = WF_VALS - 1 - v;
+            // Additive, clamped alpha at this (column, value) cell.
+            const d = (row * WF_COLS + x) * 4;
+            const a = px[d + 3] + WF_GAIN;
+            px[d]     = WF_R;
+            px[d + 1] = WF_G;
+            px[d + 2] = WF_B;
+            px[d + 3] = a > 255 ? 255 : a;
+        }
+    }
+
+    // Match the canvas backing store to the raster (once), then blit.
+    if (out.width  !== WF_COLS) out.width  = WF_COLS;
+    if (out.height !== WF_VALS) out.height = WF_VALS;
+    wf.putImageData(ras, 0, 0);
 }
 
 function panic() { 

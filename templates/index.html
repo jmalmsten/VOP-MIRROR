@@ -207,8 +207,19 @@
                 </div>
             </div>
 
-            <div class="preview-area">
-                <img id="probe_img" alt="Live Preview">
+            <!-- issue #185: preview + waveform scope live side by side in
+                 grid-column 1. The wrapper holds the column slot now; the
+                 preview itself is unchanged inside it. -->
+            <div class="preview-row">
+                <div class="preview-area">
+                    <img id="probe_img" alt="Live Preview">
+                </div>
+                <!-- Luma waveform scope. Canvas only - no inline sizing.
+                     CSS sizes the DISPLAY box; main.js sets the backing-store
+                     resolution and paints it. -->
+                <div class="waveform-area">
+                    <canvas id="luma_wf"></canvas>
+                </div>
             </div>
 
             <div class="controls-area">
@@ -480,7 +491,7 @@
         </div>
         <!-- {% include 'sections/cheat-sheet.html' %} -->
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=76"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=77"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling

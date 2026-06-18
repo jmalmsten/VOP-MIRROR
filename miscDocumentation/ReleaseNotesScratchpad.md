@@ -12,6 +12,9 @@ To speed up navigation with the keyboard. I've added the ability to use up and d
 ### #205 - Checkbox to show the latest exposed image in preview during execute job
 Both as a way to see how things are progressing and to make it more interesting for marketing videos and livestreams. Simple use. When checked. It auto-loads the latest exposure to the preview window during a job execution. When unchecked. It doesn't and we need to use the CAM PROBE function to manually summon the image from the cam mag for preview.
 
+### #185 - Luma Waveform
+To make it easier to judge exposures, I'm adding a waveform function to the right of the preview window. 
+
 ## Changed:
 
 ### #208 - Make Cam Res input into a dropdown menu
