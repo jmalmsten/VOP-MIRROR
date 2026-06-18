@@ -31,15 +31,15 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>VOP v0.13</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.18">
+    <title>VOP v0.14</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=4.19">
 </head>
 <body>
     <div class="container">
         
         <div class="vop-header">
             <!-- Page title -->
-            <h2>VOP v0.13.1</h2>
+            <h2>VOP v0.14.0</h2>
 
             <!-- Page navigation. Click to switch between Main
                  (job editor + status + xsheet) and Calibration
@@ -270,6 +270,20 @@
                         <hr class="section-divider">
                         <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
                         <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
+                        <!-- LIVE PREVIEW toggle (issue #205). When ticked, the
+                             preview window refreshes with each frame as it
+                             commits during an Execute job - for monitoring
+                             progress and for livestream/marketing capture. OFF
+                             by default: the per-frame TIFF re-read + JPG encode
+                             can measurably slow a job on slow storage. When OFF,
+                             Cam View / Cam Probe still work to peek into CamMag
+                             mid-job (we never auto-touch the preview then). The
+                             backend reads this id from the saved job as
+                             job_data['exec_live_preview']. PAR-aware downstream. -->
+                        <label class="exec-live-preview-toggle" title="Refresh the preview window after each frame is exposed during an Execute job. Off by default - adds a small per-frame cost. PAR-aware: respects Preview Unsqueeze.">
+                            <input type="checkbox" id="exec_live_preview" onchange="saveJob()">
+                            Live preview
+                        </label>
                     </div>
                 </div>
 
@@ -277,7 +291,31 @@
                     <div class="group-title">Hardware Constants</div>
                     <div class="constants-zone">
                         <div class="const-group"><label>FOV</label><input id="fov" type="number" value="45"></div>
-                        <div class="const-group"><label>Cam Res</label><input id="cam_res" value="2028x1520"></div>
+                        <div class="const-group"><label>Cam Res</label><select id="cam_res">
+                            <!-- Native IMX477 (HQ camera) sensor modes only - issue #208.
+                                 Was a free text input, which let non-native sizes through;
+                                 libcamera then silently snapped them to the nearest real
+                                 mode (the confusing behaviour this fixes). Option VALUES
+                                 stay "WxH" with a lowercase x so the backend's
+                                 cam_res.split('x') parsing (vop.py / engine.py) is untouched.
+                                 FoV labels come straight from each mode's sensor crop window:
+                                   Full Sensor   (0,0)/4056x3040    - whole sensor, widest FoV
+                                   Vertical Crop (0,440)/4056x2160  - full width, cropped height
+                                   Center Window (696,528)/2664x1980 - cropped both axes (zoom)
+                                 1.88:1 (not 16:9) because 2028x1080 and 4056x2160 are 1.878:1
+                                 off the sensor - true 16:9 at 2160h would be 3840 wide. -->
+                            <optgroup label="Full Sensor (4:3)">
+                                <option value="2028x1520" selected>2028x1520 - Binned (Default)</option>
+                                <option value="4056x3040">4056x3040 - Full</option>
+                            </optgroup>
+                            <optgroup label="Vertical Crop (1.88:1)">
+                                <option value="2028x1080">2028x1080 - Binned</option>
+                                <option value="4056x2160">4056x2160 - Full</option>
+                            </optgroup>
+                            <optgroup label="Center Window (4:3)">
+                                <option value="1332x990">1332x990 - Binned</option>
+                            </optgroup>
+                        </select></div>
                         <div class="const-group"><label>FPS</label><input id="fps" type="number" value="24"></div>
                         <div class="const-group"><label>Gain</label><input id="gain" type="number" value="1.0"></div>
                         <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>
@@ -313,6 +351,37 @@
                                 <input type="checkbox" id="preview_unsqueeze" onchange="saveJob()">
                                 Preview unsqueeze
                             </label>
+                        </div>
+
+                        <!-- TARGET AR -> PAR helper (issue #199)
+                             A convenience calculator for anamorphic setups.
+                             You type the FINAL aspect ratio you want the
+                             projected image to read as (e.g. 2.2 : 1) and hit
+                             CALC PAR. It divides that target aspect by the
+                             projection monitor's OWN aspect ratio - read live
+                             from the panel's EDID via /display_info, so it's
+                             correct whether the panel is 3:2 (our 1.5), 16:9,
+                             4:3 or anything else - and writes the resulting
+                             squeeze straight into the par_x / par_y fields
+                             above.
+
+                             These two inputs are deliberately scratch-only:
+                             nothing here is saved into the job. Only the PAR
+                             fields they populate persist, because those already
+                             carry onchange="saveJob()". That keeps the engine
+                             and the job schema completely untouched - this row
+                             is pure front-end arithmetic on the existing PAR
+                             mechanism.
+
+                             Reuses .crush-group (flex + span-2) and .par-colon
+                             from the PAR row, and .mini-btn for the button, so
+                             the only new CSS is the input-width override. -->
+                        <div class="const-group crush-group target-ar-group">
+                            <label>Target AR</label>
+                            <input type="number" step="0.0001" id="target_ar_x" value="2.0" title="Target aspect ratio WIDTH component (the X in X:Y) - the final look you want, e.g. 2.2 for a 2.2:1 frame.">
+                            <span class="par-colon">:</span>
+                            <input type="number" step="0.0001" id="target_ar_y" value="1.0" title="Target aspect ratio HEIGHT component (the Y in X:Y) - usually 1.">
+                            <button type="button" class="mini-btn" onclick="applyTargetAR()" title="Divide Target AR by the projection monitor's EDID aspect ratio and write the result into the PAR fields above.">CALC PAR</button>
                         </div>
                     </div>
                 </div>
@@ -411,7 +480,7 @@
         </div>
         <!-- {% include 'sections/cheat-sheet.html' %} -->
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=73"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=76"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling

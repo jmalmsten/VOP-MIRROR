@@ -1,4 +1,4 @@
-**Latest Stable:** v0.6.3 | **In Development:** v0.13.0
+**Latest Stable:** v0.6.3 | **In Development:** v0.13.1
 > [!IMPORTANT]
 > **USE AT YOUR OWN RISK.** - This project is a learning experiment. If you brick your hardware, I cannot provide support outside of what has worked for me. Run this code only if you accept the risks of experimental software. And while this Flask Web application **CAN** be exposed on the public internet. I **HIGHLY** recommend doing it through a VPN instead if you want to reach it from outside.
 
@@ -31,7 +31,9 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 > ### Technical Features
 > - **16-bit Pipeline:** All processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
 > - **Motion Blur:** Move artwork on-screen during exposure to create physical light smears.
+> - **Smear:** Smear and extrude like an 80's title sequence.
 > - **Virtual Gels & BiPacks:** Use digital mattes and color overlays to simulate traditional optical effects.
+> - **Multiple Exposures:** To combine passes, the VOP uses LIME (see above).
 > 
 > ### Hardware needed:
 > - **Raspberry Pi 5 or 4 (4GB+)** - The VOP is lightweight, typically using <1GB of RAM  

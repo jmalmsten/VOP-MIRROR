@@ -1,69 +1,27 @@
-# V0.13.1 (YYYYMMDD)
+# V0.14.0 (YYYYMMDD)
 ## Added: 
-### Restored the IP output for the idle screen
-This one has been missed for a while. The idle screen used to show the IP and Port for the WebGUI. Now it's back.
 
-### Rearranged the placement of the mags in the GUI
-To make the sidebar on the main page less greedy in vertical space. I moved the sections for the mags up abobe the preview. As a bonus, this also sets things up for the big wood grain makeover I have planned where I make the whole VOP look and feel more like an Optical Printer visually. 
+### #199 - Target Aspect Ratio (Target AR) inputs for easier use of the PAR settings. 
+To simplify using non-square aspect ratios, I added a couple of inputs that let the user input the Aspect Ratio they want. Then hit the button CALC PAR and it does the math for Pixel Aspect Ratio for the user. This target aspect ratio is for now not saved in the current job. The PAR is already saved there.
 
-### Frame counters for all the mags.
-Added a neat little frame counter so that both when probing and when executing a job. I can see which frame is loaded at which gate. Mostly as a fun visual touch, but also as a way to decode if the step-printing is out of wack.  
+It is also aware of the projection monitor's resolution so the calculations should be correct wether it's 16:9, 3:2, 4:3, 5:4 or whatever.
 
-It's formatted like: ``####/####`` where ``####/`` is the current frame in the gate and ``/####`` is the total number of frames in the gate.
+### #206 - Navigate inputs with keyboard
+To speed up navigation with the keyboard. I've added the ability to use up and down arrows to move between input fields up and down. For horizontal movement, we'll still have to use tab and shift-tab because I need to be able to step inside the long string inputs for POS and ROT easily. 
 
-The number is four digits. 0001-9999 because, right now, the step printer logic is limited to 9999 frames. in 24 fps playback speed, that's 6 minutes, 56 seconds and 15 frames. Should be enough for most shots. Please let me know if this is too limiting. But remember that upping thte limit to 5 digits means ten times the storage space requirements... per mag. and ten times the job length in time. 
-
-#### Stages for frame counters:
-The step printers have three stages depending on what is loaded. 
-
-- ``----/----`` - means the mag is empty and nothing is loaded
-- ``SINGLE_FR`` - means that a lone image is loaded and is treated as a still image. No step printing available.
-- ``0001-9999/0001-9999`` - this means a video has been ingested and transcoded to a tiff sequence that can be used with step printing.
-
-### Font choice
-To make the counters stand out and look plain cool I decided to use a segmented display font found here:
-https://github.com/keshikan/DSEG
-
-Read more about the font here:
-https://www.keshikan.net/fonts-e.html
-
-I claim no ownership of the font. I just find it neat. :)
-
-### RENDER WORKPRINT button
-Button to manually trigger creation of a new workprint even when a new full job isn't run.
-
-
-## Camera Feed for Focus and alignment
-Issue #198 - Added a way to get a camera feed into the GUI in order to make it easier to both line up the camera, monitor and set focus.. Find it in the calibration page. And when using it. You should see a focus chart on the screen with some crosshairs in the corners and boxes in the corners of the camera feed. You should be able to use these to line up the camera to the monitor and set focus and zoom. 
-
-A focus peaking mode is coming once this is nailed down.
-
-## Wood grain makeover
-Mostly a GUI niceity. I want to see the VOP using a wood style. 
+### #205 - Checkbox to show the latest exposed image in preview during execute job
+Both as a way to see how things are progressing and to make it more interesting for marketing videos and livestreams. Simple use. When checked. It auto-loads the latest exposure to the preview window during a job execution. When unchecked. It doesn't and we need to use the CAM PROBE function to manually summon the image from the cam mag for preview.
 
 ## Changed:
-### Rearranged the sections of the GUI
-In order to limit the vertical space used by the sidebar I moved the mags up as a horizontal line of sections. This is also in anticipation of the big wood-grain redesign that's coming later on.
 
-### Moved Noise Crusher and Hot Pixel Mapper to the Calibration Page
-Simply because those are calibration steps. 
+### #208 - Make Cam Res input into a dropdown menu
+To simplify using different resolutions in the camera. I changed the Cam Res input field into a dropdown menu to quickly choose between valid options. 
 
-### Renamed mode names
-Mostly to clean it up and make them less width hungry.
-
-### Display branding when job is nuked
-When the NUKE JOB button is pressed and confirmed. The job is nuked and now a placeholder image is put into the preview. That placeholder is the branding image that's also used for the screensaver on the monitor.
-
-### Moved copyright text to bottom
-
-### Removed the Cheat Sheet from the bottom of the GUI
-the cheatsheet.html remains for a while until I decide this change didn't become more troublesome than I wanted.
 
 ## Fixed: 
-- #187 - corrected exposure time for noise measure and hot pixel mapping.
-- #186 - unified naming so type is now task in the python code and json. 
-- #142 - nothing left here to fix. so closed it.
-- Cleaned up a little inline css codes. 
-- #140 - not actionable here either. 
-- #141 - the whole standalone idle_screen.py is no more already. Nothing to do here.
-- When frame counter was added. It's using amber color. This is the same color that the NUKE JOB button used, so I restyled that button to match the other NUKE buttons. Just to keep the color coding consistent.
+### #200 - In MDS, the Keyframe PG does not apply
+Fixed.
+### #201 - The Autogenerated workprint doesn't use PAR input when Preview Unsqueeze is ticked
+Fixed.
+### #202 - Calibration page preview window is needlessly tiny
+Fixed. Now matches the main page.

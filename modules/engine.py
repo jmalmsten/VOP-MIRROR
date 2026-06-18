@@ -2561,18 +2561,65 @@ def run_persistent_engine():
                                 total_size_bytes += os.path.getsize(out_f)
                                 files_found += 1
 
+                                # LIVE PREVIEW (issue #205) - opt-in. When the
+                                # "Live preview" checkbox by Execute Sequence is
+                                # ticked, refresh the GUI preview with the frame
+                                # that just committed. OFF by default because the
+                                # extra per-frame TIFF re-read + JPG encode can
+                                # slow a job on slow storage. PAR-aware: par_x,
+                                # par_y and preview_unsqueeze were already resolved
+                                # from job_data at the top of dispatch (lines
+                                # ~369-371), so the live preview honours the same
+                                # Preview Unsqueeze the probe buttons do. The
+                                # helper swallows its own errors, so a preview
+                                # failure can never abort the job - the latent is
+                                # already on disk (that's why this sits inside the
+                                # os.path.exists(out_f) guard).
+                                if bool(job_data.get('exec_live_preview', False)):
+                                    cutil.write_live_preview_from_latent(
+                                        out_f, static_dir,
+                                        par_x=par_x, par_y=par_y,
+                                        preview_unsqueeze=preview_unsqueeze
+                                    )
+
                             avg_size = total_size_bytes / max(1, files_found)
                             total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
 
                         ts = int(time.time())
                         out_mp4 = os.path.join(wp_dir, f"vop_wp_{ts}.mp4")
 
+                        # PAR / UNSQUEEZE - issue #201. The auto end-of-job
+                        # workprint had NO unsqueeze handling at all (out_mp4 was
+                        # appended straight after -pix_fmt), so it always ignored
+                        # PAR. The manual RENDER WORKPRINT route (vop.py
+                        # /render_workprint) already does this correctly; we mirror
+                        # it here verbatim so the two paths behave identically.
+                        #
+                        # Behaviour: when the Preview-unsqueeze checkbox is ticked,
+                        # stamp the stream SAR (= par_x/par_y) so the proof plays
+                        # back unsqueezed. When unticked, attach no SAR filter and
+                        # the proof stays squeezed exactly as-shot (PAR ignored on
+                        # purpose - that's the spec, not a bug). No-op at PAR 1:1.
+                        #
+                        # job_data carries these as the raw GUI values: the
+                        # checkbox as a JSON bool, par_x/par_y as strings - hence
+                        # the float() casts. The `or 1.0` guards an empty field,
+                        # matching vop.py's guard exactly.
+                        unsqueeze = bool(job_data.get('preview_unsqueeze', False))
+                        par_x = float(job_data.get('par_x', 1.0) or 1.0)
+                        par_y = float(job_data.get('par_y', 1.0) or 1.0)
+
                         ffmpeg_cmd = [
                             "ffmpeg", "-y", "-framerate", str(job_data.get('fps', 24)),
                             "-pattern_type", "glob", "-i", os.path.join(cam_mag_dir, "*.tif"),
-                            "-c:v", "libx264", "-pix_fmt", "yuv420p", out_mp4
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p",
                         ]
-                        log_audit(f"Creating Workprint: {out_mp4}")
+                        # Only attach SAR when unsqueeze is requested, so a squeezed
+                        # proof carries no aspect metadata at all (truly as-shot).
+                        if unsqueeze:
+                            ffmpeg_cmd += ["-vf", f"setsar={par_x}/{par_y}"]
+                        ffmpeg_cmd += [out_mp4]
+                        log_audit(f"Creating Workprint: {out_mp4} | unsqueeze={unsqueeze} PAR={par_x}:{par_y}")
 
                         # All frames are exposed; the ffmpeg mux below is blocking
                         # and can run for a while on a long job. Without this, the

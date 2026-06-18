@@ -532,7 +532,30 @@ class Timeline:
         lbp2_r = start_bp2_r + (stop_bp2_r - start_bp2_r) * t_norm
         pg_start = safe_col('start_c', np.array([1,1,1],'f4'))
         pg_stop = safe_col('stop_c', np.array([1,1,1],'f4'))
-        pg_val = oklab_to_linear(linear_to_oklab(pg_start) + (linear_to_oklab(pg_stop) - linear_to_oklab(pg_start)) * t_norm)
+        # Smear gel: the start->stop colour animated ACROSS the smear sweep.
+        # Interpolated perceptually in OKLab, then handed back as linear RGB.
+        # (Renamed from pg_val -> pg_smear: it's now only one of two gels.)
+        pg_smear = oklab_to_linear(linear_to_oklab(pg_start) + (linear_to_oklab(pg_stop) - linear_to_oklab(pg_start)) * t_norm)
+
+        # Keyframe-level gel: the MDS master-row PG. get_state() (called as
+        # st_base above) already sampled the 'pg' track into st_base['pg'],
+        # defaulting to white [1,1,1] when unset.
+        #
+        # Issue #200: this value was being computed and then THROWN AWAY - the
+        # old code returned a pg built solely from the smear start/stop colours,
+        # so the master-row PG never reached the exposure. Because it defaults
+        # to white, a keyframe with no PG set is a transparent no-op pass, which
+        # is the "default to white like the others" behaviour the issue asks for.
+        pg_keyframe = st_base['pg']
+
+        # Stack the two gels. Two gels in the optical path are transmission
+        # filters in series, so their effect MULTIPLIES per channel: light that
+        # survives the keyframe gel is then filtered again by the smear gel.
+        # Both operands are linear-RGB transmissions in [0,1] (oklab_to_linear
+        # clips), so the product is in-gamut; the clip is belt-and-braces against
+        # any future out-of-gamut colour source. This mirrors the PG*CG gel
+        # multiply the engine already does at exposure time (engine.py:908/1662).
+        pg_val = np.clip(pg_keyframe * pg_smear, 0.0, 1.0)
         
         cg_start = safe_col('start_cg', np.array([1,1,1],'f4'))
         cg_stop = safe_col('stop_cg', np.array([1,1,1],'f4'))

@@ -44,6 +44,10 @@ let dreMasterCount = 0;
 let brkMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
+// Tracks the last heartbeat frame we refreshed the live preview for (issue
+// #205), so we reload probe_live.jpg only when the engine advances to a new
+// frame rather than on every 1s poll. -1 = "no job seen yet / reset".
+let _lastLivePreviewFrame = -1;
 let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
 
 // Initialize the dropdown listener when the DOM loads
@@ -184,6 +188,100 @@ async function uploadFile(inputId, textId, endpoint) {
     }
 }    
     
+/* TARGET AR -> PAR helper (issue #199)
+ *
+ * Anamorphic convenience calculator. The user types the final aspect
+ * ratio they want the PROJECTED image to read as (Target AR, e.g.
+ * 2.2 : 1) and presses CALC PAR. We divide that target aspect by the
+ * projection monitor's own aspect ratio - read live from the panel's
+ * EDID via /display_info, so it's correct whether the panel is 3:2,
+ * 16:9, 4:3 or anything else - and write the resulting squeeze into
+ * the existing par_x / par_y fields.
+ *
+ * Why divide (not multiply): PAR is the squeeze the engine applies so
+ * that a frame rendered to fill the monitor-aspect panel reads as the
+ * target aspect once unsqueezed in post:
+ *     PAR = target_aspect / monitor_aspect
+ * Example: 2.2:1 target on a 3:2 (1.5) panel -> 2.2 / 1.5 = 1.4667,
+ * i.e. par_x = 1.4667, par_y = 1.
+ *
+ * We reuse the EXACT convention vop.py uses for its Cam Mag
+ * "recommended PAR": ratio >= 1 goes in par_x (squeeze X) with par_y
+ * = 1; ratio < 1 puts the inverse in par_y (squeeze Y) with par_x = 1,
+ * so neither field ever drops below 1.0 - how a cinematographer
+ * naturally reads an anamorphic squeeze.
+ *
+ * The Target AR inputs are NOT persisted: they're scratch values for
+ * this one calculation. Only par_x / par_y are saved, and they already
+ * carry onchange (saveJob), which the dispatched 'change' events below
+ * trigger for us. Engine and job schema stay untouched.
+ */
+async function applyTargetAR() {
+    // 1. Read + validate the two Target AR inputs. The (x > 0) guards turn
+    //    blank / NaN / non-positive entries into a clean no-op rather than
+    //    poisoning the math with NaN or a divide-by-zero.
+    const tx = parseFloat(document.getElementById('target_ar_x')?.value);
+    const ty = parseFloat(document.getElementById('target_ar_y')?.value);
+    if (!(tx > 0) || !(ty > 0)) {
+        console.error('Target AR: both X and Y must be positive numbers.');
+        return;
+    }
+
+    // 2. Get the projection monitor's size straight from EDID. /display_info
+    //    returns the engine's EDID-published panel dimensions (cached
+    //    server-side after the first read). We fetch on demand rather than
+    //    caching client-side: the call is cheap and it guarantees we never
+    //    act on a stale panel size if the monitor was swapped mid-session.
+    let monW, monH;
+    try {
+        const r = await fetch('/display_info');
+        const info = await r.json();
+        monW = info.monitor_w;
+        monH = info.monitor_h;
+    } catch (e) {
+        console.error('Target AR: could not read /display_info', e);
+        alert('Could not read the projection monitor size from the engine. Is the engine running?');
+        return;
+    }
+    if (!(monW > 0) || !(monH > 0)) {
+        console.error('Target AR: /display_info returned an unusable size', monW, monH);
+        return;
+    }
+
+    // 3. The squeeze math: target_aspect / monitor_aspect, then split into
+    //    the >=1 / <1 convention described in the header comment.
+    const targetAspect = tx / ty;
+    const monAspect     = monW / monH;
+    const ratio         = targetAspect / monAspect;
+
+    let parX, parY;
+    if (ratio >= 1.0) {
+        parX = ratio;   // squeeze X
+        parY = 1.0;
+    } else {
+        parX = 1.0;
+        parY = 1.0 / ratio;   // squeeze Y, kept >= 1.0
+    }
+
+    // 4. Round to 4 dp to match par_x/par_y step="0.0001" and vop.py's
+    //    recommended_par formatting. parseFloat(...toFixed) also trims
+    //    trailing zeros so "1.5000" reads as "1.5".
+    const fmt = (n) => parseFloat(n.toFixed(4)).toString();
+
+    // 5. Write into the real PAR fields and dispatch 'change' so the existing
+    //    save/sync pipeline picks up the new squeeze (writes current_job.json,
+    //    re-renders Proj Probe / Comp View). Assigning .value alone does NOT
+    //    fire the field's onchange - same manual-dispatch trick the Cam Mag
+    //    recommended-PAR click handler uses.
+    const parXEl = document.getElementById('par_x');
+    const parYEl = document.getElementById('par_y');
+    if (parXEl && parYEl) {
+        parXEl.value = fmt(parX);
+        parYEl.value = fmt(parY);
+        parXEl.dispatchEvent(new Event('change', { bubbles: true }));
+        parYEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
 
 /* Silent state save. POSTs the current DOM state to /save_job, which
  * writes current_job.json to disk WITHOUT dispatching the engine.
@@ -1073,6 +1171,17 @@ setInterval(async () => {
                 if (el && el.type !== 'file') {
                     if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
                     else el.value = v;
+
+                    // SELECT safety net (issue #208). Setting a <select> to a value
+                    // that matches no <option> (e.g. a legacy non-native cam_res
+                    // saved before this dropdown existed) silently leaves
+                    // selectedIndex at -1 and the control renders blank. Snap to
+                    // the first option so the control always shows a valid choice.
+                    // Generic, but in practice only cam_res can hit this - smear_mode
+                    // and tiff_compression only ever save values that are real options.
+                    if (el.tagName === 'SELECT' && el.selectedIndex === -1 && el.options.length > 0) {
+                        el.selectedIndex = 0;
+                    }
                 }
             }
 
@@ -1099,6 +1208,23 @@ setInterval(async () => {
             // FIXED: Use st.heartbeat.msg instead of st.msg
             msgEl.innerText = `${st.heartbeat.msg} [${st.heartbeat.current}/${st.heartbeat.total}]`;
             bar.style.width = (st.heartbeat.current/st.heartbeat.total*100) + "%";
+
+            // LIVE PREVIEW (issue #205). If the operator ticked "Live preview"
+            // by Execute Sequence, refresh the preview window when the engine
+            // moves to a new frame. The engine writes probe_live.jpg right
+            // AFTER each frame commits, so the natural reading is: when the
+            // status reads "EXPOSING N", the preview shows frame N-1 - the one
+            // that just finished. We reload only on a frame change (not every
+            // poll) to avoid re-fetching an unchanged JPG. When the box is OFF
+            // we never touch probe_img here, so a manual Cam View / Cam Probe
+            // the operator ran mid-job stays put.
+            const livePreviewEl = document.getElementById('exec_live_preview');
+            if (livePreviewEl && livePreviewEl.checked &&
+                st.heartbeat.current !== _lastLivePreviewFrame) {
+                _lastLivePreviewFrame = st.heartbeat.current;
+                document.getElementById('probe_img').src =
+                    '/static/probe_live.jpg?t=' + Date.now();
+            }
             
             // Format ETA (HH:MM:SS) - Only if eta exists
             if (st.heartbeat.eta !== undefined) {
@@ -1113,6 +1239,7 @@ setInterval(async () => {
             if (isEngineRunning) {
                 document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
                 isEngineRunning = false;
+                _lastLivePreviewFrame = -1;   // reset for the next job (issue #205)
                 // Calibration page may have a task in flight that
                 // just completed. Let its controller refresh its
                 // readouts and re-enable its buttons. Safe to call
@@ -2239,3 +2366,164 @@ document.addEventListener('DOMContentLoaded', () => { calibration.init(); framin
     calibration.init();
     framing.init();
 }
+
+// ─── Spatial Up/Down Field Navigation + Ctrl-Step ────────────────────────────
+//
+// Goal: spreadsheet-style vertical movement through the xsheet without the
+// mouse. Tab/Shift-Tab already handle horizontal movement (DOM order), but
+// there was no keyboard way to move straight DOWN a column. This adds it.
+//
+// Key bindings this installs:
+//   Up / Down            -> jump focus to the nearest field directly
+//                           above / below the current one (same column pref).
+//   Ctrl + Up / Down     -> step a <input type="number"> value up/down by its
+//                           own `step` (respecting min/max). This REPLACES the
+//                           browser's native plain-arrow stepping, which we had
+//                           to vacate so plain Up/Down could navigate.
+//
+// Deliberately NOT touched (so existing behaviour survives intact):
+//   Left / Right         -> never intercepted. Caret movement inside the
+//                           comma-string POS/ROT fields (e.g. editing the Y in
+//                           "0.34,0.01,-0.7") works exactly as before. This is
+//                           the whole reason we only steal the vertical axis.
+//   <select> Up/Down     -> left native, so it still cycles options. Use Tab to
+//                           leave a select. (If you'd rather Up/Down navigate
+//                           OUT of selects too, delete the isSelect guard below.)
+//   Shift / Alt / Meta+arrows -> ignored, so text selection (Shift+Up) and any
+//                           window-manager chords are never clobbered.
+
+(function () {
+
+    // Everything we're willing to LAND on (and that can be the focused field).
+    // We exclude hidden/disabled and the non-data input types (buttons, file
+    // pickers, etc.) so navigation never dumps focus onto a button.
+    const NAV_TARGETS = [
+        'input:not([type="hidden"]):not([type="button"]):not([type="submit"])' +
+              ':not([type="reset"]):not([type="file"]):not([type="image"]):not([disabled])',
+        'select:not([disabled])'
+    ].join(', ');
+
+    // Column "stickiness": how hard to penalise horizontal drift when picking
+    // the target above/below. Higher = more insistent on staying in the same
+    // column. 4 means a field 10px sideways scores worse than one 40px straight
+    // down. Bump to 6-8 if Down ever hops to a neighbouring column on a tight
+    // row; lower toward 2 if a column has gaps and you want more vertical reach.
+    const CROSS_WEIGHT = 4;
+
+    // Minimum vertical gap (px) before a candidate counts as genuinely
+    // "above" or "below" rather than sitting on the same visual row. Guards
+    // against floating-point wobble between inputs that share a row.
+    const MIN_PX = 4;
+
+    document.addEventListener('keydown', function (e) {
+
+        // We only ever care about the vertical arrows. Left/Right (and every
+        // other key) fall straight through to their native behaviour.
+        const key = e.key;
+        if (key !== 'ArrowUp' && key !== 'ArrowDown') return;
+
+        // Bail out the moment Alt/Meta/Shift are involved — those belong to the
+        // browser / window manager / text-selection and are not ours to grab.
+        if (e.altKey || e.metaKey || e.shiftKey) return;
+
+        // Must be focused on an actual navigable field.
+        const active = document.activeElement;
+        if (!active || !active.matches(NAV_TARGETS)) return;
+
+        const isNumber = active.tagName === 'INPUT' && active.type === 'number';
+        const isSelect = active.tagName === 'SELECT';
+
+        // ── Ctrl + Up/Down: step a number field ──────────────────────────────
+        // Plain arrows no longer trigger native stepping (we use them to
+        // navigate), so we re-implement stepping here under Ctrl. Only number
+        // inputs have a meaningful "step" — for anything else, Ctrl+arrow is a
+        // no-op and we just let it pass.
+        if (e.ctrlKey) {
+            if (!isNumber) return; // nothing to step; leave native alone
+            e.preventDefault();
+
+            // Honour the field's own step/min/max if it declares them.
+            const step = parseFloat(active.step) || 1;
+            const min  = active.min !== '' ? parseFloat(active.min) : -Infinity;
+            const max  = active.max !== '' ? parseFloat(active.max) :  Infinity;
+            let   val  = parseFloat(active.value) || 0;
+
+            val = (key === 'ArrowUp')
+                ? Math.min(max, val + step)
+                : Math.max(min, val - step);
+
+            // Round away binary float dust (e.g. 0.1+0.2) to the step's own
+            // decimal precision, so the box shows 0.3 not 0.30000000000000004.
+            const decimals = (String(step).split('.')[1] || '').length;
+            active.value = val.toFixed(decimals);
+
+            // CRITICAL: the save path is wired to the 'change' event
+            // (addEventListener('change', triggerSync) on every generated row).
+            // A programmatic value-set fires NO events on its own, so we
+            // dispatch them by hand or the stepped value never gets saved.
+            // 'input' is included too for any future live-input listeners.
+            active.dispatchEvent(new Event('input',  { bubbles: true }));
+            active.dispatchEvent(new Event('change', { bubbles: true }));
+            return; // handled — do not fall through to navigation
+        }
+
+        // ── Plain Up/Down: vertical navigation ───────────────────────────────
+
+        // A focused <select> keeps Up/Down for cycling its options. Tab moves
+        // off it. (Remove this guard to make Up/Down navigate out of selects.)
+        if (isSelect) return;
+
+        // Collect every visible navigable field. offsetParent === null means
+        // the element is hidden via display:none (how the xsheet hides inactive
+        // BP1/BP2 columns), so those are correctly skipped as targets.
+        const candidates = Array.from(document.querySelectorAll(NAV_TARGETS))
+            .filter(el => el.offsetParent !== null);
+        if (candidates.length < 2) return;
+
+        // Screen-space centre of the field we're leaving.
+        const src   = active.getBoundingClientRect();
+        const srcCx = src.left + src.width  / 2;
+        const srcCy = src.top  + src.height / 2;
+
+        let best      = null;
+        let bestScore = Infinity;
+
+        for (const el of candidates) {
+            if (el === active) continue;
+
+            const r  = el.getBoundingClientRect();
+            const cx = r.left + r.width  / 2;
+            const cy = r.top  + r.height / 2;
+            const dx = cx - srcCx;          // sideways offset (column drift)
+            const dy = cy - srcCy;          // vertical offset; +ve = below
+
+            // Only consider fields on the correct side (above for Up, below for
+            // Down), past the dead-zone that protects same-row neighbours.
+            const inDirection = (key === 'ArrowUp') ? (dy < -MIN_PX)
+                                                     : (dy >  MIN_PX);
+            if (!inDirection) continue;
+
+            // Prefer the closest row, but punish column drift hard so we track
+            // straight down the same column rather than veering sideways.
+            const score = Math.abs(dy) + Math.abs(dx) * CROSS_WEIGHT;
+            if (score < bestScore) {
+                bestScore = score;
+                best      = el;
+            }
+        }
+
+        if (best) {
+            // Stop the page from scrolling now that we've claimed the keypress.
+            e.preventDefault();
+            best.focus();
+            // NOTE: intentionally NOT calling best.select(). Leaving the caret
+            // alone means landing on a POS/ROT triple lets you Left/Right to the
+            // component you want and edit in place, instead of an accidental
+            // select-all that would overtype the whole "x,y,z" on first keypress.
+            // If you'd rather number fields auto-select for quick overtype, add:
+            //   if (best.type === 'number') best.select();
+        }
+
+    }, false);
+
+}());

@@ -429,6 +429,24 @@ body {
     grid-column:        1;
     justify-self:       center;
     align-self:         start;
+
+    /* Width fix - issue #202. The Main preview's flex item is a bare <img>
+     * whose intrinsic width drives .preview-area's width:auto. Here the flex
+     * item is .cal-preview-stack - a <div> with width:100% and NO intrinsic
+     * width - so width:100% is circular against the auto-width parent, the
+     * flex container has nothing to size against, and it collapses to its
+     * inherited min-width (300px) while height:50vh stays put. That 300px x
+     * 50vh box is the tall ~9:16 sliver the issue describes.
+     *
+     * Pinning an explicit width gives the panel a definite landscape size.
+     * 70vh equals .preview-area's own max-width cap, so the box is 70vh x
+     * 50vh (1.4:1) - the exact panel a full-frame camera image (>=1.4:1,
+     * e.g. the 3:2 sensor) lands on via Main's max-width clamp. The stack's
+     * two object-fit:contain images then letterbox inside it, just like
+     * #probe_img does on Main. No conflict with the inherited rule:
+     * .preview-area sets max-width but never width, so this slots in clean
+     * regardless of source order. */
+    width:              70vh;
 }
 
 /* Right-column control stack. Sits in column 2 of the page grid,
@@ -1233,9 +1251,11 @@ body {
  * by a colon, then an inline checkbox. The constraints on .const-group input
  * default to 100% width which would break the row layout, so we shrink the
  * PAR fields explicitly (similar to the #black_clip override above). */
-#par_x, #par_y {
+#par_x, #par_y,
+#target_ar_x, #target_ar_y {
     width:              60px;
 }
+
 .par-colon {
     color:              var(--text-secondary);
     font-weight:        bold;
@@ -1259,6 +1279,34 @@ body {
      * and shove everything off-screen. Lock it to native size. */
     width:              auto;
     margin:             0;
+}
+
+/* Live-preview toggle under Execute Sequence (issue #205). A small inline
+ * checkbox+label row centred under the full-width Execute button. It lives in
+ * .probe-controls, not .const-group, so it gets its own layout rather than
+ * reusing .par-preview-toggle (which is tuned to override Hardware-Constants
+ * label rules that don't apply here). */
+.exec-live-preview-toggle {
+    display:            flex;
+    align-items:        center;
+    justify-content:    center;
+    gap:                6px;
+    margin-top:         6px;
+    font-size:          0.8em;
+    color:              var(--text-secondary);
+    cursor:             pointer;
+}
+.exec-live-preview-toggle input[type=checkbox] {
+    /* Lock to native size - several inputs in this app inherit a 100%-width
+     * rule that would otherwise blow the checkbox up. */
+    width:              auto;
+    margin:             0;
+    cursor:             pointer;
+}
+
+.par-group,
+.target-ar-group {
+    grid-column:        1 / -1;
 }
 
 /* ################ SHEET HEADER & MODE SELECTOR ############### */
@@ -1802,6 +1850,21 @@ hr.section-divider {
     align-items:        center;
     gap:                5px;
     grid-column:        span 2;                    /* Forces this cell to span across two columns to fit the contents */
+}
+
+/* TARGET AR helper row (issue #199)
+ * .constants-zone is a 4-column grid (repeat(4, 1fr)) and .crush-group
+ * spans 2 columns. With no override, the PAR row (a .crush-group, span 2)
+ * and this Target AR row (also a .crush-group, span 2) pack onto the SAME
+ * grid line, because 2 + 2 = 4 fills one row exactly - that's the
+ * "Target AR sits next to PAR" bug.
+ *
+ * Span the full width so this row always breaks onto its own line directly
+ * beneath PAR. Same 1 / -1 idiom hr.section-divider already uses in this
+ * grid. This rule MUST sit after .crush-group in the file so it overrides
+ * its grid-column: span 2 (equal specificity -> source order wins). */
+.target-ar-group {
+    grid-column:        1 / -1;
 }
 
 .io-btn {
