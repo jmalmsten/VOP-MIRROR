@@ -99,6 +99,11 @@ Description:        Stylings for the whole GUI
     --graphic-w: 256px;   /* schematic display size = 50% of the 512x256 source */
     --graphic-h: 128px;
 
+    /* issue #185: the preview panel's height. Shared so the waveform scope
+     * beside it can pin to the exact same value - otherwise the scope
+     * stretches to the (taller) grid row height set by the controls column. */
+    --preview-h: 50vh;
+
     /* Inset bevel shared by both cheeks (lit from top-left). Stored as a
        token so each cheek can append its own outer shadow below. */
     --cheek-bevel:
@@ -1015,7 +1020,7 @@ body {
     min-width:          300px;
     max-width:          70vh;
     min-height:         320px;
-    height:             50vh;
+    height:             var(--preview-h);
 
     display:            flex;
     align-items:        center;
@@ -1052,7 +1057,11 @@ body {
     grid-column:     1;
     display:         flex;
     justify-content: center;
-    align-items:     stretch;
+    /* Both children now carry an explicit height (var(--preview-h)), so we
+     * pin them to the TOP of the row. The row itself still stretches to the
+     * tall grid track, but that just leaves empty board below the scope -
+     * same as the preview always did. */
+    align-items:     flex-start;
     gap:             14px;
 }
 
@@ -1065,7 +1074,12 @@ body {
  *     full-height column: add an explicit `height` here (e.g. 22vh) and
  *     change .preview-row's align-items to flex-start. <<< */
 .waveform-area {
-    flex:                     0 0 16vh;
+    flex:                     0 0 16vh;            /* width (vh-relative, tracks the preview) */
+    height:                   var(--preview-h);    /* << the fix: match the preview exactly */
+    display:                  flex;
+    flex-direction:           column;              /* stack: luma over RGB overlay */
+    gap:                      6px;                 /* thin divider of glass between the two */
+    padding:                  6px;
     background:               var(--bg-group-glass);
     -webkit-backdrop-filter:  blur(var(--group-blur));
     backdrop-filter:          blur(var(--group-blur));
@@ -1079,11 +1093,12 @@ body {
  * waveform is read by column position and trace height, so a non-1:1
  * stretch is fine - the vertical stretch actually buys you intensity
  * resolution, which helps spot near-clipping. */
-#luma_wf {
+.wf-canvas {
     width:           100%;
-    height:          100%;
+    flex:            1 1 0;       /* the two scopes split the panel height 50/50 */
+    min-height:      0;           /* allow shrink below the canvas's 256px intrinsic height */
     display:         block;
-    image-rendering: pixelated;   /* crisp bins; switch to 'auto' for a softer scope glow */
+    image-rendering: pixelated;   /* crisp bins; 'auto' for a softer glow */
 }
 
 /* ############### Action & Mini Buttons ############### */
