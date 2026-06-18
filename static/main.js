@@ -184,6 +184,100 @@ async function uploadFile(inputId, textId, endpoint) {
     }
 }    
     
+/* TARGET AR -> PAR helper (issue #199)
+ *
+ * Anamorphic convenience calculator. The user types the final aspect
+ * ratio they want the PROJECTED image to read as (Target AR, e.g.
+ * 2.2 : 1) and presses CALC PAR. We divide that target aspect by the
+ * projection monitor's own aspect ratio - read live from the panel's
+ * EDID via /display_info, so it's correct whether the panel is 3:2,
+ * 16:9, 4:3 or anything else - and write the resulting squeeze into
+ * the existing par_x / par_y fields.
+ *
+ * Why divide (not multiply): PAR is the squeeze the engine applies so
+ * that a frame rendered to fill the monitor-aspect panel reads as the
+ * target aspect once unsqueezed in post:
+ *     PAR = target_aspect / monitor_aspect
+ * Example: 2.2:1 target on a 3:2 (1.5) panel -> 2.2 / 1.5 = 1.4667,
+ * i.e. par_x = 1.4667, par_y = 1.
+ *
+ * We reuse the EXACT convention vop.py uses for its Cam Mag
+ * "recommended PAR": ratio >= 1 goes in par_x (squeeze X) with par_y
+ * = 1; ratio < 1 puts the inverse in par_y (squeeze Y) with par_x = 1,
+ * so neither field ever drops below 1.0 - how a cinematographer
+ * naturally reads an anamorphic squeeze.
+ *
+ * The Target AR inputs are NOT persisted: they're scratch values for
+ * this one calculation. Only par_x / par_y are saved, and they already
+ * carry onchange (saveJob), which the dispatched 'change' events below
+ * trigger for us. Engine and job schema stay untouched.
+ */
+async function applyTargetAR() {
+    // 1. Read + validate the two Target AR inputs. The (x > 0) guards turn
+    //    blank / NaN / non-positive entries into a clean no-op rather than
+    //    poisoning the math with NaN or a divide-by-zero.
+    const tx = parseFloat(document.getElementById('target_ar_x')?.value);
+    const ty = parseFloat(document.getElementById('target_ar_y')?.value);
+    if (!(tx > 0) || !(ty > 0)) {
+        console.error('Target AR: both X and Y must be positive numbers.');
+        return;
+    }
+
+    // 2. Get the projection monitor's size straight from EDID. /display_info
+    //    returns the engine's EDID-published panel dimensions (cached
+    //    server-side after the first read). We fetch on demand rather than
+    //    caching client-side: the call is cheap and it guarantees we never
+    //    act on a stale panel size if the monitor was swapped mid-session.
+    let monW, monH;
+    try {
+        const r = await fetch('/display_info');
+        const info = await r.json();
+        monW = info.monitor_w;
+        monH = info.monitor_h;
+    } catch (e) {
+        console.error('Target AR: could not read /display_info', e);
+        alert('Could not read the projection monitor size from the engine. Is the engine running?');
+        return;
+    }
+    if (!(monW > 0) || !(monH > 0)) {
+        console.error('Target AR: /display_info returned an unusable size', monW, monH);
+        return;
+    }
+
+    // 3. The squeeze math: target_aspect / monitor_aspect, then split into
+    //    the >=1 / <1 convention described in the header comment.
+    const targetAspect = tx / ty;
+    const monAspect     = monW / monH;
+    const ratio         = targetAspect / monAspect;
+
+    let parX, parY;
+    if (ratio >= 1.0) {
+        parX = ratio;   // squeeze X
+        parY = 1.0;
+    } else {
+        parX = 1.0;
+        parY = 1.0 / ratio;   // squeeze Y, kept >= 1.0
+    }
+
+    // 4. Round to 4 dp to match par_x/par_y step="0.0001" and vop.py's
+    //    recommended_par formatting. parseFloat(...toFixed) also trims
+    //    trailing zeros so "1.5000" reads as "1.5".
+    const fmt = (n) => parseFloat(n.toFixed(4)).toString();
+
+    // 5. Write into the real PAR fields and dispatch 'change' so the existing
+    //    save/sync pipeline picks up the new squeeze (writes current_job.json,
+    //    re-renders Proj Probe / Comp View). Assigning .value alone does NOT
+    //    fire the field's onchange - same manual-dispatch trick the Cam Mag
+    //    recommended-PAR click handler uses.
+    const parXEl = document.getElementById('par_x');
+    const parYEl = document.getElementById('par_y');
+    if (parXEl && parYEl) {
+        parXEl.value = fmt(parX);
+        parYEl.value = fmt(parY);
+        parXEl.dispatchEvent(new Event('change', { bubbles: true }));
+        parYEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
 
 /* Silent state save. POSTs the current DOM state to /save_job, which
  * writes current_job.json to disk WITHOUT dispatching the engine.

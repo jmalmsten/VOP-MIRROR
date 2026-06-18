@@ -314,6 +314,37 @@
                                 Preview unsqueeze
                             </label>
                         </div>
+
+                        <!-- TARGET AR -> PAR helper (issue #199)
+                             A convenience calculator for anamorphic setups.
+                             You type the FINAL aspect ratio you want the
+                             projected image to read as (e.g. 2.2 : 1) and hit
+                             CALC PAR. It divides that target aspect by the
+                             projection monitor's OWN aspect ratio - read live
+                             from the panel's EDID via /display_info, so it's
+                             correct whether the panel is 3:2 (our 1.5), 16:9,
+                             4:3 or anything else - and writes the resulting
+                             squeeze straight into the par_x / par_y fields
+                             above.
+
+                             These two inputs are deliberately scratch-only:
+                             nothing here is saved into the job. Only the PAR
+                             fields they populate persist, because those already
+                             carry onchange="saveJob()". That keeps the engine
+                             and the job schema completely untouched - this row
+                             is pure front-end arithmetic on the existing PAR
+                             mechanism.
+
+                             Reuses .crush-group (flex + span-2) and .par-colon
+                             from the PAR row, and .mini-btn for the button, so
+                             the only new CSS is the input-width override. -->
+                        <div class="const-group crush-group target-ar-group">
+                            <label>Target AR</label>
+                            <input type="number" step="0.0001" id="target_ar_x" value="2.0" title="Target aspect ratio WIDTH component (the X in X:Y) - the final look you want, e.g. 2.2 for a 2.2:1 frame.">
+                            <span class="par-colon">:</span>
+                            <input type="number" step="0.0001" id="target_ar_y" value="1.0" title="Target aspect ratio HEIGHT component (the Y in X:Y) - usually 1.">
+                            <button type="button" class="mini-btn" onclick="applyTargetAR()" title="Divide Target AR by the projection monitor's EDID aspect ratio and write the result into the PAR fields above.">CALC PAR</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -411,7 +442,7 @@
         </div>
         <!-- {% include 'sections/cheat-sheet.html' %} -->
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=73"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=74"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling

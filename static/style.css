@@ -1233,9 +1233,11 @@ body {
  * by a colon, then an inline checkbox. The constraints on .const-group input
  * default to 100% width which would break the row layout, so we shrink the
  * PAR fields explicitly (similar to the #black_clip override above). */
-#par_x, #par_y {
+#par_x, #par_y,
+#target_ar_x, #target_ar_y {
     width:              60px;
 }
+
 .par-colon {
     color:              var(--text-secondary);
     font-weight:        bold;
