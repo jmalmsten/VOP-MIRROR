@@ -2333,3 +2333,164 @@ document.addEventListener('DOMContentLoaded', () => { calibration.init(); framin
     calibration.init();
     framing.init();
 }
+
+// ─── Spatial Up/Down Field Navigation + Ctrl-Step ────────────────────────────
+//
+// Goal: spreadsheet-style vertical movement through the xsheet without the
+// mouse. Tab/Shift-Tab already handle horizontal movement (DOM order), but
+// there was no keyboard way to move straight DOWN a column. This adds it.
+//
+// Key bindings this installs:
+//   Up / Down            -> jump focus to the nearest field directly
+//                           above / below the current one (same column pref).
+//   Ctrl + Up / Down     -> step a <input type="number"> value up/down by its
+//                           own `step` (respecting min/max). This REPLACES the
+//                           browser's native plain-arrow stepping, which we had
+//                           to vacate so plain Up/Down could navigate.
+//
+// Deliberately NOT touched (so existing behaviour survives intact):
+//   Left / Right         -> never intercepted. Caret movement inside the
+//                           comma-string POS/ROT fields (e.g. editing the Y in
+//                           "0.34,0.01,-0.7") works exactly as before. This is
+//                           the whole reason we only steal the vertical axis.
+//   <select> Up/Down     -> left native, so it still cycles options. Use Tab to
+//                           leave a select. (If you'd rather Up/Down navigate
+//                           OUT of selects too, delete the isSelect guard below.)
+//   Shift / Alt / Meta+arrows -> ignored, so text selection (Shift+Up) and any
+//                           window-manager chords are never clobbered.
+
+(function () {
+
+    // Everything we're willing to LAND on (and that can be the focused field).
+    // We exclude hidden/disabled and the non-data input types (buttons, file
+    // pickers, etc.) so navigation never dumps focus onto a button.
+    const NAV_TARGETS = [
+        'input:not([type="hidden"]):not([type="button"]):not([type="submit"])' +
+              ':not([type="reset"]):not([type="file"]):not([type="image"]):not([disabled])',
+        'select:not([disabled])'
+    ].join(', ');
+
+    // Column "stickiness": how hard to penalise horizontal drift when picking
+    // the target above/below. Higher = more insistent on staying in the same
+    // column. 4 means a field 10px sideways scores worse than one 40px straight
+    // down. Bump to 6-8 if Down ever hops to a neighbouring column on a tight
+    // row; lower toward 2 if a column has gaps and you want more vertical reach.
+    const CROSS_WEIGHT = 4;
+
+    // Minimum vertical gap (px) before a candidate counts as genuinely
+    // "above" or "below" rather than sitting on the same visual row. Guards
+    // against floating-point wobble between inputs that share a row.
+    const MIN_PX = 4;
+
+    document.addEventListener('keydown', function (e) {
+
+        // We only ever care about the vertical arrows. Left/Right (and every
+        // other key) fall straight through to their native behaviour.
+        const key = e.key;
+        if (key !== 'ArrowUp' && key !== 'ArrowDown') return;
+
+        // Bail out the moment Alt/Meta/Shift are involved — those belong to the
+        // browser / window manager / text-selection and are not ours to grab.
+        if (e.altKey || e.metaKey || e.shiftKey) return;
+
+        // Must be focused on an actual navigable field.
+        const active = document.activeElement;
+        if (!active || !active.matches(NAV_TARGETS)) return;
+
+        const isNumber = active.tagName === 'INPUT' && active.type === 'number';
+        const isSelect = active.tagName === 'SELECT';
+
+        // ── Ctrl + Up/Down: step a number field ──────────────────────────────
+        // Plain arrows no longer trigger native stepping (we use them to
+        // navigate), so we re-implement stepping here under Ctrl. Only number
+        // inputs have a meaningful "step" — for anything else, Ctrl+arrow is a
+        // no-op and we just let it pass.
+        if (e.ctrlKey) {
+            if (!isNumber) return; // nothing to step; leave native alone
+            e.preventDefault();
+
+            // Honour the field's own step/min/max if it declares them.
+            const step = parseFloat(active.step) || 1;
+            const min  = active.min !== '' ? parseFloat(active.min) : -Infinity;
+            const max  = active.max !== '' ? parseFloat(active.max) :  Infinity;
+            let   val  = parseFloat(active.value) || 0;
+
+            val = (key === 'ArrowUp')
+                ? Math.min(max, val + step)
+                : Math.max(min, val - step);
+
+            // Round away binary float dust (e.g. 0.1+0.2) to the step's own
+            // decimal precision, so the box shows 0.3 not 0.30000000000000004.
+            const decimals = (String(step).split('.')[1] || '').length;
+            active.value = val.toFixed(decimals);
+
+            // CRITICAL: the save path is wired to the 'change' event
+            // (addEventListener('change', triggerSync) on every generated row).
+            // A programmatic value-set fires NO events on its own, so we
+            // dispatch them by hand or the stepped value never gets saved.
+            // 'input' is included too for any future live-input listeners.
+            active.dispatchEvent(new Event('input',  { bubbles: true }));
+            active.dispatchEvent(new Event('change', { bubbles: true }));
+            return; // handled — do not fall through to navigation
+        }
+
+        // ── Plain Up/Down: vertical navigation ───────────────────────────────
+
+        // A focused <select> keeps Up/Down for cycling its options. Tab moves
+        // off it. (Remove this guard to make Up/Down navigate out of selects.)
+        if (isSelect) return;
+
+        // Collect every visible navigable field. offsetParent === null means
+        // the element is hidden via display:none (how the xsheet hides inactive
+        // BP1/BP2 columns), so those are correctly skipped as targets.
+        const candidates = Array.from(document.querySelectorAll(NAV_TARGETS))
+            .filter(el => el.offsetParent !== null);
+        if (candidates.length < 2) return;
+
+        // Screen-space centre of the field we're leaving.
+        const src   = active.getBoundingClientRect();
+        const srcCx = src.left + src.width  / 2;
+        const srcCy = src.top  + src.height / 2;
+
+        let best      = null;
+        let bestScore = Infinity;
+
+        for (const el of candidates) {
+            if (el === active) continue;
+
+            const r  = el.getBoundingClientRect();
+            const cx = r.left + r.width  / 2;
+            const cy = r.top  + r.height / 2;
+            const dx = cx - srcCx;          // sideways offset (column drift)
+            const dy = cy - srcCy;          // vertical offset; +ve = below
+
+            // Only consider fields on the correct side (above for Up, below for
+            // Down), past the dead-zone that protects same-row neighbours.
+            const inDirection = (key === 'ArrowUp') ? (dy < -MIN_PX)
+                                                     : (dy >  MIN_PX);
+            if (!inDirection) continue;
+
+            // Prefer the closest row, but punish column drift hard so we track
+            // straight down the same column rather than veering sideways.
+            const score = Math.abs(dy) + Math.abs(dx) * CROSS_WEIGHT;
+            if (score < bestScore) {
+                bestScore = score;
+                best      = el;
+            }
+        }
+
+        if (best) {
+            // Stop the page from scrolling now that we've claimed the keypress.
+            e.preventDefault();
+            best.focus();
+            // NOTE: intentionally NOT calling best.select(). Leaving the caret
+            // alone means landing on a POS/ROT triple lets you Left/Right to the
+            // component you want and edit in place, instead of an accidental
+            // select-all that would overtype the whole "x,y,z" on first keypress.
+            // If you'd rather number fields auto-select for quick overtype, add:
+            //   if (best.type === 'number') best.select();
+        }
+
+    }, false);
+
+}());
