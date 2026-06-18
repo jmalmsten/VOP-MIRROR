@@ -2561,6 +2561,27 @@ def run_persistent_engine():
                                 total_size_bytes += os.path.getsize(out_f)
                                 files_found += 1
 
+                                # LIVE PREVIEW (issue #205) - opt-in. When the
+                                # "Live preview" checkbox by Execute Sequence is
+                                # ticked, refresh the GUI preview with the frame
+                                # that just committed. OFF by default because the
+                                # extra per-frame TIFF re-read + JPG encode can
+                                # slow a job on slow storage. PAR-aware: par_x,
+                                # par_y and preview_unsqueeze were already resolved
+                                # from job_data at the top of dispatch (lines
+                                # ~369-371), so the live preview honours the same
+                                # Preview Unsqueeze the probe buttons do. The
+                                # helper swallows its own errors, so a preview
+                                # failure can never abort the job - the latent is
+                                # already on disk (that's why this sits inside the
+                                # os.path.exists(out_f) guard).
+                                if bool(job_data.get('exec_live_preview', False)):
+                                    cutil.write_live_preview_from_latent(
+                                        out_f, static_dir,
+                                        par_x=par_x, par_y=par_y,
+                                        preview_unsqueeze=preview_unsqueeze
+                                    )
+
                             avg_size = total_size_bytes / max(1, files_found)
                             total_proj_est_mb = (avg_size * total_frames) / (1024 * 1024)
 

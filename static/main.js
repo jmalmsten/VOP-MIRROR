@@ -44,6 +44,10 @@ let dreMasterCount = 0;
 let brkMasterCount = 0;
 let isFirstLoad = true;
 let isEngineRunning = false;
+// Tracks the last heartbeat frame we refreshed the live preview for (issue
+// #205), so we reload probe_live.jpg only when the engine advances to a new
+// frame rather than on every 1s poll. -1 = "no job seen yet / reset".
+let _lastLivePreviewFrame = -1;
 let currentMode = 'SSS'; // <-- tracks the current active mode and sets the initial default.
 
 // Initialize the dropdown listener when the DOM loads
@@ -1193,6 +1197,23 @@ setInterval(async () => {
             // FIXED: Use st.heartbeat.msg instead of st.msg
             msgEl.innerText = `${st.heartbeat.msg} [${st.heartbeat.current}/${st.heartbeat.total}]`;
             bar.style.width = (st.heartbeat.current/st.heartbeat.total*100) + "%";
+
+            // LIVE PREVIEW (issue #205). If the operator ticked "Live preview"
+            // by Execute Sequence, refresh the preview window when the engine
+            // moves to a new frame. The engine writes probe_live.jpg right
+            // AFTER each frame commits, so the natural reading is: when the
+            // status reads "EXPOSING N", the preview shows frame N-1 - the one
+            // that just finished. We reload only on a frame change (not every
+            // poll) to avoid re-fetching an unchanged JPG. When the box is OFF
+            // we never touch probe_img here, so a manual Cam View / Cam Probe
+            // the operator ran mid-job stays put.
+            const livePreviewEl = document.getElementById('exec_live_preview');
+            if (livePreviewEl && livePreviewEl.checked &&
+                st.heartbeat.current !== _lastLivePreviewFrame) {
+                _lastLivePreviewFrame = st.heartbeat.current;
+                document.getElementById('probe_img').src =
+                    '/static/probe_live.jpg?t=' + Date.now();
+            }
             
             // Format ETA (HH:MM:SS) - Only if eta exists
             if (st.heartbeat.eta !== undefined) {
@@ -1207,6 +1228,7 @@ setInterval(async () => {
             if (isEngineRunning) {
                 document.getElementById('probe_img').src = '/static/probe_live.jpg?t=' + Date.now();
                 isEngineRunning = false;
+                _lastLivePreviewFrame = -1;   // reset for the next job (issue #205)
                 // Calibration page may have a task in flight that
                 // just completed. Let its controller refresh its
                 // readouts and re-enable its buttons. Safe to call

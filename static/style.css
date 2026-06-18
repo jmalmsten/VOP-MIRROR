@@ -1281,6 +1281,29 @@ body {
     margin:             0;
 }
 
+/* Live-preview toggle under Execute Sequence (issue #205). A small inline
+ * checkbox+label row centred under the full-width Execute button. It lives in
+ * .probe-controls, not .const-group, so it gets its own layout rather than
+ * reusing .par-preview-toggle (which is tuned to override Hardware-Constants
+ * label rules that don't apply here). */
+.exec-live-preview-toggle {
+    display:            flex;
+    align-items:        center;
+    justify-content:    center;
+    gap:                6px;
+    margin-top:         6px;
+    font-size:          0.8em;
+    color:              var(--text-secondary);
+    cursor:             pointer;
+}
+.exec-live-preview-toggle input[type=checkbox] {
+    /* Lock to native size - several inputs in this app inherit a 100%-width
+     * rule that would otherwise blow the checkbox up. */
+    width:              auto;
+    margin:             0;
+    cursor:             pointer;
+}
+
 .par-group,
 .target-ar-group {
     grid-column:        1 / -1;

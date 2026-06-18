@@ -94,6 +94,56 @@ def unsqueeze_preview_jpg(img, par_x, par_y, preview_unsqueeze):
         print(f"[VOP WARNING] unsqueeze_preview_jpg failed (falling back to squeezed): {e}")
         return img
 
+def write_live_preview_from_latent(latent_path, static_dir,
+                                   par_x=1.0, par_y=1.0, preview_unsqueeze=False):
+    """
+    Read a committed CamMag latent TIFF and write it to static/probe_live.jpg
+    as an 8-bit, optionally-unsqueezed preview. Powers the Execute loop's
+    opt-in "Live preview" feature (issue #205): refresh the GUI preview window
+    after each frame's exposure commits.
+
+    The latent on disk is ALREADY the final composited + CG-gelled image, so
+    no colour processing happens here - this is the same read/convert path as
+    vop.py's /cam_probe disk branch, just routed through the shared
+    unsqueeze_preview_jpg() helper instead of a fourth inline copy.
+
+    PAR-aware: when preview_unsqueeze is True the image is de-squeezed with the
+    job's par_x/par_y, so the live preview matches what the probe/preview
+    buttons show for the same settings.
+
+    Returns True on success, False if the latent is missing/unreadable. ALL
+    exceptions are caught and logged rather than raised: this runs inside the
+    blocking exposure loop, and a preview failure must never take down a job
+    whose latent is already safely on disk.
+    """
+    try:
+        if not os.path.exists(latent_path):
+            return False
+
+        # IMREAD_UNCHANGED preserves the 16-bit depth + BGR channel order.
+        img = cv2.imread(latent_path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return False
+
+        # 16-bit linear -> 8-bit, identical /256.0 reduction to the sibling
+        # preview functions, so the live preview's visual character matches
+        # Cam View / Cam Probe (all uniformly "dark on sRGB" - expected).
+        if img.dtype == np.uint16:
+            img8 = (img / 256.0).astype(np.uint8)
+        else:
+            # Defensive: hand-edited / legacy non-uint16 TIFF passes through.
+            img8 = img
+
+        # Honour Preview Unsqueeze exactly like every other preview path.
+        img8 = unsqueeze_preview_jpg(img8, par_x, par_y, preview_unsqueeze)
+
+        out_jpg = os.path.join(static_dir, "probe_live.jpg")
+        cv2.imwrite(out_jpg, img8)
+        return True
+    except Exception as e:
+        print(f"[VOP WARNING] write_live_preview_from_latent failed: {e}")
+        return False
+
 def letterbox_into(img, target_w, target_h, fill_bgr=(26, 26, 26)):
     """
     Scale `img` proportionally to fit inside a `target_w` x `target_h`

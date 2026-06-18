@@ -270,6 +270,20 @@
                         <hr class="section-divider">
                         <button class="action-btn" onclick="triggerLabInvert()" title="Invert the latent image buffer for holdout mattes">LAB / INVERT</button>
                         <button class="action-btn execute" onclick="runTask('execute')" title="Run a job of exposures">Execute Sequence</button>
+                        <!-- LIVE PREVIEW toggle (issue #205). When ticked, the
+                             preview window refreshes with each frame as it
+                             commits during an Execute job - for monitoring
+                             progress and for livestream/marketing capture. OFF
+                             by default: the per-frame TIFF re-read + JPG encode
+                             can measurably slow a job on slow storage. When OFF,
+                             Cam View / Cam Probe still work to peek into CamMag
+                             mid-job (we never auto-touch the preview then). The
+                             backend reads this id from the saved job as
+                             job_data['exec_live_preview']. PAR-aware downstream. -->
+                        <label class="exec-live-preview-toggle" title="Refresh the preview window after each frame is exposed during an Execute job. Off by default - adds a small per-frame cost. PAR-aware: respects Preview Unsqueeze.">
+                            <input type="checkbox" id="exec_live_preview" onchange="saveJob()">
+                            Live preview
+                        </label>
                     </div>
                 </div>
 
@@ -442,7 +456,7 @@
         </div>
         <!-- {% include 'sections/cheat-sheet.html' %} -->
     </div>
-    <script src="{{ url_for('static', filename='main.js') }}?v=75"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=76"></script>
     <!-- Page navigation handler. The Calibration page logic
              lives in main.js, but this small toggle is
              page-structural and stays here to avoid coupling
