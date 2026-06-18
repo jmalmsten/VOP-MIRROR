@@ -1263,6 +1263,11 @@ body {
     margin:             0;
 }
 
+.par-group,
+.target-ar-group {
+    grid-column:        1 / -1;
+}
+
 /* ################ SHEET HEADER & MODE SELECTOR ############### */
 
 .sheet-header {
@@ -1804,6 +1809,21 @@ hr.section-divider {
     align-items:        center;
     gap:                5px;
     grid-column:        span 2;                    /* Forces this cell to span across two columns to fit the contents */
+}
+
+/* TARGET AR helper row (issue #199)
+ * .constants-zone is a 4-column grid (repeat(4, 1fr)) and .crush-group
+ * spans 2 columns. With no override, the PAR row (a .crush-group, span 2)
+ * and this Target AR row (also a .crush-group, span 2) pack onto the SAME
+ * grid line, because 2 + 2 = 4 fills one row exactly - that's the
+ * "Target AR sits next to PAR" bug.
+ *
+ * Span the full width so this row always breaks onto its own line directly
+ * beneath PAR. Same 1 / -1 idiom hr.section-divider already uses in this
+ * grid. This rule MUST sit after .crush-group in the file so it overrides
+ * its grid-column: span 2 (equal specificity -> source order wins). */
+.target-ar-group {
+    grid-column:        1 / -1;
 }
 
 .io-btn {
