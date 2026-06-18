@@ -291,7 +291,31 @@
                     <div class="group-title">Hardware Constants</div>
                     <div class="constants-zone">
                         <div class="const-group"><label>FOV</label><input id="fov" type="number" value="45"></div>
-                        <div class="const-group"><label>Cam Res</label><input id="cam_res" value="2028x1520"></div>
+                        <div class="const-group"><label>Cam Res</label><select id="cam_res">
+                            <!-- Native IMX477 (HQ camera) sensor modes only - issue #208.
+                                 Was a free text input, which let non-native sizes through;
+                                 libcamera then silently snapped them to the nearest real
+                                 mode (the confusing behaviour this fixes). Option VALUES
+                                 stay "WxH" with a lowercase x so the backend's
+                                 cam_res.split('x') parsing (vop.py / engine.py) is untouched.
+                                 FoV labels come straight from each mode's sensor crop window:
+                                   Full Sensor   (0,0)/4056x3040    - whole sensor, widest FoV
+                                   Vertical Crop (0,440)/4056x2160  - full width, cropped height
+                                   Center Window (696,528)/2664x1980 - cropped both axes (zoom)
+                                 1.88:1 (not 16:9) because 2028x1080 and 4056x2160 are 1.878:1
+                                 off the sensor - true 16:9 at 2160h would be 3840 wide. -->
+                            <optgroup label="Full Sensor (4:3)">
+                                <option value="2028x1520" selected>2028x1520 - Binned (Default)</option>
+                                <option value="4056x3040">4056x3040 - Full</option>
+                            </optgroup>
+                            <optgroup label="Vertical Crop (1.88:1)">
+                                <option value="2028x1080">2028x1080 - Binned</option>
+                                <option value="4056x2160">4056x2160 - Full</option>
+                            </optgroup>
+                            <optgroup label="Center Window (4:3)">
+                                <option value="1332x990">1332x990 - Binned</option>
+                            </optgroup>
+                        </select></div>
                         <div class="const-group"><label>FPS</label><input id="fps" type="number" value="24"></div>
                         <div class="const-group"><label>Gain</label><input id="gain" type="number" value="1.0"></div>
                         <div class="const-group"><label>AWB R</label><input id="awb_r" value="1.0"></div>

@@ -1171,6 +1171,17 @@ setInterval(async () => {
                 if (el && el.type !== 'file') {
                     if (el.type === 'checkbox') el.checked = (v === true || v === 'true');
                     else el.value = v;
+
+                    // SELECT safety net (issue #208). Setting a <select> to a value
+                    // that matches no <option> (e.g. a legacy non-native cam_res
+                    // saved before this dropdown existed) silently leaves
+                    // selectedIndex at -1 and the control renders blank. Snap to
+                    // the first option so the control always shows a valid choice.
+                    // Generic, but in practice only cam_res can hit this - smear_mode
+                    // and tiff_compression only ever save values that are real options.
+                    if (el.tagName === 'SELECT' && el.selectedIndex === -1 && el.options.length > 0) {
+                        el.selectedIndex = 0;
+                    }
                 }
             }
 

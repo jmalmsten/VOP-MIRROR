@@ -14,6 +14,9 @@ Both as a way to see how things are progressing and to make it more interesting 
 
 ## Changed:
 
+### #208 - Make Cam Res input into a dropdown menu
+To simplify using different resolutions in the camera. I changed the Cam Res input field into a dropdown menu to quickly choose between valid options. 
+
 
 ## Fixed: 
 ### #200 - In MDS, the Keyframe PG does not apply
