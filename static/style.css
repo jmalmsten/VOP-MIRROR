@@ -99,6 +99,11 @@ Description:        Stylings for the whole GUI
     --graphic-w: 256px;   /* schematic display size = 50% of the 512x256 source */
     --graphic-h: 128px;
 
+    /* issue #185: the preview panel's height. Shared so the waveform scope
+     * beside it can pin to the exact same value - otherwise the scope
+     * stretches to the (taller) grid row height set by the controls column. */
+    --preview-h: 50vh;
+
     /* Inset bevel shared by both cheeks (lit from top-left). Stored as a
        token so each cheek can append its own outer shadow below. */
     --cheek-bevel:
@@ -1015,7 +1020,7 @@ body {
     min-width:          300px;
     max-width:          70vh;
     min-height:         320px;
-    height:             50vh;
+    height:             var(--preview-h);
 
     display:            flex;
     align-items:        center;
@@ -1038,6 +1043,62 @@ body {
     width:              100%;
     height:             100%;
     object-fit:         contain;
+}
+
+/* ############### Waveform scope (issue #185) ############### */
+
+/* The preview+scope row. Takes grid-column 1 - the slot .preview-area
+ * used to hold directly. The pair is centred in the 1fr track, so the
+ * preview shifts only slightly left and the scope fills the dead space
+ * to its right. align-items:stretch makes the scope match whatever the
+ * preview's height resolves to (.preview-area pins itself to 50vh, so
+ * the scope inherits that height). */
+.preview-row {
+    grid-column:     1;
+    display:         flex;
+    justify-content: center;
+    /* Both children now carry an explicit height (var(--preview-h)), so we
+     * pin them to the TOP of the row. The row itself still stretches to the
+     * tall grid track, but that just leaves empty board below the scope -
+     * same as the preview always did. */
+    align-items:     flex-start;
+    gap:             14px;
+}
+
+/* The scope panel. Width is vh-relative so it tracks the preview, which
+ * is also vh-sized (max-width:70vh) - 16vh is ~a quarter of the preview's
+ * max width. Shares the group-box glass look so it reads as part of the
+ * UI rather than a bolted-on box.
+ *
+ * >>> To get the SHORT landscape box from your screenshot instead of a
+ *     full-height column: add an explicit `height` here (e.g. 22vh) and
+ *     change .preview-row's align-items to flex-start. <<< */
+.waveform-area {
+    flex:                     0 0 16vh;            /* width (vh-relative, tracks the preview) */
+    height:                   var(--preview-h);    /* << the fix: match the preview exactly */
+    display:                  flex;
+    flex-direction:           column;              /* stack: luma over RGB overlay */
+    gap:                      6px;                 /* thin divider of glass between the two */
+    padding:                  6px;
+    background:               var(--bg-group-glass);
+    -webkit-backdrop-filter:  blur(var(--group-blur));
+    backdrop-filter:          blur(var(--group-blur));
+    box-shadow:               inset 0 2px 4px rgba(0, 0, 0, 0.35);
+    border:                   1px solid var(--border-color);
+    overflow:                 hidden;
+}
+
+/* DISPLAY sizing only. The backing-store resolution (WF_COLS x WF_VALS)
+ * is set in JS; the browser scales that raster to fill this box. A
+ * waveform is read by column position and trace height, so a non-1:1
+ * stretch is fine - the vertical stretch actually buys you intensity
+ * resolution, which helps spot near-clipping. */
+.wf-canvas {
+    width:           100%;
+    flex:            1 1 0;       /* the two scopes split the panel height 50/50 */
+    min-height:      0;           /* allow shrink below the canvas's 256px intrinsic height */
+    display:         block;
+    image-rendering: pixelated;   /* crisp bins; 'auto' for a softer glow */
 }
 
 /* ############### Action & Mini Buttons ############### */

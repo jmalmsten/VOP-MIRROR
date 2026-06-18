@@ -52,6 +52,13 @@ let currentMode = 'SSS'; // <-- tracks the current active mode and sets the init
 
 // Initialize the dropdown listener when the DOM loads
 document.addEventListener('DOMContentLoaded', () => {
+    // issue #185: repaint the luma waveform whenever a new preview JPEG
+    // decodes. Every probe/preview/live-frame path swaps #probe_img.src,
+    // and they all fire this one 'load' event - so this single listener
+    // covers all of them.
+    const _wfImg = document.getElementById('probe_img');
+    if (_wfImg) _wfImg.addEventListener('load', drawWaveforms);
+
     const modeSelect = document.getElementById('smear_mode');
     if (modeSelect) {
         currentMode = modeSelect.value;
@@ -402,6 +409,105 @@ async function runCamProbe() {
         // readouts as-is rather than throwing in the click handler.
         console.error("Cam Probe gate readout update failed:", e);
     }
+}
+
+// ============================================================
+//  WAVEFORM SCOPES  (issue #185)
+// ------------------------------------------------------------
+//  Two stacked scopes, both DISPLAY-REFERRED (they read the 8-bit
+//  preview JPEG, not the linear 16-bit latent):
+//
+//    TOP  (#luma_wf) - luma waveform. Rec.709 brightness only,
+//                      monochrome glow (alpha carries intensity).
+//    BOT  (#rgb_wf)  - RGB OVERLAY. The three channels are plotted
+//                      additively into ONE space, so the trace
+//                      shows column brightness AND colour: where
+//                      all three stack -> white; where one channel
+//                      dominates -> its hue. (Overlay, not a
+//                      side-by-side parade - the panel's too narrow
+//                      for three lanes.) Here brightness lives in
+//                      the COLOUR components (that's what makes the
+//                      additive mix work); alpha is just an on/off
+//                      mask so empty cells stay transparent.
+//
+//  Both rasters are built from a SINGLE downscale + read.
+// ============================================================
+
+const WF_COLS = 256;   // horizontal: image columns resolved (image resampled to this)
+const WF_VALS = 256;   // vertical: intensity bins. JPEG is 8-bit so 256 is exact.
+const WF_ROWS = 256;   // image rows sampled per column (more = denser trace)
+
+// Per-hit brightness. Higher = sparse near-clip pixels show sooner, but dense
+// areas bloom to solid faster (losing density detail). Tune to taste.
+const WF_GAIN = 16;
+
+// Luma trace tint - alpha carries the brightness, panel shows through.
+const WF_R = 120, WF_G = 255, WF_B = 140;
+
+let _wfScratch = null;
+
+function drawWaveforms() {
+    const img   = document.getElementById('probe_img');
+    const lumaC = document.getElementById('luma_wf');
+    const rgbC  = document.getElementById('rgb_wf');
+    // naturalWidth is 0 until the first real decode - bail until then.
+    if (!img || !lumaC || !rgbC || !img.naturalWidth) return;
+
+    // ---- shared downscale + single read ------------------------------
+    if (!_wfScratch) {
+        _wfScratch = document.createElement('canvas');
+        _wfScratch.width  = WF_COLS;
+        _wfScratch.height = WF_ROWS;
+    }
+    const sctx = _wfScratch.getContext('2d', { willReadFrequently: true });
+    // Native downscale of the WHOLE preview in one call. drawImage reads the
+    // decoded source bitmap, NOT the CSS object-fit letterboxing, so the black
+    // display bars never enter the data.
+    sctx.drawImage(img, 0, 0, WF_COLS, WF_ROWS);
+    const src = sctx.getImageData(0, 0, WF_COLS, WF_ROWS).data;  // same-origin, no taint
+
+    // ---- two fresh rasters (all transparent) -------------------------
+    const lctx = lumaC.getContext('2d');
+    const rctx = rgbC.getContext('2d');
+    const lras = lctx.createImageData(WF_COLS, WF_VALS);
+    const rras = rctx.createImageData(WF_COLS, WF_VALS);
+    const lp = lras.data;   // luma raster
+    const rp = rras.data;   // rgb-overlay raster
+
+    for (let y = 0; y < WF_ROWS; y++) {
+        const rowBase = y * WF_COLS * 4;
+        for (let x = 0; x < WF_COLS; x++) {
+            const s = rowBase + x * 4;
+            const R = src[s], G = src[s + 1], B = src[s + 2];
+
+            // -- LUMA scope: one point, alpha-glow in a fixed tint --------
+            const v = (0.2126 * R + 0.7152 * G + 0.0722 * B + 0.5) | 0;
+            const ld = ((WF_VALS - 1 - v) * WF_COLS + x) * 4;   // flip: black at bottom
+            const la = lp[ld + 3] + WF_GAIN;
+            lp[ld]     = WF_R;
+            lp[ld + 1] = WF_G;
+            lp[ld + 2] = WF_B;
+            lp[ld + 3] = la > 255 ? 255 : la;
+
+            // -- RGB OVERLAY: three points, each bumps only its component --
+            const dR = ((WF_VALS - 1 - R) * WF_COLS + x) * 4;
+            const nr = rp[dR]     + WF_GAIN; rp[dR]     = nr > 255 ? 255 : nr; rp[dR + 3] = 255;
+
+            const dG = ((WF_VALS - 1 - G) * WF_COLS + x) * 4;
+            const ng = rp[dG + 1] + WF_GAIN; rp[dG + 1] = ng > 255 ? 255 : ng; rp[dG + 3] = 255;
+
+            const dB = ((WF_VALS - 1 - B) * WF_COLS + x) * 4;
+            const nb = rp[dB + 2] + WF_GAIN; rp[dB + 2] = nb > 255 ? 255 : nb; rp[dB + 3] = 255;
+        }
+    }
+
+    // ---- size backing stores once, then blit -------------------------
+    if (lumaC.width  !== WF_COLS) lumaC.width  = WF_COLS;
+    if (lumaC.height !== WF_VALS) lumaC.height = WF_VALS;
+    if (rgbC.width   !== WF_COLS) rgbC.width   = WF_COLS;
+    if (rgbC.height  !== WF_VALS) rgbC.height  = WF_VALS;
+    lctx.putImageData(lras, 0, 0);
+    rctx.putImageData(rras, 0, 0);
 }
 
 function panic() { 
