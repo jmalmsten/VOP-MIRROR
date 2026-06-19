@@ -1,3 +1,8 @@
+> ⚠️ **DISCLAIMER - The GitHub repo is a read only mirror of [VOP on Codeberg](https://codeberg.org/jmalmsten-com/VOP).**
+> 
+> **All development, issues, pull requests, discussions, releases, and wiki** happen on Codeberg.
+> GitHub features are actively **disabled or ignored**.
+
 **Latest Stable:** v0.6.3 | **In Development:** v0.14
 > [!IMPORTANT]
 > **USE AT YOUR OWN RISK.** - This project is a learning experiment. If you brick your hardware, I cannot provide support outside of what has worked for me. Run this code only if you accept the risks of experimental software. And while this Flask Web application **CAN** be exposed on the public internet. I **HIGHLY** recommend doing it through a VPN instead if you want to reach it from outside.
