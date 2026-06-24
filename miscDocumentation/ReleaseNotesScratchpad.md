@@ -15,10 +15,15 @@ Both as a way to see how things are progressing and to make it more interesting 
 ### #185 - Luma & RGB Waveform
 To make it easier to judge exposures, I'm adding a waveform function to the right of the preview window. 
 
+### #217 - Local Notifications
+Setting things up so that a notification can be sent from the VOP to a phone on the local network listening to the ntfy app. 
+
 ## Changed:
 
 ### #208 - Make Cam Res input into a dropdown menu
 To simplify using different resolutions in the camera. I changed the Cam Res input field into a dropdown menu to quickly choose between valid options. 
+
+### Added clock sync guard to the deploy_vop.sh
 
 
 ## Fixed: 

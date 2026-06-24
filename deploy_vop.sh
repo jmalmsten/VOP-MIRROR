@@ -156,6 +156,43 @@ cd "$SCRIPT_DIR"
 echo "Starting VOP Environment Deployment in $SCRIPT_DIR..."
 
 # 1. System Dependencies
+
+# --- Clock sync guard (fresh-reflash hardening) ---------------------------
+# A Raspberry Pi has no battery-backed RTC, so a freshly-flashed drive boots
+# with a stale clock. On Debian Trixie, apt verifies repo signatures with sqv,
+# which REJECTS signatures whose validity window starts "in the future"
+# relative to the system clock — the "Not live until <date>" errors. So before
+# touching any signed repo, make sure NTP has actually synced. We wait up to
+# ~60s, then WARN and continue (deliberately not a hard fail: the operator
+# might be intentionally offline, and we shouldn't brick the whole deploy).
+echo "Ensuring the system clock is NTP-synced before touching apt repos..."
+sudo timedatectl set-ntp true 2>/dev/null || true            # enable NTP (no-op if on)
+sudo systemctl restart systemd-timesyncd 2>/dev/null || true # nudge an immediate sync
+                                                             # (|| true: ignore if the
+                                                             #  box uses chrony instead)
+
+SYNC_WAIT=0          # seconds elapsed
+SYNC_MAX=60          # give up after this many seconds
+# NTPSynchronized is a systemd property that reads "yes" once the clock is set.
+# It's backend-agnostic (works whether timesyncd or chrony is doing the work).
+while [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != "yes" ]; do
+    if [ "$SYNC_WAIT" -ge "$SYNC_MAX" ]; then
+        echo "  WARNING: clock still not NTP-synced after ${SYNC_MAX}s."
+        echo "           If apt reports 'Not live until ...' signature errors,"
+        echo "           wait for the clock to sync (check with: timedatectl)"
+        echo "           and then re-run this script."
+        break
+    fi
+    echo "  Waiting for clock sync... (${SYNC_WAIT}s elapsed)"
+    sleep 3
+    SYNC_WAIT=$((SYNC_WAIT + 3))
+done
+# Report the result either way so the deploy log is unambiguous.
+if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = "yes" ]; then
+    echo "  Clock is synced: $(date)"
+fi
+# --------------------------------------------------------------------------
+
 echo "Updating APT repositories..."
 sudo apt update -y
 
@@ -223,7 +260,66 @@ sudo mv "$SERVICE_FILE" /etc/systemd/system/
 # Tell the OS to refresh its list of available services
 sudo systemctl daemon-reload
 # Tell the OS to launch this service automatically on every boot
+# Tell the OS to launch this service automatically on every boot
 sudo systemctl enable vop.service
+
+# ---------------------------------------------------------------------------
+# 5b. VOP Notifier (self-hosted ntfy)
+# ---------------------------------------------------------------------------
+# Installs a tiny self-hosted ntfy server so the VOP can push "Job Done" and
+# error alerts to your phone over the LAN / VPN. No Docker, no cloud: a single
+# static Go binary (MIT licensed — installed as a separate program, so no
+# clash with this script's AGPL) managed by its own systemd unit. The engine
+# publishes to it over loopback (modules/notifier.py); the phone subscribes
+# over the network. The exact Topic URL is printed in the summary at the end.
+echo "Setting up the VOP notifier (self-hosted ntfy)..."
+
+# --- Detect THIS Pi's current LAN IP, for the server's base-url and for the
+# --- Topic URL we print at the end. Prefer eth0 (the VOP is wired); fall back
+# --- to the first global IPv4 if eth0 isn't the active interface, then to
+# --- loopback as a last resort so we never write an empty base-url.
+PI_IP="$(ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+if [ -z "$PI_IP" ]; then
+    PI_IP="$(hostname -I | awk '{print $1}')"
+fi
+if [ -z "$PI_IP" ]; then
+    PI_IP="127.0.0.1"
+    echo "  WARNING: could not detect a LAN IP; base-url falls back to 127.0.0.1."
+    echo "           Set the real IP in /etc/ntfy/server.yml and restart ntfy,"
+    echo "           or the phone won't be able to reach it."
+fi
+echo "  Detected Pi IP for notifier: $PI_IP"
+
+# --- Add ntfy's official apt repo (idempotent on re-run). ntfy isn't in
+# --- Debian's own repos. We use the CURRENT archive.ntfy.sh repo (the old
+# --- archive.heckel.io one is being retired in 2026). arch=arm64 matches
+# --- 64-bit Pi OS on the Pi 4B.
+sudo mkdir -p /etc/apt/keyrings
+sudo curl -L -o /etc/apt/keyrings/ntfy.gpg https://archive.ntfy.sh/apt/keyring.gpg
+sudo apt install -y apt-transport-https
+echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/ntfy.gpg] https://archive.ntfy.sh/apt stable main" \
+    | sudo tee /etc/apt/sources.list.d/ntfy.list
+sudo apt update -y          # second update: needed to see the freshly-added repo
+sudo apt install -y ntfy
+
+# --- Write the LAN-only server config, baking in the detected IP as base-url.
+# --- NOTE the UNQUOTED heredoc (<<EOF, not <<'EOF') so $PI_IP expands here.
+# --- This overwrites any hand-edits on re-run — that's intentional: the deploy
+# --- script's job is a reproducible-from-scratch setup. The cache lets a phone
+# --- that was asleep during a long job still pick up the alert on reconnect.
+sudo mkdir -p /var/cache/ntfy
+sudo tee /etc/ntfy/server.yml > /dev/null <<EOF
+# --- VOP notifier: self-hosted ntfy, LAN-only (generated by deploy_vop.sh) ---
+base-url: "http://$PI_IP:7777"
+listen-http: ":7777"
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "12h"
+log-level: warn
+EOF
+
+# --- Enable + (re)start so it runs now and on every boot.
+sudo systemctl enable ntfy
+sudo systemctl restart ntfy
 
 # 6. Optional HDMI Full RGB Fix
 # This fix forces "Full RGB" (0-255) HDMI output. Recommended for most setups,
@@ -363,6 +459,17 @@ echo "              - Daemon Info -"
 echo " The VOP will now start automatically on boot."
 echo " To view live terminal logs at any time, run:"
 echo " sudo journalctl -u vop.service -f"
+echo "========================================"
+echo "              - Notifier -"
+echo " Self-hosted ntfy is running on this Pi (port 7777)."
+echo " In the ntfy phone app (Android: install from F-Droid), choose"
+echo " 'Subscribe to topic' and enter this Topic URL exactly:"
+echo
+echo "     http://$PI_IP:7777/vop-alerts"
+echo
+echo " With your phone on the home LAN / VPN you'll then get Job Done and"
+echo " error pushes. (iOS needs an internet relay for background push; on"
+echo " Android it's fully LAN-only.)"
 echo "========================================"
 
 # 8. Reboot Prompt

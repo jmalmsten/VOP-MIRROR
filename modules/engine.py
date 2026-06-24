@@ -50,6 +50,7 @@ import vop_math as vmath
 import camera_hardware as hw
 import color_utils as cutil
 import graphics_utils as gfx
+import notifier  # best-effort phone push via self-hosted ntfy (modules/notifier.py)
 # Calibration store for hardware-calibration values (T_peak, black
 # floor at T_peak, future LUT data, etc.). See modules/calibration_store.py
 # for the IPC / engine-busy convention notes that apply to all
@@ -789,7 +790,7 @@ def run_persistent_engine():
 
             def execute_dre_exposure(frame_num, is_preview=False, is_comp_preview=False):
                 """
-                DRE / Dynamic Range Extender exposure path (issue #169, phase 3).
+                DRE / Dynamic Range Extender exposure path (issue #169).
                 
                 Sibling to execute_exposure(). Same camera trigger semantics 
                 (single libcamera exposure with pre-roll), but the HDMI animation 
@@ -1600,7 +1601,7 @@ def run_persistent_engine():
                                 f"{chosen.slice_high_norm:.4f}]"
                             )
                             # render_world with a bracket applies the
-                            # slice-remap shader uniforms (Phase 2).
+                            # slice-remap shader uniforms.
                             render_world(probe_frame, probe_sub,
                                          is_preview=True, bracket=chosen)
                         else:
@@ -2358,7 +2359,7 @@ def run_persistent_engine():
                     log_audit(f"AWB | Exposure {'found' if expo_found else 'NOT found'}: "
                               f"{current_exposure:.4f}s")
                     
-                    # --- PHASE 2: WB closed loop at the converged exposure. ---
+                    # ---  WB closed loop at the converged exposure. ---
                     eps = 1e-6
                     wb_converged = False
                     for it in range(1, max_wb_iter +1):
@@ -2638,6 +2639,21 @@ def run_persistent_engine():
 
                         subprocess.run(ffmpeg_cmd)
 
+                        # --- notifier: job-done push -----------------
+                        # Reached only when every frame exposed cleanly (any
+                        # exception en route is caught below and skips this).
+                        # Format elapsed wall-clock from start_t (set at the top
+                        # of this 'if frames:' block) into Hh MMm SSs.
+                        _elapsed = int(time.time() - start_t)
+                        _mins, _secs = divmod(_elapsed, 60)
+                        _hrs, _mins = divmod(_mins, 60)
+                        notifier.notify_job_done(
+                            f"Render done: {total_frames} frames "
+                            f"in {_hrs}h {_mins:02d}m {_secs:02d}s "
+                            f"({os.path.basename(out_mp4)})"
+                        )
+                        # -----------------------------------------------------
+
                 elif task == 'lab_invert':
                     log_audit("Starting LAB/INVERT on CamMag")
                     tiffs = sorted([f for f in os.listdir(cam_mag_dir) if f.endswith(".tif")])
@@ -2665,12 +2681,27 @@ def run_persistent_engine():
                                 }, hbf)
                         
                         log_audit(f"LAB/INVERT Complete: Processed {total_frames} frames.")
+                        # --- notifier: job-done push -----------------
+                        notifier.notify_job_done(
+                            f"LAB/INVERT done: {total_frames} frames"
+                        )
+                        # -----------------------------------------------------
                     else:
                         log_audit("LAB/INVERT aborted: No frames found in CamMag.")
 
             except Exception as e:
                 log_audit(f"CRITICAL ERROR during {task.upper()}: {e}")
                 traceback.print_exc()
+
+                # --- Notifier: error push --------------------------
+                # Only the long, unattended jobs warrant a phone alert on
+                # failure. Interactive tasks (previews, measurements) fail right
+                # in front of you, so we stay silent to avoid handset spam —
+                # especially during calibration. NOTIFY_TASKS is defined once in
+                # modules/notifier.py so success and error gating never drift.
+                if task in notifier.NOTIFY_TASKS:
+                    notifier.notify_job_error(f"{task.upper()} failed: {e}")
+                # -----------------------------------------------------------
             
             # ---------------------------------------------------------
             # TASK CLEANUP
