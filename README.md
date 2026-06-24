@@ -37,20 +37,25 @@ Mainly... me. I'm just putting this on a public repo in case someone out there w
 > [!NOTE]
 > ## TLDR
 >
-> ### Technical Features
+> ### Top Technical Features
 > - **16-bit Pipeline:** All processing is done in 16-bit linear color space for maximum math accuracy and dynamic range.
 > - **Motion Blur:** Move artwork on-screen during exposure to create physical light smears.
 > - **Smear:** Smear and extrude like an 80's title sequence.
 > - **Virtual Gels & BiPacks:** Use digital mattes and color overlays to simulate traditional optical effects.
+> - **Three Layers Per Exposure:** for each exposure, up to three layers of artwork can be used, they live in their own 3D space, and the 2D planes transforms are rendered into 2D images that are then multiplied together for exposure.
 > - **Multiple Exposures:** To combine passes, the VOP uses LIME (see above).
+> - **Anamorphic Workflow:** In order to maximize the pixels recorded on the camera, the VOP can use non-square pixels in it's math that can then be accounted for at playback or in your NLE/Compositor.
+> - **Video I/O:** Video files can be uploaded to the VOP both on the Camera and Projector side. When a compatible video file is ingested using ffmpeg, it's converted into a sequence of TIFFs. And you can use that sequence with the step printing functionality of the VOP.
 > 
 > ### Hardware needed:
 > - **Raspberry Pi 5 or 4 (4GB+)** - The VOP is lightweight, typically using <1GB of RAM  
-> - **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens
+> - **Raspberry Pi Camera HQ** - (IMX477) with appropriate lens.
 > - **Storage with Raspberry Pi OS Lite (64 bit)** - SD card or USB3.2 Solid State Flash Drive. The faster, the better for handling the big TIFF files.
 > - **HDMI Monitor** - Preferably an OLED (although the [black crush system](https://codeberg.org/jmalmsten-com/VOP/wiki/NoiseCrush) introduced in v0.6.3 helps a lot here for cheaper screens)
 > - **Device for control** - the VOP is controlled with a web interface, pretty much any web browser works as long as it's on the same network. I recommend having the browser on a screen at at least 1920x1080.
-> 
+> - **Notifications:** As a single job can take multiple hours, a [ntfy server](https://github.com/binwiederhier/ntfy) is included in the deployment script so you can subscribe to it inside your LAN with a free phone app and be notified when a job has finished or failed.
+> ## Regarding other cameras and film workflows
+> The question has come up a few times if this system can use a film camera (like, Super8 and 16mm) and communicate with solutions for film based optical printers. And I have to say that it's not currently a feature. And as I myself don't have a working film camera and I don't have the economic means to experiment on that front. It's not a feature I can prioritize for implementation. You are however, welcome to fork this project and even suggest code to make it work. 
 > ## Installation and use
 > Check the Wiki for current instructions that should work. At least, it has worked for me. 
 > - [wiki/tutorials](https://codeberg.org/jmalmsten-com/VOP/wiki/Tutorials_main)
