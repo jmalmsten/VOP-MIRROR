@@ -23,6 +23,8 @@ Setting things up so that a notification can be sent from the VOP to a phone on 
 ### #208 - Make Cam Res input into a dropdown menu
 To simplify using different resolutions in the camera. I changed the Cam Res input field into a dropdown menu to quickly choose between valid options. 
 
+### Added clock sync guard to the deploy_vop.sh
+
 
 ## Fixed: 
 ### #200 - In MDS, the Keyframe PG does not apply
