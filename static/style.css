@@ -1017,6 +1017,13 @@ body {
      *     the image works as expected and letterboxes instead of
      *     cropping.
      *   - min-* values are safety floors for short/narrow viewports. */
+    /* issue #185 alignment: border-box so height:var(--preview-h) is the
+     * OUTER height. This panel has a 1px border and no padding, so on its
+     * own the difference is tiny - but pairing it with the waveform panel
+     * (which DOES have padding) only lines up if both measure height the
+     * same way. Carving the border inside costs the image 2px of room,
+     * which object-fit:contain absorbs silently. */
+    box-sizing:         border-box;
     min-width:          300px;
     max-width:          70vh;
     min-height:         320px;
@@ -1076,6 +1083,10 @@ body {
 .waveform-area {
     flex:                     0 0 16vh;            /* width (vh-relative, tracks the preview) */
     height:                   var(--preview-h);    /* << the fix: match the preview exactly */
+    box-sizing:               border-box;          /* issue #185: keep padding+border INSIDE
+                                                     * the 50vh, so this panel's bottom edge
+                                                     * lands level with .preview-area instead
+                                                     * of spilling ~12px below it. */
     display:                  flex;
     flex-direction:           column;              /* stack: luma over RGB overlay */
     gap:                      6px;                 /* thin divider of glass between the two */
