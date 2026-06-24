@@ -156,6 +156,43 @@ cd "$SCRIPT_DIR"
 echo "Starting VOP Environment Deployment in $SCRIPT_DIR..."
 
 # 1. System Dependencies
+
+# --- Clock sync guard (fresh-reflash hardening) ---------------------------
+# A Raspberry Pi has no battery-backed RTC, so a freshly-flashed drive boots
+# with a stale clock. On Debian Trixie, apt verifies repo signatures with sqv,
+# which REJECTS signatures whose validity window starts "in the future"
+# relative to the system clock — the "Not live until <date>" errors. So before
+# touching any signed repo, make sure NTP has actually synced. We wait up to
+# ~60s, then WARN and continue (deliberately not a hard fail: the operator
+# might be intentionally offline, and we shouldn't brick the whole deploy).
+echo "Ensuring the system clock is NTP-synced before touching apt repos..."
+sudo timedatectl set-ntp true 2>/dev/null || true            # enable NTP (no-op if on)
+sudo systemctl restart systemd-timesyncd 2>/dev/null || true # nudge an immediate sync
+                                                             # (|| true: ignore if the
+                                                             #  box uses chrony instead)
+
+SYNC_WAIT=0          # seconds elapsed
+SYNC_MAX=60          # give up after this many seconds
+# NTPSynchronized is a systemd property that reads "yes" once the clock is set.
+# It's backend-agnostic (works whether timesyncd or chrony is doing the work).
+while [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != "yes" ]; do
+    if [ "$SYNC_WAIT" -ge "$SYNC_MAX" ]; then
+        echo "  WARNING: clock still not NTP-synced after ${SYNC_MAX}s."
+        echo "           If apt reports 'Not live until ...' signature errors,"
+        echo "           wait for the clock to sync (check with: timedatectl)"
+        echo "           and then re-run this script."
+        break
+    fi
+    echo "  Waiting for clock sync... (${SYNC_WAIT}s elapsed)"
+    sleep 3
+    SYNC_WAIT=$((SYNC_WAIT + 3))
+done
+# Report the result either way so the deploy log is unambiguous.
+if [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = "yes" ]; then
+    echo "  Clock is synced: $(date)"
+fi
+# --------------------------------------------------------------------------
+
 echo "Updating APT repositories..."
 sudo apt update -y
 
