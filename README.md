@@ -14,7 +14,9 @@
 ## Description
 The VOP (Video Optical Printer) is a combination of hardware and software to make a tool that mimics several real world old tools used for animation, compositing and optical printing. 
 
-[![Watch playlist about things around the VOP](https://img.youtube.com/vi/PLQs2r9v3Gn4eMMfkK-vVVfrTkS1Z6mzul/maxresdefault.jpg)](https://www.youtube.com/playlist?list=PLQs2r9v3Gn4eMMfkK-vVVfrTkS1Z6mzul)
+### Youtube Playlist:
+Click the image below to play the playlist where I gather things regarding the VOP:
+[![Watch playlist about things around the VOP](https://img.youtube.com/vi/hCpjup2M3UU/maxresdefault.jpg)](https://www.youtube.com/playlist?list=PLQs2r9v3Gn4eMMfkK-vVVfrTkS1Z6mzul)
 
 ### What does it aim to do?
 
